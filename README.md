@@ -16,6 +16,22 @@ Conversa follows one simple workflow:
 
 AI should assist the seller, not silently make consequential decisions. Sellers approve order creation, changes to paid orders, payment status, and outbound messages.
 
+## What makes Conversa different?
+
+Most order-management tools help sellers record orders, track payments, and manage customer conversations. Conversa goes a step further by helping sellers understand whether they can realistically fulfil their commitments on time.
+
+Its core differentiator is **deadline-aware workload intelligence**:
+
+- **Preparation time estimation:** Estimate how long each order will take using seller-defined preparation times, product complexity, and historical data where available.
+- **Workload analysis:** Compare the total preparation time of pending orders with the seller's available working hours.
+- **Deadline conflict detection:** Identify orders that may be delayed because of limited capacity, overlapping deadlines, or task dependencies.
+- **Explainable recommendations:** Prioritise tasks and suggest corrective actions, explaining why each action matters.
+- **What-if scheduling:** Simulate changes to deadlines or task schedules and show how they affect the seller's overall workload and delivery risks.
+
+AI extracts order information and explains recommendations, while a rule-based scheduling engine calculates workload, scheduling conflicts, and deadline risks. Sellers remain in control and approve important changes.
+
+**The goal:** Move small businesses from simply tracking orders to proactively planning and fulfilling them on time.
+
 ## Planned MVP
 
 - **Unified inbox:** organise supported customer conversations in one workspace.
