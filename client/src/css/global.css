@@ -1,3 +1,18 @@
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --border: #e5e7ee;
+  --text: #1a1d29;
+  --text-muted: #6b7083;
+  --accent: #5b5bd6;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(20, 22, 40, 0.04), 0 4px 12px rgba(20, 22, 40, 0.04);
+  --ok: #15803d; --ok-bg: #e8f6ee;
+  --warn: #b45309; --warn-bg: #fdf3e3; --warn-border: #f3d9a8;
+  --danger: #c0392b; --danger-bg: #fdecea;
+  --info: #2563eb;
+}
+
 *,
 *::before,
 *::after {
@@ -6,9 +21,9 @@
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  color: #1f2937;
-  background: #f9fafb;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
 }
 
 .app {
@@ -19,5 +34,8 @@ body {
 
 .app-main {
   flex: 1;
-  padding: 1.5rem;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
 }
