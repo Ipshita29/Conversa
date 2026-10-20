@@ -61,9 +61,6 @@ export const simulatePlanner = (payload) => request('POST', '/planner/simulate',
 export const getIntegrations = () => request('GET', '/integrations');
 export const connectIntegration = (channel) => request('POST', `/integrations/${channel}/connect`, {});
 
-// NOT in docs/api-contract.md yet: there is no conversations endpoint. Live mode reports it as unavailable
-// instead of inventing data; demo mode returns clearly-labelled sample conversations.
-export async function getConversations() {
-  if (!DEMO_MODE) return { items: [], unavailable: true };
-  return request('GET', '/conversations');
-}
+// Not in docs/api-contract.md yet (proposed addition, implemented in server/README.md): conversations stored from
+// Meta webhooks. Demo mode returns clearly-labelled sample conversations.
+export const getConversations = () => request('GET', '/conversations');

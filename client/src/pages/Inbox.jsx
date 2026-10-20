@@ -72,13 +72,10 @@ export default function Inbox() {
 
       {status === 'loading' && <StateMessage kind="loading" message="Loading conversations…" />}
       {status === 'error' && <StateMessage kind="error" message={`Couldn't load conversations. ${error.message}`} onRetry={reload} />}
-      {status === 'ready' && data.unavailable && (
-        <div className="notice">Live conversations are not available yet: the API contract has no conversations endpoint and no messaging account is connected. You can still paste a customer message below to extract an order.</div>
-      )}
 
       <div className="inbox-layout">
         <aside className="panel conv-list" aria-label="Conversations">
-          {status === 'ready' && conversations.length === 0 && !data.unavailable && <StateMessage message="No conversations yet." />}
+          {status === 'ready' && conversations.length === 0 && <StateMessage message={DEMO_MODE ? 'No conversations yet.' : 'No conversations yet. Messages appear here once WhatsApp or Instagram is connected and a customer writes in.'} />}
           {conversations.map((c) => {
             const last = c.messages[c.messages.length - 1];
             const orderId = linked[c.id] ?? c.orderId;
@@ -91,7 +88,7 @@ export default function Inbox() {
                 <p className="conv-preview">{last.text}</p>
                 <div className="conv-tags">
                   <ChannelBadge channel={c.channel} />
-                  <span className="badge demo-tag">Demo conversation</span>
+                  {DEMO_MODE && <span className="badge demo-tag">Demo conversation</span>}
                   {orderId && <span className="badge order-tag"><LinkIcon size={11} /> {orderId}</span>}
                 </div>
               </button>

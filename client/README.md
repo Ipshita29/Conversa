@@ -9,6 +9,7 @@ cd client
 npm install
 cp .env.example .env   # optional; defaults match the values below
 npm run dev            # http://localhost:5173
+# To use the real backend (cd ../server && npm run dev), put VITE_DEMO_MODE=false in client/.env
 npm run build          # production build into dist/
 ```
 
@@ -30,5 +31,5 @@ In live mode (`VITE_DEMO_MODE=false`) a failed request is shown as an error; it 
 
 ## Known gaps
 
-- The Inbox conversation list has no endpoint in the API contract; it only shows (labelled) demo conversations and is reported as unavailable in live mode.
+- `GET /api/conversations` is implemented by the server but not yet in `docs/api-contract.md`. Live conversations only appear once a Meta integration is configured and webhooks deliver messages.
 - Replying to customers and connecting WhatsApp/Instagram are not implemented.
