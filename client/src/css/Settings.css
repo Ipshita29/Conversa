@@ -1,0 +1,10 @@
+.integration-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.6rem; }
+.integration-head h2 { flex: 1; font-size: 1.05rem; }
+.integration-icon { display: inline-flex; padding: 0.5rem; border-radius: 10px; }
+.int-status { font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 999px; background: var(--border); }
+.int-connected { background: var(--ok-bg); color: var(--ok); }
+.int-demo { background: var(--warn-bg); color: var(--warn); }
+.int-unavailable { background: var(--danger-bg); color: var(--danger); }
+.integration dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; font-size: 0.85rem; margin: 0.8rem 0 1rem; }
+.integration dt { color: var(--text-muted); }
+.integration dd { margin: 0; }

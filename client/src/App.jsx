@@ -6,21 +6,25 @@ import Orders from './pages/Orders.jsx';
 import Operations from './pages/Operations.jsx';
 import Calendar from './pages/Calendar.jsx';
 import Inbox from './pages/Inbox.jsx';
+import Settings from './pages/Settings.jsx';
 
 export default function App() {
   return (
     <div className="app">
       <Navbar />
-      <main className="app-main">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/orders" element={<Orders />} />
-          <Route path="/operations" element={<Operations />} />
-          <Route path="/calendar" element={<Calendar />} />
-          <Route path="/inbox" element={<Inbox />} />
-        </Routes>
-      </main>
-      <Footer />
+      <div className="app-body">
+        <main className="app-main">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/orders" element={<Orders />} />
+            <Route path="/operations" element={<Operations />} />
+            <Route path="/calendar" element={<Calendar />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </main>
+        <Footer />
+      </div>
     </div>
   );
 }
