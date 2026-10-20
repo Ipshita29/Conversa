@@ -13,7 +13,7 @@ export default function Drawer({ title, onClose, children }) {
 
   return (
     <div className="drawer-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label={title}>
+      <aside className="drawer" data-lenis-prevent role="dialog" aria-modal="true" aria-label={title}>
         <header className="drawer-header">
           <h2>{title}</h2>
           <button type="button" ref={closeRef} className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>

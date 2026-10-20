@@ -12,8 +12,9 @@ import { ChannelBadge, StatusBadge } from './Badge.jsx';
 
 const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp'], ['instagram', 'Instagram']];
 
-export default function InboxSection({ orders, onChanged }) {
+export default function InboxSection({ orders, onChanged, onSettled }) {
   const { status, data, error, reload } = useAsync(getConversations);
+  useEffect(() => { if (status !== 'loading') onSettled?.(); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
   const [filter, setFilter] = useState('all');
   const [open, setOpen] = useState(null); // { convId } | { paste: true }
   const [createdFor, setCreatedFor] = useState(null); // { convId, customerName } shown after an order is created from a message

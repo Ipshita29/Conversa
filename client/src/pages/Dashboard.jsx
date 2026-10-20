@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import useWorkspace from '../hooks/useWorkspace.js';
 import { scrollToSection } from '../utils/scroll.js';
@@ -15,12 +15,16 @@ import '../css/Dashboard.css';
 export default function Dashboard() {
   const { status, data, error, reload } = useWorkspace();
   const { hash } = useLocation();
+  const [prefill, setPrefill] = useState(null);
+  const [inboxSettled, setInboxSettled] = useState(false);
+  const simulate = (p) => { setPrefill({ ...p, nonce: Date.now() }); scrollToSection('simulation'); };
 
+  // Deep links (e.g. /inbox -> /#inbox) wait until the async sections have rendered, so the page is at full height.
   useEffect(() => {
-    if (!data || !hash) return undefined;
-    const t = setTimeout(() => scrollToSection(hash.slice(1)), 120); // e.g. /inbox redirects to /#inbox
+    if (!data || !inboxSettled || !hash) return undefined;
+    const t = setTimeout(() => scrollToSection(hash.slice(1)), 100);
     return () => clearTimeout(t);
-  }, [data, hash]);
+  }, [data, inboxSettled, hash]);
 
   if (status === 'loading' && !data) {
     return <section className="page home"><div className="ws-section" id="overview"><HeroSection /></div><StateMessage kind="loading" message="Loading your workspace…" /></section>;
@@ -38,9 +42,9 @@ export default function Dashboard() {
           ? <StateMessage message="No orders yet. Add your first order, or draft one from a customer message in the inbox below." />
           : <TodaySection dashboard={dashboard} planner={planner} orders={orders} />}
       </Reveal>
-      <Reveal as="section" id="deadlines" className="ws-section"><RiskSection planner={planner} orders={orders} /></Reveal>
-      <Reveal as="section" id="simulation" className="ws-section"><SimulationPanel planner={planner} orders={orders} onApplied={reload} /></Reveal>
-      <Reveal as="section" id="inbox" className="ws-section"><InboxSection orders={orders} onChanged={reload} /></Reveal>
+      <Reveal as="section" id="deadlines" className="ws-section"><RiskSection planner={planner} orders={orders} onSimulate={simulate} /></Reveal>
+      <Reveal as="section" id="simulation" className="ws-section"><SimulationPanel planner={planner} orders={orders} onApplied={reload} prefill={prefill} /></Reveal>
+      <Reveal as="section" id="inbox" className="ws-section"><InboxSection orders={orders} onChanged={reload} onSettled={() => setInboxSettled(true)} /></Reveal>
     </section>
   );
 }

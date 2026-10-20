@@ -21,7 +21,7 @@
 .navbar-demo { margin: 0.9rem 0 0; font-size: 0.72rem; color: var(--blue-ink); }
 
 @media (max-width: 860px) {
-  .navbar { position: sticky; top: 0; width: 100%; inset: auto; flex-direction: column; padding: 0.7rem 1.1rem; border-right: 0; border-bottom: 1px solid var(--border); }
+  .navbar { position: sticky; inset: 0 auto auto 0; width: 100%; flex-direction: column; padding: 0.7rem 1.1rem; border-right: 0; border-bottom: 1px solid var(--border); }
   .you-are-here { position: absolute; left: 50%; top: 1.15rem; margin: 0; transform: translateX(-50%); }
   .menu { position: absolute; left: 0; right: 0; top: 100%; background: var(--ivory); border-bottom: 1px solid var(--border); padding: 0 1.1rem; box-shadow: var(--shadow); }
   .menu.is-open { padding-bottom: 1rem; }
