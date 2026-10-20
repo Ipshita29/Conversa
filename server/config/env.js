@@ -10,7 +10,7 @@ export const config = {
   businessTimezone: process.env.BUSINESS_TIMEZONE || 'Asia/Kolkata',
   groq: {
     apiKey: process.env.GROQ_API_KEY || '',
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-20b',
     timeoutMs: int(process.env.GROQ_TIMEOUT_MS, 15000),
   },
   meta: {
