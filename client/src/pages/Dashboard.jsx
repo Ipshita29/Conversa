@@ -1,52 +1,33 @@
-import { useCallback, useEffect, useState } from 'react';
-import { getDashboard } from '../services/dashboardService.js';
+import { Link } from 'react-router-dom';
+import { getDashboard } from '../services/api.js';
+import useAsync from '../hooks/useAsync.js';
+import { formatMinutes, formatDateTime, timeLeft } from '../utils/format.js';
 import StatCard from '../components/StatCard.jsx';
 import Panel from '../components/Panel.jsx';
+import PageHeader from '../components/PageHeader.jsx';
 import StateMessage from '../components/StateMessage.jsx';
 import WorkloadChart from '../components/WorkloadChart.jsx';
+import { RiskBadge, StatusBadge } from '../components/Badge.jsx';
 import '../css/Dashboard.css';
 
-const fmtDeadline = (iso) =>
-  new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
-
-function timeLeft(iso) {
-  const h = Math.round((new Date(iso) - Date.now()) / 36e5);
-  if (h < 0) return 'Overdue';
-  return h < 24 ? `${h}h left` : `${Math.round(h / 24)}d left`;
-}
-
 export default function Dashboard() {
-  const [state, setState] = useState({ status: 'loading' });
+  const { status, data, error, reload } = useAsync(getDashboard);
 
-  const load = useCallback(() => {
-    setState({ status: 'loading' });
-    getDashboard()
-      .then(({ data, isDemo }) => setState({ status: 'ready', data, isDemo }))
-      .catch((err) => setState({ status: 'error', message: err.message }));
-  }, []);
+  const header = <PageHeader title="Dashboard" subtitle="Your orders, workload, and what to do next." />;
+  if (status === 'loading' && !data) return <section className="page dashboard">{header}<StateMessage kind="loading" message="Loading dashboard…" /></section>;
+  if (status === 'error') return <section className="page dashboard">{header}<StateMessage kind="error" message={`Couldn't load the dashboard. ${error.message}`} onRetry={reload} /></section>;
 
-  useEffect(load, [load]);
-
-  if (state.status === 'loading') return <section className="page dashboard"><StateMessage kind="loading" message="Loading dashboard…" /></section>;
-  if (state.status === 'error') return <section className="page dashboard"><StateMessage kind="error" message={`Couldn't load the dashboard. ${state.message}`} onRetry={load} /></section>;
-
-  const { stats, workload, urgentOrders, upcomingDeadlines, recommendations } = state.data;
-  const isEmpty = stats.total === 0;
-  const usedPct = workload.availableHours ? Math.round((workload.pendingHours / workload.availableHours) * 100) : 0;
-  const overloaded = workload.pendingHours > workload.availableHours;
+  const { stats, workload, urgentOrders, upcomingDeadlines, recommendations } = data;
+  const usedPct = workload.availableMinutes ? Math.round((workload.pendingMinutes / workload.availableMinutes) * 100) : 0;
+  const overloaded = workload.pendingMinutes > workload.availableMinutes;
 
   return (
     <section className="page dashboard">
-      <header className="page-header">
-        <div>
-          <h1>Dashboard</h1>
-          <p className="muted">Your orders, workload, and what to do next.</p>
-        </div>
-        {state.isDemo && <span className="demo-badge" title="Mock data from client/src/mock">Demo data</span>}
-      </header>
-
-      {isEmpty ? (
-        <StateMessage message="No orders yet. Once orders come in, your dashboard will appear here." />
+      {header}
+      {stats.total === 0 ? (
+        <StateMessage message="No orders yet. Once orders come in, your dashboard will appear here.">
+          <Link className="btn btn-primary" to="/orders">Add your first order</Link>
+        </StateMessage>
       ) : (
         <>
           <div className="stat-grid">
@@ -58,9 +39,9 @@ export default function Dashboard() {
           </div>
 
           <div className="dash-grid">
-            <Panel title="Workload" subtitle="Pending preparation vs. available working hours">
+            <Panel title="Workload" subtitle="Pending preparation vs. available working hours (next 7 days)">
               <p className="workload-figure">
-                <strong>{workload.pendingHours}h</strong> of {workload.availableHours}h <span className="muted">({usedPct}%)</span>
+                <strong>{formatMinutes(workload.pendingMinutes)}</strong> of {formatMinutes(workload.availableMinutes)} <span className="muted">({usedPct}%)</span>
               </p>
               <div className="meter" role="progressbar" aria-valuenow={Math.min(usedPct, 100)} aria-valuemin="0" aria-valuemax="100" aria-label="Workload used">
                 <div className={overloaded ? 'meter-fill over' : 'meter-fill'} style={{ width: `${Math.min(usedPct, 100)}%` }} />
@@ -76,14 +57,12 @@ export default function Dashboard() {
                   {recommendations.map((r) => (
                     <li key={r.id} className={`reco reco-${r.priority}`}>
                       <span className="pill">{r.priority}</span>
-                      <div>
-                        <strong>{r.action}</strong>
-                        <p>{r.reason}</p>
-                      </div>
+                      <div><strong>{r.action}</strong><p>{r.reason}</p></div>
                     </li>
                   ))}
                 </ol>
               )}
+              <Link className="btn btn-sm" to="/operations">Open Operations</Link>
             </Panel>
 
             <Panel title="Urgent orders">
@@ -94,14 +73,11 @@ export default function Dashboard() {
                   {urgentOrders.map((o) => (
                     <li key={o.id}>
                       <div>
-                        <strong>{o.customer}</strong> <span className="muted">{o.id}</span>
+                        <strong>{o.customerName}</strong>
                         <p>{o.item}</p>
-                        <small className="muted">{o.status} · {o.prepHours}h prep</small>
+                        <small className="muted"><StatusBadge status={o.status} /> {formatMinutes(o.prepTimeMinutes)} prep</small>
                       </div>
-                      <div className="order-meta">
-                        <span className={`pill risk-${o.risk}`}>{o.risk} risk</span>
-                        <small>{timeLeft(o.deadline)}</small>
-                      </div>
+                      <div className="order-meta"><RiskBadge risk={o.risk} /><small>{timeLeft(o.deadline)}</small></div>
                     </li>
                   ))}
                 </ul>
@@ -114,10 +90,7 @@ export default function Dashboard() {
               ) : (
                 <ul className="deadline-list">
                   {upcomingDeadlines.map((d) => (
-                    <li key={d.id}>
-                      <span><strong>{d.customer}</strong> <span className="muted">{d.id}</span></span>
-                      <time dateTime={d.deadline}>{fmtDeadline(d.deadline)}</time>
-                    </li>
+                    <li key={d.id}><strong>{d.customerName}</strong><time dateTime={d.deadline}>{formatDateTime(d.deadline)}</time></li>
                   ))}
                 </ul>
               )}
