@@ -131,3 +131,31 @@ test('dashboard and planner use the same workload numbers', () => {
   assert.deepEqual(d.stats, { total: 4, pending: 2, inProgress: 1, completed: 1, atRisk: d.stats.atRisk });
   assert.equal(d.stats.atRisk, p.risks.length);
 });
+
+test('schedule entries explain themselves: kind, exact blocks, and the orders queued ahead', () => {
+  const a = order({ prepTimeMinutes: 300, deadline: '2026-10-19T17:00:00Z' });
+  const b = order({ prepTimeMinutes: 300, deadline: '2026-10-19T17:00:00Z' });
+  const p = plan([a, b]);
+  const [first, second] = p.schedule;
+  assert.equal(p.rules.riskBufferMinutes, 240);
+  assert.equal(first.kind, 'tight');
+  assert.deepEqual(first.precededBy, []);
+  assert.equal(second.kind, 'late');
+  assert.deepEqual(second.precededBy, [{ orderId: first.orderId, minutes: 300 }]);
+  assert.equal(second.deadline, '2026-10-19T17:00:00.000Z');
+  // blocks add up to the prep time, are contiguous with the schedule start/end, and match the day entries
+  assert.equal(second.blocks.reduce((s, x) => s + x.minutes, 0), 300);
+  assert.equal(second.blocks[0].start, second.scheduledStart);
+  assert.equal(second.blocks.at(-1).end, second.scheduledEnd);
+  const day = p.days.find((d) => d.date === second.blocks[0].date);
+  assert.ok(day.startsAt);
+  assert.deepEqual(day.orders.find((o) => o.id === second.orderId).start, second.blocks[0].start);
+  // the second order starts exactly when the first one ends (it is queued behind it)
+  assert.equal(second.scheduledStart, first.scheduledEnd);
+});
+
+test('kinds: deadline_passed, unschedulable, on_track', () => {
+  assert.equal(plan([order({ deadline: '2026-10-18T10:00:00Z' })]).schedule[0].kind, 'deadline_passed');
+  assert.equal(plan([order({ prepTimeMinutes: 60 * 24 * 30, deadline: '2026-10-30T17:00:00Z' })]).schedule[0].kind, 'unschedulable');
+  assert.equal(plan([order({ prepTimeMinutes: 60, deadline: '2026-10-23T17:00:00Z' })]).schedule[0].kind, 'on_track');
+});

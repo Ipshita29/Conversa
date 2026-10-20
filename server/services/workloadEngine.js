@@ -71,10 +71,12 @@ export function computePlan({ orders, settings, now = new Date(), rangeDays = 7 
 
   const results = {};
   const schedule = [];
+  const queued = []; // orders already placed (earliest deadline first), used to explain what is ahead of each order
   for (const o of plannable) {
     let remaining = o.prepTimeMinutes;
     let firstStart = null;
     let lastEnd = null;
+    const blocks = [];
     for (let i = 0; i < days.length && remaining > 0; i++) {
       const take = Math.min(remaining, days[i].capacityMinutes - days[i].plannedMinutes);
       if (take <= 0) continue;
@@ -83,7 +85,8 @@ export function computePlan({ orders, settings, now = new Date(), rangeDays = 7 
       firstStart ??= s;
       lastEnd = e;
       days[i].plannedMinutes += take;
-      days[i].orders.push({ id: o.id, customerName: o.customerName, item: o.item, scheduledMinutes: take });
+      days[i].orders.push({ id: o.id, customerName: o.customerName, item: o.item, scheduledMinutes: take, start: s.toISOString(), end: e.toISOString() });
+      blocks.push({ date: days[i].date, start: s.toISOString(), end: e.toISOString(), minutes: take });
       remaining -= take;
     }
 
@@ -94,21 +97,26 @@ export function computePlan({ orders, settings, now = new Date(), rangeDays = 7 
     let reason = `Scheduled to finish ${fmtDur(bufferMinutes)} before the deadline.`;
     let shortfallMinutes = null;
     let suggestedDeadline = null;
+    let kind = 'on_track'; // machine-readable cause: deadline_passed | unschedulable | late | tight | on_track
     if (o.deadline < now) {
-      risk = 'high'; reason = 'The deadline has already passed.';
+      risk = 'high'; kind = 'deadline_passed'; reason = 'The deadline has already passed.';
     } else if (unfit) {
-      risk = 'high'; reason = `Cannot be scheduled within the next ${HORIZON_DAYS} days of working capacity.`;
+      risk = 'high'; kind = 'unschedulable'; reason = `Cannot be scheduled within the next ${HORIZON_DAYS} days of working capacity.`;
     } else if (bufferMinutes < 0) {
-      risk = 'high'; shortfallMinutes = -bufferMinutes;
+      risk = 'high'; kind = 'late'; shortfallMinutes = -bufferMinutes;
       reason = `Estimated to finish ${fmtDur(shortfallMinutes)} after the deadline (${formatInZone(finishAt, tz)}).`;
       suggestedDeadline = new Date(finishAt.getTime() + settings.riskBufferMinutes * MIN).toISOString();
     } else if (bufferMinutes < settings.riskBufferMinutes) {
-      risk = 'medium'; reason = `Estimated to finish only ${fmtDur(bufferMinutes)} before the deadline.`;
+      risk = 'medium'; kind = 'tight'; reason = `Estimated to finish only ${fmtDur(bufferMinutes)} before the deadline.`;
     }
     const entry = {
-      orderId: o.id, risk, reason, bufferMinutes, shortfallMinutes, suggestedDeadline,
+      orderId: o.id, risk, kind, reason, bufferMinutes, shortfallMinutes, suggestedDeadline,
+      deadline: o.deadline.toISOString(), prepTimeMinutes: o.prepTimeMinutes,
       scheduledStart: (firstStart ?? now).toISOString(), scheduledEnd: unfit ? null : finishAt.toISOString(),
+      blocks, // exact time blocks the engine placed for this order
+      precededBy: queued.map((q) => ({ ...q })), // orders scheduled ahead of this one (earlier deadline), with their prep minutes
     };
+    queued.push({ orderId: o.id, minutes: o.prepTimeMinutes });
     results[o.id] = entry;
     schedule.push(entry);
   }
@@ -129,12 +137,14 @@ export function computePlan({ orders, settings, now = new Date(), rangeDays = 7 
   const byId = Object.fromEntries(open.map((o) => [o.id, o]));
   const risks = schedule.filter((r) => r.risk !== 'low')
     .sort((a, b) => RANK[a.risk] - RANK[b.risk] || byId[a.orderId].deadline - byId[b.orderId].deadline)
-    .map(({ orderId, risk, reason, bufferMinutes, shortfallMinutes, suggestedDeadline }) => ({ orderId, risk, reason, bufferMinutes, shortfallMinutes, suggestedDeadline }));
+    .map(({ orderId, risk, kind, reason, bufferMinutes, shortfallMinutes, suggestedDeadline }) => ({ orderId, risk, kind, reason, bufferMinutes, shortfallMinutes, suggestedDeadline }));
 
   return {
     range: { from: shown[0].date, days: rangeDays, timezone: tz },
+    rules: { riskBufferMinutes: settings.riskBufferMinutes, horizonDays: HORIZON_DAYS },
+    generatedAt: now.toISOString(),
     workload,
-    days: shown.map(({ date, plannedMinutes, capacityMinutes, orders: dayOrders }) => ({ date, plannedMinutes, capacityMinutes, orders: dayOrders })),
+    days: shown.map(({ date, plannedMinutes, capacityMinutes, start, orders: dayOrders }) => ({ date, plannedMinutes, capacityMinutes, startsAt: start.toISOString(), orders: dayOrders })),
     risks,
     unscheduledOrders,
     overloadedDays,
