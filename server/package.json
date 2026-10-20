@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "seed:demo": "node scripts/seed-demo.js",
+    "seed:clear": "node scripts/seed-demo.js --clear"
   },
   "dependencies": {
     "cors": "^2.8.5",

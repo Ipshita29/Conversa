@@ -103,6 +103,8 @@ The lifecycle may need to support cancellation, refunds, partial payments, or ch
 - Make demo/sample data clearly distinguishable from real connected-account data.
 - Include clear loading, empty, error, and disconnected-account states.
 
+> **Pitch, demo script, architecture map and a walkthrough of the risk and what-if logic:** see [`docs/project-summary.md`](docs/project-summary.md).
+
 ## Getting started
 
 This repository is currently a project plan. Once the frontend and backend have been scaffolded, update this section with the exact commands and environment variables used by the implementation.

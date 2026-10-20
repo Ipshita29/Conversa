@@ -29,14 +29,32 @@ async function upsertConversation(m, retry = true) {
   }
 }
 
+const shape = (c, msgs) => ({
+  id: String(c._id), channel: c.channel, customerName: c.customerName || `Unknown (${c.contactId})`,
+  ...(c.channel === 'whatsapp' ? { phone: c.isDemo ? null : c.contactId } : { handle: c.isDemo ? null : c.contactId }),
+  orderId: c.orderId ? String(c.orderId) : null, isDemo: Boolean(c.isDemo),
+  unread: msgs.filter((m) => !m.read).length, messages: msgs.slice(-30),
+});
+
+async function messagesByConversation(ids) {
+  const msgs = await Message.find({ conversation: { $in: ids } }).sort({ receivedAt: 1 }).lean();
+  const by = {};
+  for (const m of msgs) (by[m.conversation] ??= []).push({ id: String(m._id), from: 'customer', text: m.text ?? `[${m.messageType} message — not shown]`, at: m.receivedAt.toISOString(), read: Boolean(m.readAt) });
+  return by;
+}
+
 export async function listConversations(limit = 50) {
   const convs = await Conversation.find().sort({ lastMessageAt: -1 }).limit(limit).lean();
-  const msgs = await Message.find({ conversation: { $in: convs.map((c) => c._id) } }).sort({ receivedAt: 1 }).lean();
-  const by = {};
-  for (const m of msgs) (by[m.conversation] ??= []).push({ id: String(m._id), from: 'customer', text: m.text ?? `[${m.messageType} message — not shown]`, at: m.receivedAt.toISOString() });
-  return convs.map((c) => ({
-    id: String(c._id), channel: c.channel, customerName: c.customerName || `Unknown (${c.contactId})`,
-    ...(c.channel === 'whatsapp' ? { phone: c.contactId } : { handle: c.contactId }),
-    orderId: null, messages: (by[c._id] ?? []).slice(-30),
-  }));
+  const by = await messagesByConversation(convs.map((c) => c._id));
+  return convs.map((c) => shape(c, by[c._id] ?? []));
+}
+
+// Seller actions on a conversation: mark its messages read, and/or link it to an order.
+export async function updateConversation(id, { read, orderId }) {
+  const conv = await Conversation.findById(id);
+  if (!conv) return null;
+  if (read === true) await Message.updateMany({ conversation: conv._id, readAt: null }, { $set: { readAt: new Date() } });
+  if (orderId !== undefined) { conv.orderId = orderId; await conv.save(); }
+  const by = await messagesByConversation([conv._id]);
+  return shape(conv.toObject(), by[conv._id] ?? []);
 }

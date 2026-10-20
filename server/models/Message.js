@@ -9,6 +9,8 @@ const messageSchema = new mongoose.Schema({
   text: { type: String, default: null },
   messageType: { type: String, default: 'text' },
   receivedAt: { type: Date, default: Date.now },
+  readAt: { type: Date, default: null }, // null = unread
+  isDemo: { type: Boolean, default: false },
 }, { timestamps: true });
 messageSchema.index({ channel: 1, externalId: 1 }, { unique: true });
 

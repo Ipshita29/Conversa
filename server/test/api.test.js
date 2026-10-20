@@ -215,3 +215,27 @@ test('without META_APP_SECRET webhooks refuse to process (never trust unsigned i
   assert.equal((await call('POST', '/webhooks/instagram', { object: 'instagram', entry: [] })).status, 503);
   config.meta.appSecret = saved;
 });
+
+test('conversations: webhook messages start unread; PATCH marks them read and links an order', { skip }, async () => {
+  const conv = (await call('GET', '/conversations')).json.items.find((c) => c.customerName === 'Riya');
+  assert.equal(conv.unread, 1);
+  assert.equal(conv.messages[0].read, false);
+  assert.equal(conv.orderId, null);
+  assert.equal(conv.isDemo, false);
+
+  const order = (await call('POST', '/orders', { customerName: 'Riya', item: 'Cake' })).json;
+  const linked = await call('PATCH', `/conversations/${conv.id}`, { read: true, orderId: order.id });
+  assert.equal(linked.status, 200);
+  assert.equal(linked.json.unread, 0);
+  assert.equal(linked.json.messages[0].read, true);
+  assert.equal(linked.json.orderId, order.id);
+  assert.equal((await call('PATCH', `/conversations/${conv.id}`, { orderId: null })).json.orderId, null);
+
+  assert.equal((await call('PATCH', `/conversations/${conv.id}`, {})).status, 422);
+  assert.equal((await call('PATCH', `/conversations/${conv.id}`, { read: false })).status, 422);
+  assert.equal((await call('PATCH', `/conversations/${conv.id}`, { evil: 1 })).status, 422);
+  assert.equal((await call('PATCH', `/conversations/${conv.id}`, { orderId: 'nope' })).status, 422);
+  assert.equal((await call('PATCH', `/conversations/${conv.id}`, { orderId: 'aaaaaaaaaaaaaaaaaaaaaaaa' })).status, 404);
+  assert.equal((await call('PATCH', '/conversations/aaaaaaaaaaaaaaaaaaaaaaaa', { read: true })).status, 404);
+  assert.equal((await call('PATCH', '/conversations/xyz', { read: true })).status, 404);
+});

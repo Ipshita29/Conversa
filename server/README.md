@@ -51,7 +51,8 @@ Errors always look like `{ "error": { "code", "message", "details?" } }`. Dates 
 | `GET /api/integrations` | per-channel status (see below) |
 | `POST /api/integrations/:channel/connect` | `whatsapp` or `instagram`; re-verifies server credentials |
 | `GET`/`POST /api/webhooks/:channel` | **addition.** Meta handshake and incoming messages |
-| `GET /api/conversations` | **addition.** Conversations stored from webhooks (the shape the client Inbox expects) |
+| `GET /api/conversations` | **addition.** Stored conversations: `unread` count, per-message `read`, `orderId`, `isDemo` |
+| `PATCH /api/conversations/:id` | **addition.** `{ read: true }` marks its messages read; `{ orderId }` links (or `null` unlinks) an order |
 
 ## Workload engine (deterministic, no LLM)
 
@@ -77,6 +78,10 @@ The customer message is sent to Groq (`/openai/v1/chat/completions`, JSON mode) 
 * **No OAuth / Embedded Signup flow is implemented.** Credentials are supplied via environment variables, and `connect` simply re-verifies them (`200 { status: "connected", authorizationUrl: null }` or `503 INTEGRATION_UNAVAILABLE`).
 * Webhooks: `GET` answers Meta's `hub.*` handshake; `POST` verifies `X-Hub-Signature-256` over the **raw body** with `META_APP_SECRET` (401 if wrong, 503 if no secret is configured). Messages are stored (conversation + message); a unique `(channel, externalId)` index makes retries idempotent. Storing a message does **not** create an order or call the LLM; the seller triggers extraction.
 * Webhook payload shapes and the signature scheme were checked against Meta's current documentation. **The flows have not been run against a real Meta account**, and Instagram messaging requires a professional account, app permissions and Meta app review. Register `https://<host>/api/webhooks/whatsapp` and `/api/webhooks/instagram` in the Meta app dashboard with the matching verify tokens.
+
+## Demo data
+
+`npm run seed:demo` (re)creates 5 demo orders (notes start with `[DEMO]`) and 6 demo inbox messages (`isDemo: true`; 5 read, 1 unread), with deadlines relative to now, so run it right before presenting. `npm run seed:clear` removes only those. These are plain stored records: WhatsApp/Instagram are **not** connected or simulated.
 
 ## Security notes
 
