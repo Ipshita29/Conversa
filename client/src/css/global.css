@@ -31,7 +31,6 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
-@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
 
 body { margin: 0; font-family: var(--sans); font-size: 16px; line-height: 1.55; color: var(--cocoa); background: var(--ivory); -webkit-font-smoothing: antialiased; }
 h1, h2, h3, h4, p { margin: 0; }
@@ -61,14 +60,17 @@ a { color: var(--caramel-ink); text-underline-offset: 3px; }
 /* ---------- Sections (home workspace) ---------- */
 .ws-section { padding: 3.5rem 0; border-top: 1px solid var(--border); scroll-margin-top: 1rem; }
 .ws-section:first-child { border-top: 0; padding-top: 0; }
-.section-head { max-width: 40rem; margin-bottom: 2rem; }
+.section-head { max-width: 46rem; margin-bottom: 2rem; }
 .section-head h2 { margin: 0.5rem 0 0.6rem; }
 .section-head p { color: var(--muted); font-size: 1.02rem; }
 @media (max-width: 860px) { .ws-section { padding: 2.5rem 0; scroll-margin-top: 4.5rem; } }
 
-.reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
-.reveal.is-visible { opacity: 1; transform: none; }
-@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+.reveal > * { opacity: 0; transform: translateY(14px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.reveal.is-visible > * { opacity: 1; transform: none; }
+.reveal.is-visible > :nth-child(2) { transition-delay: 0.07s; }
+.reveal.is-visible > :nth-child(n + 3) { transition-delay: 0.14s; }
+/* Only the children animate: the section's own box never moves, so scroll targets measured by Lenis stay exact. */
+@media (prefers-reduced-motion: reduce) { .reveal > * { opacity: 1; transform: none; transition: none; } }
 
 /* ---------- Buttons ---------- */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; min-height: 40px; padding: 0.5rem 1.05rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); color: var(--cocoa); font: inherit; font-size: 0.9rem; font-weight: 500; cursor: pointer; text-decoration: none; transition: background 0.18s var(--ease), border-color 0.18s var(--ease), transform 0.18s var(--ease); }
@@ -165,3 +167,19 @@ textarea { resize: vertical; min-height: 96px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
 @media (max-width: 860px) { .grid-2 { grid-template-columns: minmax(0, 1fr); } }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 1rem; list-style: none; padding: 0; margin: 0.5rem 0 0; font-size: 0.75rem; color: var(--muted); }
+
+.section-title-row { display: flex; align-items: baseline; gap: 1rem 1.5rem; flex-wrap: wrap; }
+
+/* ---------- Lenis-driven scroll effects (all disabled for reduced motion) ---------- */
+.scroll-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 70; pointer-events: none; background: var(--caramel); transform-origin: 0 50%; transform: scaleX(var(--scroll-progress, 0)); }
+.hero-copy, .hero-orb, .section-head h2 { will-change: transform; }
+@media (prefers-reduced-motion: no-preference) {
+  /* Rows, tiles and counters rise in one after another when their section scrolls into view. */
+  .reveal.is-visible :is(.metric, .rk-sum, .work-row, .rk-list > li, .msg-list > li, .day-bars li, .action) { animation: rise 0.7s var(--ease) both; }
+  .reveal.is-visible :is(.metric, .rk-sum, .work-row, .rk-list > li, .msg-list > li, .day-bars li, .action):nth-child(2) { animation-delay: 0.09s; }
+  .reveal.is-visible :is(.metric, .rk-sum, .work-row, .rk-list > li, .msg-list > li, .day-bars li, .action):nth-child(3) { animation-delay: 0.18s; }
+  .reveal.is-visible :is(.metric, .rk-sum, .work-row, .rk-list > li, .msg-list > li, .day-bars li, .action):nth-child(4) { animation-delay: 0.27s; }
+  .reveal.is-visible :is(.metric, .rk-sum, .work-row, .rk-list > li, .msg-list > li, .day-bars li, .action):nth-child(5) { animation-delay: 0.36s; }
+  .reveal.is-visible :is(.metric, .rk-sum, .work-row, .rk-list > li, .msg-list > li, .day-bars li, .action):nth-child(n + 6) { animation-delay: 0.45s; }
+}
+@media (prefers-reduced-motion: reduce) { .scroll-progress { display: none; } }

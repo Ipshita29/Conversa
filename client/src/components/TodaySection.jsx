@@ -1,5 +1,6 @@
 import { dateKey, formatInTz, formatMinutes, isDemoOrder, OPEN } from '../utils/format.js';
 import SectionHead from './SectionHead.jsx';
+import CountUp from './CountUp.jsx';
 import StateMessage from './StateMessage.jsx';
 import StepBar from './StepBar.jsx';
 import { RiskBadge, StatusBadge } from './Badge.jsx';
@@ -20,10 +21,10 @@ export default function TodaySection({ dashboard, planner, orders, eyebrow = 'To
     <>
       <SectionHead eyebrow={eyebrow} title={title}>{subtitle}</SectionHead>
       <dl className="metrics">
-        <div className="metric metric-key"><dt>Today's orders</dt><dd>{todays.length}</dd><small>due or scheduled today</small></div>
-        <div className="metric"><dt>In progress</dt><dd>{stats.inProgress}</dd><small>being prepared</small></div>
-        <div className="metric"><dt>Completed</dt><dd>{stats.completed}</dd><small>all completed orders</small></div>
-        <div className="metric"><dt>Need attention</dt><dd>{attention}</dd><small>at risk or missing details</small></div>
+        <div className="metric metric-key"><dt>Today's orders</dt><dd><CountUp value={todays.length} /></dd><small>due or scheduled today</small></div>
+        <div className="metric"><dt>In progress</dt><dd><CountUp value={stats.inProgress} /></dd><small>being prepared</small></div>
+        <div className="metric"><dt>Completed</dt><dd><CountUp value={stats.completed} /></dd><small>all completed orders</small></div>
+        <div className="metric"><dt>Need attention</dt><dd><CountUp value={attention} /></dd><small>at risk or missing details</small></div>
       </dl>
 
       <h3 className="list-title">Today's work</h3>

@@ -8,6 +8,7 @@ export default function HeroSection({ stats }) {
   const open = stats ? stats.pending + stats.inProgress : null;
   return (
     <div className="hero">
+      <div className="hero-copy" data-scroll-speed="0.14" data-fade>
       <div className="hero-meta">
         <p className="eyebrow">Business operations, made clear</p>
         <DemoBadge />
@@ -20,7 +21,8 @@ export default function HeroSection({ stats }) {
         {stats && <p className="hero-summary">{stats.total} orders · {open} open · {stats.atRisk} {stats.atRisk === 1 ? 'needs' : 'need'} a closer look</p>}
       </div>
       <p className="hero-statement"><span>The AI reads.</span> <span>Rules decide.</span> <span>You approve.</span></p>
-      <span className="hero-orb" aria-hidden="true"><i /></span>
+      </div>
+      <span className="hero-orb" aria-hidden="true" data-scroll-speed="-0.22"><i /></span>
     </div>
   );
 }
