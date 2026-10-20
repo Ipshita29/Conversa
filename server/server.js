@@ -1,17 +1,10 @@
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
+import { config } from './config/env.js';
+import { connectDb } from './config/db.js';
+import { createApp } from './app.js';
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+const app = createApp();
 
-app.use(cors());
-app.use(express.json());
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-app.listen(PORT, () => {
-  console.log(`Conversa server running on http://localhost:${PORT}`);
+app.listen(config.port, () => {
+  console.log(`Conversa server running on http://localhost:${config.port}`);
+  connectDb();
 });
