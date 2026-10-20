@@ -1,75 +1,208 @@
+import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatInTz, formatMinutes } from '../utils/format.js';
+import { ArrowRight, ChevronDown, FlaskConical, CalendarDays, Pencil, Info } from 'lucide-react';
+import { formatInTz, formatLongInTz, formatMinutes } from '../utils/format.js';
 import SectionHead from './SectionHead.jsx';
 import StateMessage from './StateMessage.jsx';
+import Modal from './Modal.jsx';
+import CountUp from './CountUp.jsx';
+import RiskTimeline from './RiskTimeline.jsx';
 import { RiskBadge } from './Badge.jsx';
+import '../css/Risk.css';
 
-const NEEDS = { missing_prep_time: 'Add a preparation time so it can be scheduled.', missing_deadline: 'Add a deadline so it can be scheduled.', missing_both: 'Add a deadline and a preparation time so it can be scheduled.' };
+const MISSING = { missing_prep_time: 'preparation time', missing_deadline: 'deadline', missing_both: 'preparation time and deadline' };
+const plural = (n, one, many) => (n === 1 ? one : many);
+const qty = (o) => (o.quantity > 1 ? ` × ${o.quantity}` : '');
 
-function Row({ order, entry, next, tz, kind }) {
-  const late = entry && entry.bufferMinutes !== null && entry.bufferMinutes < 0;
+// Urgency: biggest predicted lateness first; overdue / unschedulable lead; then tightest buffers.
+const urgency = (e) => (e.kind === 'deadline_passed' || e.kind === 'unschedulable' ? Infinity : e.shortfallMinutes ?? -(e.bufferMinutes ?? 0));
+const byUrgency = (a, b) => urgency(b) - urgency(a) || (a.deadline ?? '').localeCompare(b.deadline ?? '');
+
+function impact(e) {
+  if (e.kind === 'deadline_passed') return { text: 'Past due', tone: 'late' };
+  if (e.kind === 'unschedulable') return { text: 'Cannot be scheduled', tone: 'late' };
+  if (e.bufferMinutes === null || e.bufferMinutes === undefined) return null;
+  return e.bufferMinutes < 0 ? { text: `${formatMinutes(-e.bufferMinutes)} late`, tone: 'late' } : { text: `${formatMinutes(e.bufferMinutes)} to spare`, tone: e.risk === 'medium' ? 'tight' : 'ok' };
+}
+
+function impactSentence(e, buf) {
+  if (e.kind === 'deadline_passed') return 'The promised deadline has already passed.';
+  if (e.kind === 'unschedulable') return e.reason;
+  if (e.bufferMinutes === null || e.bufferMinutes === undefined) return e.reason;
+  if (e.bufferMinutes < 0) return `Expected to finish ${formatMinutes(-e.bufferMinutes)} after the promised deadline.`;
+  return `Expected to finish ${formatMinutes(e.bufferMinutes)} before the promised deadline${e.risk === 'medium' ? `, which is less than the ${formatMinutes(buf)} safety buffer` : ''}.`;
+}
+
+function Row({ order, entry, tz, planner, byId, rec, buf, onSimulate }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const imp = impact(entry);
+  const risky = entry.risk !== 'low';
+  const ahead = (entry.precededBy ?? []).filter((p) => byId[p.orderId]);
+  const aheadMinutes = ahead.reduce((s, p) => s + p.minutes, 0);
+  const finish = entry.scheduledEnd;
+
   return (
-    <li className={`risk-row risk-row-${kind}`}>
-      <div className="risk-who">
-        <strong>{order.customerName}</strong>
-        <span>{order.item}{order.quantity > 1 ? ` × ${order.quantity}` : ''}</span>
+    <li className={`rk rk-${entry.risk}${open ? ' is-open' : ''}`}>
+      <div className="rk-head">
+        <div className="rk-who"><strong>{order.customerName}</strong><span>{order.item}{qty(order)}</span></div>
+        <div className="rk-when"><small>Promised deadline</small>{order.deadline ? formatInTz(order.deadline, tz) : '—'}</div>
+        <div className="rk-when"><small>Expected finish</small>{finish ? formatInTz(finish, tz) : entry.kind === 'unschedulable' ? 'Not within the horizon' : '—'}</div>
+        <div className={`rk-impact rk-impact-${imp?.tone ?? 'ok'}`}>{imp?.text ?? '—'}</div>
+        <RiskBadge risk={entry.risk} />
+        <button type="button" className="rk-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+          {risky ? 'Why is this at risk?' : 'Details'} <ChevronDown size={15} aria-hidden="true" />
+        </button>
       </div>
-      <div className="risk-times">
-        <span><small>Deadline</small>{order.deadline ? formatInTz(order.deadline, tz) : '—'}</span>
-        {entry && (entry.scheduledEnd || entry.scheduledStart) && <span><small>Estimated finish</small>{entry.scheduledEnd ? formatInTz(entry.scheduledEnd, tz) : 'Not within 60 days'}</span>}
-        {entry && entry.bufferMinutes !== null && <span><small>{late ? 'Late by' : 'Buffer'}</small>{formatMinutes(Math.abs(entry.bufferMinutes))}</span>}
-      </div>
-      <div className="risk-why">
-        <RiskBadge risk={kind === 'details' ? null : entry.risk} needsDetails={kind === 'details'} />
-        <p>{kind === 'details' ? next : entry.reason}</p>
-        {kind !== 'details' && next && <p className="risk-next"><b>Next step:</b> {next}</p>}
-        {kind !== 'details' && entry.suggestedDeadline && <p className="risk-next"><b>Suggested deadline:</b> {formatInTz(entry.suggestedDeadline, tz)}</p>}
-        {kind === 'details' && <Link to="/orders" className="btn btn-ghost btn-sm">Edit in Orders</Link>}
-      </div>
+
+      {open && (
+        <div id={id} className="rk-body">
+          <div className="rk-compare">
+            <div><small>Promised deadline</small><b>{formatLongInTz(order.deadline, tz)}</b></div>
+            <ArrowRight size={20} className="rk-arrow" aria-hidden="true" />
+            <div className={entry.risk === 'high' ? 'is-late' : ''}><small>Expected finish</small><b>{finish ? formatLongInTz(finish, tz) : 'Not within the planning horizon'}</b></div>
+          </div>
+          <p className={`rk-sentence rk-sentence-${entry.risk}`}>{impactSentence(entry, buf)}</p>
+
+          <div className="rk-cols">
+            <div>
+              <h4>{risky ? 'Why is this at risk?' : 'How it was scheduled'}</h4>
+              <ul className="rk-why">
+                <li>{entry.reason}</li>
+                <li>Needs {formatMinutes(entry.prepTimeMinutes ?? order.prepTimeMinutes)} of preparation; work is planned to start {formatInTz(entry.scheduledStart, tz)}.</li>
+                {ahead.length > 0 ? (
+                  <li>
+                    Scheduled behind {ahead.length} {plural(ahead.length, 'order', 'orders')} with earlier deadlines ({formatMinutes(aheadMinutes)} of preparation):{' '}
+                    {ahead.map((p, i) => <span key={p.orderId}>{i > 0 && ', '}{byId[p.orderId].customerName} ({formatMinutes(p.minutes)})</span>)}.
+                  </li>
+                ) : entry.precededBy ? <li>No other order is scheduled ahead of it.</li> : null}
+              </ul>
+            </div>
+
+            {risky && (
+              <div>
+                <h4>What you can do</h4>
+                {entry.suggestedDeadline && (
+                  <div className="rk-suggest">
+                    <small>Suggested deadline · a recommendation, not a change</small>
+                    <b>{formatLongInTz(entry.suggestedDeadline, tz)}</b>
+                    <span>The customer's promised deadline stays {formatInTz(order.deadline, tz)} unless you change it.</span>
+                  </div>
+                )}
+                {rec && <p className="rk-rec">Recommended: {rec}</p>}
+                <div className="rk-actions">
+                  {onSimulate && <button type="button" className="btn btn-sm btn-primary" onClick={() => onSimulate({ orderId: order.id, deadline: entry.suggestedDeadline ?? order.deadline })}><FlaskConical size={14} aria-hidden="true" />{entry.suggestedDeadline ? 'Try the suggested deadline' : 'Simulate a schedule change'}</button>}
+                  <Link className="btn btn-sm" to="/calendar"><CalendarDays size={14} aria-hidden="true" />Review the schedule</Link>
+                  <Link className="btn btn-sm" to={`/orders?edit=${order.id}`}><Pencil size={14} aria-hidden="true" />Edit this order</Link>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <RiskTimeline entry={entry} planner={planner} tz={tz} />
+        </div>
+      )}
     </li>
   );
 }
 
-// Everything shown here is the scheduling engine's output (planner API); nothing is recalculated in the browser.
-export default function RiskSection({ planner, orders, eyebrow = 'Deadlines', title = "Let's protect your deadlines.", subtitle = 'See which orders need attention, what is causing the conflict, and what you can do next.' }) {
+function RulesDialog({ buf, onClose }) {
+  const b = formatMinutes(buf);
+  return (
+    <Modal title="How is risk calculated?" onClose={onClose}>
+      <p className="muted rules-intro">Conversa's scheduler places your open orders earliest-deadline-first inside your working hours and daily capacity, then compares each order's expected finish with its promised deadline.</p>
+      <dl className="rules">
+        <div><dt><RiskBadge risk="high" /></dt><dd>The expected finish is after the deadline, or the deadline has already passed.</dd></div>
+        <div><dt><RiskBadge risk="medium" /></dt><dd>It finishes on time, but with less than {b} of buffer.</dd></div>
+        <div><dt><RiskBadge risk="low" /></dt><dd>It finishes on time with at least {b} of buffer.</dd></div>
+        <div><dt><RiskBadge needsDetails /></dt><dd>Preparation time or deadline is missing, so the order cannot be reliably scheduled. It is never given a guessed finish time or risk.</dd></div>
+      </dl>
+      <p className="muted rules-foot">Completed and cancelled orders are ignored. Today only counts the working time that is left.</p>
+    </Modal>
+  );
+}
+
+// Everything shown is the scheduling engine's output (planner API); nothing is recalculated in the browser.
+export default function RiskSection({ planner, orders, onSimulate, eyebrow = 'Deadlines', title = "Let's protect your deadlines.", subtitle = 'See which orders need attention, what is causing the conflict, and what you can do next.' }) {
+  const [rules, setRules] = useState(false);
   const tz = planner.range.timezone;
+  const buf = planner.rules?.riskBufferMinutes ?? 240;
   const byId = Object.fromEntries(orders.map((o) => [o.id, o]));
-  const schedule = planner.schedule ?? [];
-  const entryById = Object.fromEntries(schedule.map((s) => [s.orderId, s]));
+  const schedule = (planner.schedule ?? []).filter((e) => byId[e.orderId]);
   const recFor = (id) => planner.recommendations.find((r) => r.orderId === id)?.action ?? null;
 
-  const high = planner.risks.filter((r) => r.risk === 'high');
-  const medium = planner.risks.filter((r) => r.risk === 'medium');
-  const low = schedule.filter((s) => s.risk === 'low');
-  const details = planner.unscheduledOrders;
+  const high = schedule.filter((e) => e.risk === 'high').sort(byUrgency);
+  const medium = schedule.filter((e) => e.risk === 'medium').sort(byUrgency);
+  const low = schedule.filter((e) => e.risk === 'low');
+  const details = planner.unscheduledOrders.filter((u) => byId[u.id]);
+  const overdue = high.filter((e) => e.kind === 'deadline_passed').length;
+  const predicted = high.length - overdue;
+  const atRisk = [...high, ...medium];
+
+  const sentences = [];
+  if (predicted > 0) sentences.push(`${predicted} ${plural(predicted, 'order is', 'orders are')} predicted to miss ${plural(predicted, 'its deadline', 'their deadlines')}.`);
+  if (overdue > 0) sentences.push(`${overdue} ${plural(overdue, 'order is', 'orders are')} already past due.`);
+  if (predicted + overdue === 0 && medium.length > 0) sentences.push(`No orders are predicted to miss their deadlines, but ${medium.length} ${plural(medium.length, 'has', 'have')} less than ${formatMinutes(buf)} of buffer.`);
+  if (high.length + medium.length === 0 && low.length > 0) sentences.push(low.length === 1 ? 'Your scheduled order is on track.' : `All ${low.length} scheduled orders are on track.`);
+  if (details.length > 0) sentences.push(`${details.length} ${plural(details.length, 'order needs', 'orders need')} details before ${plural(details.length, 'it', 'they')} can be scheduled.`);
   const total = high.length + medium.length + low.length + details.length;
 
-  const group = (label, hint, items, render, kind) => items.length > 0 && (
-    <section className={`risk-group risk-group-${kind}`} aria-label={label}>
-      <h3>{label} <span>{items.length}</span></h3>
-      <p className="muted">{hint}</p>
-      <ul className="plain-list">{items.map(render)}</ul>
-    </section>
-  );
-  const riskRow = (kind) => (r) => {
-    const id = r.orderId;
-    const entry = entryById[id] ?? r;
-    return byId[id] && <Row key={id} order={byId[id]} entry={entry} next={recFor(id)} tz={tz} kind={kind} />;
-  };
+  const rulesButton = <button type="button" className="rk-rules-link" onClick={() => setRules(true)}><Info size={14} aria-hidden="true" /> How is risk calculated?</button>;
 
   return (
     <>
-      <SectionHead eyebrow={eyebrow} title={title}>{subtitle}</SectionHead>
+      <SectionHead eyebrow={eyebrow} title={title} action={rulesButton}>{subtitle}</SectionHead>
       {total === 0 ? (
         <StateMessage message="No open orders to schedule." />
       ) : (
-        <div className="risk-groups">
-          {group('High risk', 'Estimated to finish after the deadline, or the deadline has passed.', high, riskRow('high'), 'high')}
-          {group('Medium risk', 'Fits, but with less than four hours to spare.', medium, riskRow('medium'), 'medium')}
-          {group('Needs details', 'Left out of scheduling until a deadline and preparation time are set. Nothing is guessed.', details, (u) => byId[u.id] && <Row key={u.id} order={byId[u.id]} next={NEEDS[u.reason]} tz={tz} kind="details" />, 'details')}
-          {group('On track', 'Comfortable buffer before the deadline.', low, riskRow('low'), 'low')}
-        </div>
+        <>
+          {sentences.length > 0 && <p className="rk-headline" aria-live="polite">{sentences.join(' ')}</p>}
+          <dl className="rk-summary">
+            <div className="rk-sum rk-sum-high"><dt><RiskBadge risk="high" /></dt><dd><CountUp value={high.length} /></dd><small>Predicted to miss the deadline</small></div>
+            <div className="rk-sum rk-sum-medium"><dt><RiskBadge risk="medium" /></dt><dd><CountUp value={medium.length} /></dd><small>Less than {formatMinutes(buf)} of buffer</small></div>
+            <div className="rk-sum rk-sum-low"><dt><RiskBadge risk="low" /></dt><dd><CountUp value={low.length} /></dd><small>{formatMinutes(buf)} or more of buffer</small></div>
+            <div className="rk-sum rk-sum-details"><dt><RiskBadge needsDetails /></dt><dd><CountUp value={details.length} /></dd><small>Missing preparation time or deadline</small></div>
+          </dl>
+
+          {atRisk.length > 0 && (
+            <section className="rk-group" aria-label="At risk">
+              <h3>At risk <span>{atRisk.length}</span></h3>
+              <ol className="rk-list">{atRisk.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
+            </section>
+          )}
+
+          {details.length > 0 && (
+            <section className="rk-group" aria-label="Needs details">
+              <h3>Needs details <span>{details.length}</span></h3>
+              <p className="muted">Left out of scheduling until complete. Nothing is guessed: no finish time and no risk is assigned.</p>
+              <ul className="rk-list">
+                {details.map((u) => {
+                  const o = byId[u.id];
+                  return (
+                    <li key={u.id} className="rk rk-details">
+                      <div className="rk-head rk-head-details">
+                        <div className="rk-who"><strong>{o.customerName}</strong><span>{o.item}{qty(o)}</span></div>
+                        <div className="rk-when"><small>Missing</small>{MISSING[u.reason]}</div>
+                        <div className="rk-when"><small>Promised deadline</small>{o.deadline ? formatInTz(o.deadline, tz) : 'Not set'}</div>
+                        <RiskBadge needsDetails />
+                        <Link className="btn btn-sm btn-primary" to={`/orders?edit=${o.id}`}>Complete order details</Link>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+
+          {low.length > 0 && (
+            <section className="rk-group" aria-label="On track">
+              <h3>On track <span>{low.length}</span></h3>
+              <ol className="rk-list">{low.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={null} buf={buf} />)}</ol>
+            </section>
+          )}
+        </>
       )}
+      {rules && <RulesDialog buf={buf} onClose={() => setRules(false)} />}
     </>
   );
 }

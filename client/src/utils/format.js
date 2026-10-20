@@ -50,3 +50,5 @@ export function relativeTime(iso) {
 }
 export const isDemoOrder = (o) => typeof o?.notes === 'string' && o.notes.startsWith('[DEMO]');
 export const OPEN = ['pending', 'confirmed', 'in_progress'];
+export const formatLongInTz = (iso, tz) => (iso ? new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '—');
+export const formatDayInTz = (isoDate) => new Date(`${isoDate}T00:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });

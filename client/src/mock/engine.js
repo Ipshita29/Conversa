@@ -102,7 +102,7 @@ export function buildPlanner(orders, from = new Date(), rangeDays = 7) {
     workload: { pendingMinutes, availableMinutes, utilisationPercent: availableMinutes ? Math.round((pendingMinutes / availableMinutes) * 100) : 0 },
     days: shown, risks, unscheduledOrders: unscheduled, recommendations,
     // Demo mock has no clock-level schedule: finish times are unknown (null), risks come from the day-based rule above.
-    schedule: Object.entries(results).map(([orderId, r]) => ({ orderId, risk: r.risk, reason: r.reason, bufferMinutes: null, shortfallMinutes: null, suggestedDeadline: null, scheduledStart: null, scheduledEnd: null })),
+    schedule: Object.entries(results).map(([orderId, r]) => ({ orderId, risk: r.risk, kind: r.risk === 'high' ? 'late' : r.risk === 'medium' ? 'tight' : 'on_track', reason: r.reason, deadline: byId[orderId]?.deadline ?? null, bufferMinutes: null, shortfallMinutes: null, suggestedDeadline: null, scheduledStart: null, scheduledEnd: null })),
   };
 }
 
