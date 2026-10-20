@@ -1,103 +1,46 @@
-import { Link } from 'react-router-dom';
-import { getDashboard } from '../services/api.js';
-import useAsync from '../hooks/useAsync.js';
-import { formatMinutes, formatDateTime, timeLeft } from '../utils/format.js';
-import StatCard from '../components/StatCard.jsx';
-import Panel from '../components/Panel.jsx';
-import PageHeader from '../components/PageHeader.jsx';
+import { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
+import useWorkspace from '../hooks/useWorkspace.js';
+import { scrollToSection } from '../utils/scroll.js';
+import Reveal from '../components/Reveal.jsx';
 import StateMessage from '../components/StateMessage.jsx';
-import WorkloadChart from '../components/WorkloadChart.jsx';
-import { RiskBadge, StatusBadge } from '../components/Badge.jsx';
+import HeroSection from '../components/HeroSection.jsx';
+import TodaySection from '../components/TodaySection.jsx';
+import RiskSection from '../components/RiskSection.jsx';
+import SimulationPanel from '../components/SimulationPanel.jsx';
+import InboxSection from '../components/InboxSection.jsx';
 import '../css/Dashboard.css';
 
+// The home workspace: one continuous page that tells the story top to bottom.
 export default function Dashboard() {
-  const { status, data, error, reload } = useAsync(getDashboard);
+  const { status, data, error, reload } = useWorkspace();
+  const { hash } = useLocation();
 
-  const header = <PageHeader title="Dashboard" subtitle="Your orders, workload, and what to do next." />;
-  if (status === 'loading' && !data) return <section className="page dashboard">{header}<StateMessage kind="loading" message="Loading dashboard…" /></section>;
-  if (status === 'error') return <section className="page dashboard">{header}<StateMessage kind="error" message={`Couldn't load the dashboard. ${error.message}`} onRetry={reload} /></section>;
+  useEffect(() => {
+    if (!data || !hash) return undefined;
+    const t = setTimeout(() => scrollToSection(hash.slice(1)), 120); // e.g. /inbox redirects to /#inbox
+    return () => clearTimeout(t);
+  }, [data, hash]);
 
-  const { stats, workload, urgentOrders, upcomingDeadlines, recommendations } = data;
-  const usedPct = workload.availableMinutes ? Math.round((workload.pendingMinutes / workload.availableMinutes) * 100) : 0;
-  const overloaded = workload.pendingMinutes > workload.availableMinutes;
+  if (status === 'loading' && !data) {
+    return <section className="page home"><div className="ws-section" id="overview"><HeroSection /></div><StateMessage kind="loading" message="Loading your workspace…" /></section>;
+  }
+  if (status === 'error') {
+    return <section className="page home"><div className="ws-section" id="overview"><HeroSection /></div><StateMessage kind="error" message={`Couldn't load your workspace. ${error.message}`} onRetry={reload} /></section>;
+  }
 
+  const { dashboard, planner, orders } = data;
   return (
-    <section className="page dashboard">
-      {header}
-      {stats.total === 0 ? (
-        <StateMessage message="No orders yet. Once orders come in, your dashboard will appear here.">
-          <Link className="btn btn-primary" to="/orders">Add your first order</Link>
-        </StateMessage>
-      ) : (
-        <>
-          <div className="stat-grid">
-            <StatCard label="Total orders" value={stats.total} />
-            <StatCard label="Pending" value={stats.pending} tone="warn" />
-            <StatCard label="In progress" value={stats.inProgress} tone="info" />
-            <StatCard label="Completed" value={stats.completed} tone="ok" />
-            <StatCard label="At risk" value={stats.atRisk} tone="danger" />
-          </div>
-
-          <div className="dash-grid">
-            <Panel title="Workload" subtitle="Pending preparation vs. available working hours (next 7 days)">
-              <p className="workload-figure">
-                <strong>{formatMinutes(workload.pendingMinutes)}</strong> of {formatMinutes(workload.availableMinutes)} <span className="muted">({usedPct}%)</span>
-              </p>
-              <div className="meter" role="progressbar" aria-valuenow={Math.min(usedPct, 100)} aria-valuemin="0" aria-valuemax="100" aria-label="Workload used">
-                <div className={overloaded ? 'meter-fill over' : 'meter-fill'} style={{ width: `${Math.min(usedPct, 100)}%` }} />
-              </div>
-              <WorkloadChart daily={workload.daily} />
-            </Panel>
-
-            <Panel title="Next actions" subtitle="Prioritised recommendations">
-              {recommendations.length === 0 ? (
-                <StateMessage message="You're all caught up." />
-              ) : (
-                <ol className="reco-list">
-                  {recommendations.map((r) => (
-                    <li key={r.id} className={`reco reco-${r.priority}`}>
-                      <span className="pill">{r.priority}</span>
-                      <div><strong>{r.action}</strong><p>{r.reason}</p></div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <Link className="btn btn-sm" to="/operations">Open Operations</Link>
-            </Panel>
-
-            <Panel title="Urgent orders">
-              {urgentOrders.length === 0 ? (
-                <StateMessage message="No urgent orders." />
-              ) : (
-                <ul className="order-list">
-                  {urgentOrders.map((o) => (
-                    <li key={o.id}>
-                      <div>
-                        <strong>{o.customerName}</strong>
-                        <p>{o.item}</p>
-                        <small className="muted"><StatusBadge status={o.status} /> {formatMinutes(o.prepTimeMinutes)} prep</small>
-                      </div>
-                      <div className="order-meta"><RiskBadge risk={o.risk} /><small>{timeLeft(o.deadline)}</small></div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Panel>
-
-            <Panel title="Upcoming deadlines">
-              {upcomingDeadlines.length === 0 ? (
-                <StateMessage message="No upcoming deadlines." />
-              ) : (
-                <ul className="deadline-list">
-                  {upcomingDeadlines.map((d) => (
-                    <li key={d.id}><strong>{d.customerName}</strong><time dateTime={d.deadline}>{formatDateTime(d.deadline)}</time></li>
-                  ))}
-                </ul>
-              )}
-            </Panel>
-          </div>
-        </>
-      )}
+    <section className="page home">
+      <Reveal as="section" id="overview" className="ws-section"><HeroSection stats={dashboard.stats} /></Reveal>
+      <Reveal as="section" id="today" className="ws-section">
+        {dashboard.stats.total === 0
+          ? <StateMessage message="No orders yet. Add your first order, or draft one from a customer message in the inbox below." />
+          : <TodaySection dashboard={dashboard} planner={planner} orders={orders} />}
+      </Reveal>
+      <Reveal as="section" id="deadlines" className="ws-section"><RiskSection planner={planner} orders={orders} /></Reveal>
+      <Reveal as="section" id="simulation" className="ws-section"><SimulationPanel planner={planner} orders={orders} onApplied={reload} /></Reveal>
+      <Reveal as="section" id="inbox" className="ws-section"><InboxSection orders={orders} onChanged={reload} /></Reveal>
     </section>
   );
 }

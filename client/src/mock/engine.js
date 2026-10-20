@@ -98,9 +98,11 @@ export function buildPlanner(orders, from = new Date(), rangeDays = 7) {
   recommendations.sort((a, b) => rank[a.priority] - rank[b.priority]);
 
   return {
-    range: { from: shown[0].date, days: rangeDays },
+    range: { from: shown[0].date, days: rangeDays, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     workload: { pendingMinutes, availableMinutes, utilisationPercent: availableMinutes ? Math.round((pendingMinutes / availableMinutes) * 100) : 0 },
     days: shown, risks, unscheduledOrders: unscheduled, recommendations,
+    // Demo mock has no clock-level schedule: finish times are unknown (null), risks come from the day-based rule above.
+    schedule: Object.entries(results).map(([orderId, r]) => ({ orderId, risk: r.risk, reason: r.reason, bufferMinutes: null, shortfallMinutes: null, suggestedDeadline: null, scheduledStart: null, scheduledEnd: null })),
   };
 }
 

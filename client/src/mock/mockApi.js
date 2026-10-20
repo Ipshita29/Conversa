@@ -104,6 +104,9 @@ function simulate(body) {
     planner: after,
     comparison: {
       pendingMinutesDelta: after.workload.pendingMinutes - before.workload.pendingMinutes,
+      currentWorkload: before.workload,
+      simulatedWorkload: after.workload,
+      suggestedAdjustments: [],
       newRisks: after.risks.filter((r) => !beforeRisk[r.orderId] || (beforeRisk[r.orderId].risk === 'medium' && r.risk === 'high')),
       resolvedRisks: before.risks.filter((r) => !afterRisk[r.orderId]).map((r) => ({ orderId: r.orderId })),
     },
@@ -179,6 +182,13 @@ export async function handleMockRequest(method, path, body = {}) {
   }
 
   if (method === 'GET' && p === '/conversations') return { items: clone(conversations) };
+  if (method === 'PATCH' && (m = p.match(/^\/conversations\/([^/]+)$/))) {
+    const c = conversations.find((x) => x.id === m[1]);
+    if (!c) throw new ApiError(404, 'NOT_FOUND', `Conversation '${m[1]}' not found.`);
+    if (body.read === true) { c.messages.forEach((x) => { x.read = true; }); c.unread = 0; }
+    if ('orderId' in body) c.orderId = body.orderId;
+    return clone(c);
+  }
 
   throw new ApiError(404, 'NOT_FOUND', `Demo API has no route ${method} ${p}.`);
 }
