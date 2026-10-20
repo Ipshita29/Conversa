@@ -34,3 +34,19 @@ export function toLocalInput(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 export const fromLocalInput = (v) => (v ? new Date(v).toISOString() : null);
+
+// ---- Business-timezone helpers (the server returns planner dates in the seller's business timezone) ----
+export const greeting = (d = new Date()) => (d.getHours() < 12 ? 'Good morning' : d.getHours() < 18 ? 'Good afternoon' : 'Good evening');
+export const dateKey = (iso, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+export const formatInTz = (iso, tz) => (iso ? new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '—');
+export const formatTimeInTz = (iso, tz) => (iso ? new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '—');
+export function relativeTime(iso) {
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (m < 1) return 'Just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+export const isDemoOrder = (o) => typeof o?.notes === 'string' && o.notes.startsWith('[DEMO]');
+export const OPEN = ['pending', 'confirmed', 'in_progress'];

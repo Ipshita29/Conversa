@@ -64,3 +64,5 @@ export const connectIntegration = (channel) => request('POST', `/integrations/${
 // Not in docs/api-contract.md yet (proposed addition, implemented in server/README.md): conversations stored from
 // Meta webhooks. Demo mode returns clearly-labelled sample conversations.
 export const getConversations = () => request('GET', '/conversations');
+// patch: { read: true } and/or { orderId: string | null }
+export const updateConversation = (id, patch) => request('PATCH', `/conversations/${encodeURIComponent(id)}`, patch);
