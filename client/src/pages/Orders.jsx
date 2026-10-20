@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Pencil } from 'lucide-react';
 import { listOrders, createOrder, getOrder, updateOrder } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
@@ -42,7 +43,14 @@ function OrderEditor({ orderId, onClose, onSaved }) {
 export default function Orders() {
   const [filters, setFilters] = useState({ status: '', paymentStatus: '', source: '' });
   const [search, setSearch] = useState('');
+  const [params, setParams] = useSearchParams();
   const [editing, setEditing] = useState(null); // null | 'new' | orderId
+
+  // /orders?edit=<id> (used by "Complete order details") opens the existing edit dialog.
+  useEffect(() => {
+    const id = params.get('edit');
+    if (id) { setEditing(id); setParams({}, { replace: true }); }
+  }, [params, setParams]);
   const [actionError, setActionError] = useState(null);
   const [busyId, setBusyId] = useState(null);
 

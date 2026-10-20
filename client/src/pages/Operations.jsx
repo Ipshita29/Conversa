@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import useWorkspace from '../hooks/useWorkspace.js';
+import { scrollToSection } from '../utils/scroll.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Reveal from '../components/Reveal.jsx';
 import StateMessage from '../components/StateMessage.jsx';
@@ -10,6 +12,8 @@ import '../css/Operations.css';
 
 export default function Operations() {
   const { status, data, error, reload } = useWorkspace();
+  const [prefill, setPrefill] = useState(null);
+  const simulate = (p) => { setPrefill({ ...p, nonce: Date.now() }); scrollToSection('simulation'); };
   const header = <PageHeader eyebrow="Operations" title="Where your capacity stands." subtitle="Progress, deadline risks and what-if planning in one place." />;
   if (status === 'loading' && !data) return <section className="page operations">{header}<StateMessage kind="loading" message="Analysing workload…" /></section>;
   if (status === 'error') return <section className="page operations">{header}<StateMessage kind="error" message={`Couldn't load operations data. ${error.message}`} onRetry={reload} /></section>;
@@ -31,8 +35,8 @@ export default function Operations() {
         )}
       </Reveal>
       <Reveal as="section" className="ws-section"><TodaySection dashboard={dashboard} planner={planner} orders={orders} eyebrow="Progress" title="Today's progress." subtitle="What is due or scheduled today, and how far along it is." /></Reveal>
-      <Reveal as="section" className="ws-section"><RiskSection planner={planner} orders={orders} /></Reveal>
-      <Reveal as="section" className="ws-section"><SimulationPanel planner={planner} orders={orders} onApplied={reload} /></Reveal>
+      <Reveal as="section" id="deadlines" className="ws-section"><RiskSection planner={planner} orders={orders} onSimulate={simulate} /></Reveal>
+      <Reveal as="section" id="simulation" className="ws-section"><SimulationPanel planner={planner} orders={orders} onApplied={reload} prefill={prefill} /></Reveal>
     </section>
   );
 }

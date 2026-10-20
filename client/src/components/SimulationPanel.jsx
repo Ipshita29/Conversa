@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FlaskConical } from 'lucide-react';
 import { simulatePlanner, createOrder, updateOrder } from '../services/api.js';
 import { formatInTz, formatMinutes, toLocalInput, fromLocalInput, OPEN } from '../utils/format.js';
@@ -9,7 +9,7 @@ const RANK = { high: 0, medium: 1, low: 2 };
 const EMPTY = { customerName: '', item: '', prep: '', deadline: '', orderId: '' };
 
 // Runs POST /planner/simulate. A simulation is read-only on the server; saving is a separate, explicitly confirmed action.
-export default function SimulationPanel({ planner, orders, onApplied, eyebrow = 'What-if', title = 'What if another order comes in?', subtitle = "Try a rush order before committing. Understand the impact on the work you've already promised." }) {
+export default function SimulationPanel({ planner, orders, onApplied, prefill, eyebrow = 'What-if', title = 'What if another order comes in?', subtitle = "Try a rush order before committing. Understand the impact on the work you've already promised." }) {
   const tz = planner.range.timezone;
   const openOrders = orders.filter((o) => OPEN.includes(o.status));
   const [mode, setMode] = useState('add');
@@ -20,6 +20,14 @@ export default function SimulationPanel({ planner, orders, onApplied, eyebrow = 
   const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // "Simulate a schedule change" / "Try this deadline" from the deadlines list: preselect the order and deadline.
+  // It only fills the form; the seller still runs the simulation, and nothing is saved.
+  useEffect(() => {
+    if (!prefill) return;
+    setMode('change'); setSim(null); setError(null); setDone(null); setConfirming(false);
+    setForm({ ...EMPTY, orderId: prefill.orderId, deadline: toLocalInput(prefill.deadline) });
+  }, [prefill?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ready = mode === 'add' ? form.customerName.trim() && form.item.trim() && form.prep !== '' && Number(form.prep) >= 0 && form.deadline : form.orderId && form.deadline;
 
