@@ -102,6 +102,14 @@ export function buildPlanner(orders, from = new Date(), rangeDays = 7) {
     workload: { pendingMinutes, availableMinutes, utilisationPercent: availableMinutes ? Math.round((pendingMinutes / availableMinutes) * 100) : 0 },
     days: shown, risks, unscheduledOrders: unscheduled, recommendations,
     // Demo mock has no clock-level schedule: finish times are unknown (null), risks come from the day-based rule above.
+    // Demo mock only: a basic ranking from the mock's day-based risks (the real scheduler gives much richer reasons).
+    nextMoves: [...open.map((o) => ({ o, r: results[o.id] }))].map(({ o, r }) => {
+      const kind = !r ? 'needs_details' : r.risk === 'high' ? 'late' : r.risk === 'medium' ? 'tight' : 'on_track';
+      const tier = { late: 1, tight: 2, needs_details: 3, on_track: 4 }[kind];
+      const state = { late: 'Predicted to be late', tight: 'Tight buffer', needs_details: 'Needs details', on_track: 'On track' }[kind];
+      return { tier, d: o.deadline ? new Date(o.deadline).getTime() : Infinity, m: { orderId: o.id, kind, state, workSequence: r ? Object.keys(results).indexOf(o.id) + 1 : null, action: kind === 'needs_details' ? `Confirm details with ${o.customerName}` : `Work on ${o.item} for ${o.customerName}`, why: r?.reason ?? 'Missing a preparation time or deadline, so it cannot be scheduled.', recovery: null } };
+    }).sort((a, b) => a.tier - b.tier || a.d - b.d).map((x, i) => ({ rank: i + 1, ...x.m })),
+    nextMovesRule: 'Predicted late first, then tight buffers, then missing details, then on-track work. Earliest deadline first within each group.',
     schedule: Object.entries(results).map(([orderId, r]) => ({ orderId, risk: r.risk, kind: r.risk === 'high' ? 'late' : r.risk === 'medium' ? 'tight' : 'on_track', reason: r.reason, deadline: byId[orderId]?.deadline ?? null, bufferMinutes: null, shortfallMinutes: null, suggestedDeadline: null, scheduledStart: null, scheduledEnd: null })),
   };
 }
