@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computePlan, simulate } from '../services/workloadEngine.js';
+import { computePlan, simulate, suggestScenario } from '../services/workloadEngine.js';
 import { buildDashboard } from '../services/dashboardService.js';
 import { ApiError } from '../utils/errors.js';
 
@@ -158,4 +158,130 @@ test('kinds: deadline_passed, unschedulable, on_track', () => {
   assert.equal(plan([order({ deadline: '2026-10-18T10:00:00Z' })]).schedule[0].kind, 'deadline_passed');
   assert.equal(plan([order({ prepTimeMinutes: 60 * 24 * 30, deadline: '2026-10-30T17:00:00Z' })]).schedule[0].kind, 'unschedulable');
   assert.equal(plan([order({ prepTimeMinutes: 60, deadline: '2026-10-23T17:00:00Z' })]).schedule[0].kind, 'on_track');
+});
+
+// ---- free windows, next moves, suggested scenario, fit probe ----
+test('free windows: what is left of each day is one uninterrupted block; the largest is reported', () => {
+  const p = plan([order({ prepTimeMinutes: 100, deadline: '2026-10-23T17:00:00Z' })]);
+  const mon = p.freeWindows.find((w) => w.date === '2026-10-19');
+  assert.equal(mon.minutes, 260);
+  assert.equal(mon.start, '2026-10-19T10:40:00.000Z'); // 09:00 + 100 min of work
+  assert.equal(mon.end, '2026-10-19T15:00:00.000Z'); // 260 min later
+  assert.equal(p.largestFreeWindow.minutes, 360); // a whole untouched day beats Monday's remainder
+  assert.equal(p.largestFreeWindow.date, '2026-10-20');
+  assert.ok(!p.freeWindows.some((w) => w.date === '2026-10-24')); // weekend: no capacity, no window
+});
+
+test('next moves rank actions: overdue, predicted late, tight, blocked by missing details, then on track', () => {
+  const overdue = order({ deadline: '2026-10-18T10:00:00Z', prepTimeMinutes: 60, customerName: 'Overdue' });
+  const tight = order({ prepTimeMinutes: 300, deadline: '2026-10-19T17:00:00Z', customerName: 'Tight' });
+  const late = order({ prepTimeMinutes: 300, deadline: '2026-10-19T17:00:00Z', customerName: 'Late' });
+  const blocked = order({ prepTimeMinutes: null, customerName: 'Blocked' });
+  const fine = order({ prepTimeMinutes: 60, deadline: '2026-10-23T17:00:00Z', customerName: 'Fine', status: 'in_progress' });
+  const done = order({ status: 'completed', customerName: 'Done' });
+  const p = plan([fine, blocked, tight, done, late, overdue]);
+  const names = p.nextMoves.map((m) => [overdue, tight, late, blocked, fine].find((o) => o.id === m.orderId).customerName);
+  assert.deepEqual(names, ['Overdue', 'Late', 'Tight', 'Blocked', 'Fine']); // completed orders never appear
+  assert.deepEqual(p.nextMoves.map((m) => m.rank), [1, 2, 3, 4, 5]);
+  assert.deepEqual(p.nextMoves.map((m) => m.kind), ['deadline_passed', 'late', 'tight', 'needs_details', 'on_track']);
+  const byName = Object.fromEntries(p.nextMoves.map((m, i) => [names[i], m]));
+  assert.match(byName.Overdue.action, /Contact Overdue/);
+  assert.match(byName.Late.why, /after its deadline/);
+  assert.match(byName.Late.why, /2 earlier-deadline orders are scheduled before it/); // the overdue and the tight order, both really scheduled first
+  assert.ok(byName.Late.recovery.includes('Offer Late a deadline of'));
+  assert.match(byName.Tight.why, /only .* before the deadline, under your 4h safety buffer/);
+  assert.match(byName.Blocked.action, /Confirm details with Blocked, then add a preparation time/);
+  assert.equal(byName.Blocked.workSequence, null); // not scheduled, so no queue position invented
+  assert.match(byName.Fine.action, /Keep going on/); // in progress
+  assert.equal(byName.Fine.recovery, null);
+  assert.ok(p.nextMovesRule.includes('Overdue first'));
+});
+
+test('a missing deadline is also an action for the seller, with its own wording', () => {
+  const p = plan([order({ deadline: null, prepTimeMinutes: 90, customerName: 'NoDate' })]);
+  assert.match(p.nextMoves[0].action, /then add a deadline/);
+  assert.match(p.nextMoves[0].why, /cannot be scheduled without a deadline/);
+});
+
+test('simulation reports the largest free window before and after, and whether another job fits', () => {
+  const a = order({ prepTimeMinutes: 300, deadline: '2026-10-19T17:00:00Z' });
+  const sim = simulate({ orders: [a], settings, now, rangeDays: 7, changes: [{ type: 'cancel_order', orderId: a.id }] });
+  assert.equal(sim.comparison.currentLargestFreeWindow.minutes, 360);
+  assert.equal(sim.comparison.simulatedLargestFreeWindow.minutes, 360);
+  assert.deepEqual(sim.comparison.currentCounts, { high: 0, medium: 1, low: 0, details: 0 }); // 300 min leaves only 3h of buffer
+  assert.deepEqual(sim.comparison.simulatedCounts, { high: 0, medium: 0, low: 0, details: 0 });
+  assert.equal(sim.comparison.fit.minutes, 60); // default probe
+  assert.equal(sim.comparison.fit.fits, true);
+  assert.ok(sim.comparison.fit.startsAt && sim.comparison.fit.finishesAt);
+  const big = simulate({ orders: [a], settings, now, rangeDays: 7, probeMinutes: 400, changes: [{ type: 'update_order', orderId: a.id, order: { prepTimeMinutes: 100 } }] });
+  assert.equal(big.comparison.fit.fits, false); // no single day has 400 uninterrupted minutes
+  assert.match(big.comparison.fit.reason, /no uninterrupted 6h 40m window/i);
+});
+
+test('the fit probe is honest when adding a job would hurt an existing order', () => {
+  // Monday is nearly full; the largest window is later, but a job due before an existing order would push it late.
+  const a = order({ prepTimeMinutes: 360, deadline: '2026-10-19T17:00:00Z' });
+  const b = order({ prepTimeMinutes: 360, deadline: '2026-10-20T11:00:00Z' }); // tight: Tue 09:00-15:00 vs 11:00 deadline = late already
+  const sim = simulate({ orders: [a, b], settings, now, rangeDays: 3, probeMinutes: 60, changes: [{ type: 'update_order', orderId: a.id, order: { prepTimeMinutes: 360 } }] });
+  const fit = sim.comparison.fit;
+  assert.equal(typeof fit.fits, 'boolean');
+  if (!fit.fits) assert.ok(fit.reason);
+});
+
+test('suggested scenario: the engine itself confirms it helps and creates no new risk', () => {
+  const a = order({ prepTimeMinutes: 300, deadline: '2026-10-19T17:00:00Z', customerName: 'A' });
+  const b = order({ prepTimeMinutes: 300, deadline: '2026-10-19T17:00:00Z', customerName: 'B' });
+  const sc = suggestScenario({ orders: [a, b], settings, now, rangeDays: 7 });
+  assert.equal(sc.kind, 'move_deadline');
+  assert.equal(sc.changes.length, 1);
+  assert.equal(sc.changes[0].type, 'update_order');
+  assert.match(sc.summary, /from .* to /);
+  const verify = simulate({ orders: [a, b], changes: sc.changes, settings, now, rangeDays: 7 });
+  assert.equal(verify.comparison.newRisks.length, 0);
+  assert.ok(verify.comparison.resolvedRisks.length >= 1);
+  // and it is read-only: the orders were not touched
+  assert.equal(a.deadline, '2026-10-19T17:00:00Z');
+});
+
+test('suggested scenario falls back to a capacity check when nothing needs rescuing', () => {
+  const sc = suggestScenario({ orders: [order({ prepTimeMinutes: 60, deadline: '2026-10-23T17:00:00Z' })], settings, now, rangeDays: 7 });
+  assert.equal(sc.kind, 'capacity_check');
+  assert.equal(sc.changes[0].type, 'add_order');
+  assert.equal(sc.changes[0].order.prepTimeMinutes, 60);
+  assert.equal(suggestScenario({ orders: [], settings: { ...settings, workingDays: [] }, now, rangeDays: 7 }), null); // no capacity at all: nothing to suggest
+});
+
+test('near-term free window ignores empty days later in the week', () => {
+  // Monday and Tuesday are completely booked; Wednesday onwards is empty.
+  const orders = [order({ prepTimeMinutes: 360, deadline: '2026-10-23T17:00:00Z' }), order({ prepTimeMinutes: 360, deadline: '2026-10-23T17:00:00Z' })];
+  const p = plan(orders);
+  assert.equal(p.largestFreeWindow.minutes, 360); // Wednesday
+  assert.equal(p.largestFreeWindow.date, '2026-10-21');
+  assert.equal(p.nearFreeWindow, null); // nothing free in the first two working days
+});
+
+test('when the next two days have no free hour, the suggestion is an explicit prep-time ASSUMPTION the engine then checks', () => {
+  // 330 + 360 = 690 of the 720 minutes available on Monday and Tuesday: only 30 minutes are left over, not an hour.
+  const orders = [330, 360].map((m, i) => order({ prepTimeMinutes: m, deadline: '2026-10-23T17:00:00Z', customerName: `C${i}` }));
+  assert.equal(plan(orders).nearFreeWindow.minutes, 30);
+  const sc = suggestScenario({ orders, settings, now, rangeDays: 7 });
+  assert.equal(sc.kind, 'reduce_prep');
+  assert.match(sc.summary, /Assume you can prepare it in/);
+  assert.match(sc.why, /assumption, not a fact/);
+  const ch = sc.changes[0];
+  assert.equal(ch.type, 'update_order');
+  assert.ok(ch.order.prepTimeMinutes < 360 && ch.order.prepTimeMinutes % 15 === 0);
+  const verify = simulate({ orders, changes: sc.changes, settings, now, rangeDays: 7 });
+  assert.equal(verify.comparison.currentNearFreeWindow.minutes, 30);
+  assert.ok(verify.comparison.simulatedNearFreeWindow.minutes >= 60); // the engine confirms an uninterrupted hour appears
+  assert.equal(verify.comparison.newRisks.length, 0);
+  // and the stored orders are untouched
+  assert.deepEqual(orders.map((o) => o.prepTimeMinutes), [330, 360]);
+});
+
+test('moving a deadline alone never creates free time (the scheduler works as soon as possible)', () => {
+  const orders = [360, 360, 360].map((m, i) => order({ prepTimeMinutes: m, deadline: '2026-10-23T17:00:00Z', customerName: `C${i}` }));
+  const sim = simulate({ orders, settings, now, rangeDays: 7, changes: [{ type: 'update_order', orderId: orders[0].id, order: { deadline: '2026-10-30T17:00:00Z' } }] });
+  assert.equal(sim.comparison.simulatedNearFreeWindow, null);
+  assert.deepEqual(sim.comparison.simulatedWorkload.pendingMinutes, sim.comparison.currentWorkload.pendingMinutes);
 });

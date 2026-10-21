@@ -239,3 +239,23 @@ test('conversations: webhook messages start unread; PATCH marks them read and li
   assert.equal((await call('PATCH', '/conversations/aaaaaaaaaaaaaaaaaaaaaaaa', { read: true })).status, 404);
   assert.equal((await call('PATCH', '/conversations/xyz', { read: true })).status, 404);
 });
+
+test('planner returns next moves and a suggested scenario; simulate validates probeMinutes and reports free windows', { skip }, async () => {
+  await call('POST', '/orders', { customerName: 'Moves A', item: 'Cake', prepTimeMinutes: 120, deadline: future(60) });
+  await call('POST', '/orders', { customerName: 'Moves B', item: 'Brownies' });
+  const pl = (await call('GET', '/planner?days=7')).json;
+  assert.ok(Array.isArray(pl.nextMoves) && pl.nextMoves.length >= 2);
+  assert.deepEqual(pl.nextMoves.map((m) => m.rank), pl.nextMoves.map((_, i) => i + 1));
+  assert.ok(pl.nextMoves.every((m) => m.action && m.why && m.state));
+  assert.ok('largestFreeWindow' in pl && Array.isArray(pl.freeWindows));
+  assert.ok(pl.suggestedScenario === null || (pl.suggestedScenario.changes.length >= 1 && pl.suggestedScenario.summary));
+  const ok = await call('POST', '/planner/simulate', { changes: [{ type: 'add_order', order: { customerName: 'X', item: 'Y', prepTimeMinutes: 30, deadline: future(48) } }], probeMinutes: 45 });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.comparison.fit.minutes, 45);
+  assert.ok('simulatedLargestFreeWindow' in ok.json.comparison);
+  for (const bad of [5, 'x', 1000, 1.5]) assert.equal((await call('POST', '/planner/simulate', { changes: [{ type: 'cancel_order', orderId: 'aaaaaaaaaaaaaaaaaaaaaaaa' }], probeMinutes: bad })).status, 422);
+  // the suggestion is read-only: building it changed nothing
+  const before = JSON.stringify((await call('GET', '/orders?pageSize=100')).json);
+  await call('GET', '/planner?days=7');
+  assert.equal(JSON.stringify((await call('GET', '/orders?pageSize=100')).json), before);
+});
