@@ -4,7 +4,7 @@ import Reveal from '../components/Reveal.jsx';
 import StateMessage from '../components/StateMessage.jsx';
 import HeroSection from '../components/HeroSection.jsx';
 import TodaySection from '../components/TodaySection.jsx';
-import UrgentOrders from '../components/UrgentOrders.jsx';
+import PriorityCarousel from '../components/PriorityCarousel.jsx';
 import ExploreCards from '../components/ExploreCards.jsx';
 import useHashScroll from '../hooks/useHashScroll.js';
 import '../css/Dashboard.css';
@@ -12,7 +12,7 @@ import '../css/Dashboard.css';
 // Old bookmarks like /#inbox or /#deadlines now live on their own pages.
 const MOVED = { inbox: '/inbox', deadlines: '/deadlines', next: '/deadlines', simulation: '/deadlines#simulation' };
 
-// The home page is an overview: the hero, today's numbers, the few urgent orders, and doors to Deadlines and Inbox.
+// The home page is an overview: the hero, today's numbers, the priority carousel, and doors to Deadlines and Inbox.
 export default function Dashboard() {
   const { status, data, error, reload } = useWorkspace();
   const { hash } = useLocation();
@@ -36,7 +36,7 @@ export default function Dashboard() {
           ? <StateMessage message="No orders yet. Add your first order, or draft one from a customer message in the Inbox." />
           : <TodaySection dashboard={dashboard} planner={planner} orders={orders} />}
       </Reveal>
-      {dashboard.stats.total > 0 && <Reveal as="section" id="urgent" className="ws-section"><UrgentOrders dashboard={dashboard} planner={planner} orders={orders} /></Reveal>}
+      {dashboard.stats.total > 0 && <Reveal as="section" id="urgent" className="ws-section"><PriorityCarousel planner={planner} orders={orders} /></Reveal>}
       <Reveal as="section" id="explore" className="ws-section"><ExploreCards planner={planner} /></Reveal>
     </section>
   );
