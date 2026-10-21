@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-// Fades/lifts its children in once, when scrolled into view. Shows immediately if IntersectionObserver is unavailable.
-export default function Reveal({ as: Tag = 'div', className = '', children, ...rest }) {
+// Fades/lifts its children in once, when scrolled into view (from="right": the section heading slides in from the right). Shows immediately if IntersectionObserver is unavailable.
+export default function Reveal({ as: Tag = 'div', className = '', from, children, ...rest }) {
   const ref = useRef(null);
   const [shown, setShown] = useState(typeof IntersectionObserver === 'undefined');
 
@@ -12,5 +12,5 @@ export default function Reveal({ as: Tag = 'div', className = '', children, ...r
     return () => io.disconnect();
   }, [shown]);
 
-  return <Tag ref={ref} className={`reveal${shown ? ' is-visible' : ''} ${className}`.trim()} {...rest}>{children}</Tag>;
+  return <Tag ref={ref} className={`reveal${from === 'right' ? ' reveal--right' : ''}${shown ? ' is-visible' : ''} ${className}`.trim()} {...rest}>{children}</Tag>;
 }
