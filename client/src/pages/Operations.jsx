@@ -35,7 +35,7 @@ export default function Operations() {
         )}
       </Reveal>
       <Reveal as="section" className="ws-section"><TodaySection dashboard={dashboard} planner={planner} orders={orders} eyebrow="Progress" title="Today's progress." subtitle="What is due or scheduled today, and how far along it is." /></Reveal>
-      <Reveal as="section" id="deadlines" className="ws-section"><RiskSection planner={planner} orders={orders} onSimulate={simulate} /></Reveal>
+      <Reveal as="section" id="deadlines" className="ws-section" from="right"><RiskSection planner={planner} orders={orders} onSimulate={simulate} /></Reveal>
       <Reveal as="section" id="simulation" className="ws-section"><SimulationPanel planner={planner} orders={orders} onApplied={reload} prefill={prefill} /></Reveal>
     </section>
   );

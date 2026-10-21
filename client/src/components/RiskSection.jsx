@@ -33,7 +33,7 @@ function impactSentence(e, buf) {
   return `Expected to finish ${formatMinutes(e.bufferMinutes)} before the promised deadline${e.risk === 'medium' ? `, which is less than the ${formatMinutes(buf)} safety buffer` : ''}.`;
 }
 
-function Row({ order, entry, tz, planner, byId, rec, buf, onSimulate }) {
+function Row({ order, entry, tz, planner, byId, rec, recLabel = 'Recommended', buf, onSimulate }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const imp = impact(entry);
@@ -81,7 +81,7 @@ function Row({ order, entry, tz, planner, byId, rec, buf, onSimulate }) {
 
             {risky && (
               <div>
-                <h4>What you can do</h4>
+                <h4>Practical recovery</h4>
                 {entry.suggestedDeadline && (
                   <div className="rk-suggest">
                     <small>Suggested deadline · a recommendation, not a change</small>
@@ -89,7 +89,7 @@ function Row({ order, entry, tz, planner, byId, rec, buf, onSimulate }) {
                     <span>The customer's promised deadline stays {formatInTz(order.deadline, tz)} unless you change it.</span>
                   </div>
                 )}
-                {rec && <p className="rk-rec">Recommended: {rec}</p>}
+                {rec && <p className="rk-rec"><b>{recLabel}:</b> {rec}</p>}
                 <div className="rk-actions">
                   {onSimulate && <button type="button" className="btn btn-sm btn-primary" onClick={() => onSimulate({ orderId: order.id, deadline: entry.suggestedDeadline ?? order.deadline })}><FlaskConical size={14} aria-hidden="true" />{entry.suggestedDeadline ? 'Try the suggested deadline' : 'Simulate a schedule change'}</button>}
                   <Link className="btn btn-sm" to="/calendar"><CalendarDays size={14} aria-hidden="true" />Review the schedule</Link>
@@ -123,13 +123,16 @@ function RulesDialog({ buf, onClose }) {
 }
 
 // Everything shown is the scheduling engine's output (planner API); nothing is recalculated in the browser.
-export default function RiskSection({ planner, orders, onSimulate, eyebrow = 'Deadlines', title = "Let's protect your deadlines.", subtitle = 'See which orders need attention, what is causing the conflict, and what you can do next.' }) {
+export default function RiskSection({ planner, orders, onSimulate, eyebrow = 'Orders at risk', title = "Let's protect your deadlines.", subtitle = 'See which orders need attention, what is causing the conflict, and what you can do next.' }) {
   const [rules, setRules] = useState(false);
   const tz = planner.range.timezone;
   const buf = planner.rules?.riskBufferMinutes ?? 240;
   const byId = Object.fromEntries(orders.map((o) => [o.id, o]));
   const schedule = (planner.schedule ?? []).filter((e) => byId[e.orderId]);
-  const recFor = (id) => planner.recommendations.find((r) => r.orderId === id)?.action ?? null;
+  // The engine's own recovery suggestion for the order (planner.nextMoves); older responses fall back to its recommendation.
+  const recovery = (id) => (planner.nextMoves ?? []).find((m) => m.orderId === id)?.recovery ?? null;
+  const recFor = (id) => recovery(id) ?? planner.recommendations.find((r) => r.orderId === id)?.action ?? null;
+  const recLabelFor = (id) => (recovery(id) ? 'Recovery' : 'Recommended');
 
   const high = schedule.filter((e) => e.risk === 'high').sort(byUrgency);
   const medium = schedule.filter((e) => e.risk === 'medium').sort(byUrgency);
@@ -167,7 +170,7 @@ export default function RiskSection({ planner, orders, onSimulate, eyebrow = 'De
           {atRisk.length > 0 && (
             <section className="rk-group" aria-label="At risk">
               <h3>At risk <span>{atRisk.length}</span></h3>
-              <ol className="rk-list">{atRisk.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
+              <ol className="rk-list">{atRisk.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} recLabel={recLabelFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
             </section>
           )}
 
