@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { extractOrder, createOrder, updateConversation, DEMO_MODE } from '../services/api.js';
 import { SOURCES } from '../utils/validateOrder.js';
@@ -6,7 +6,7 @@ import { CHANNEL_LABEL } from '../utils/format.js';
 import OrderForm from './OrderForm.jsx';
 
 // message -> AI draft -> seller reviews/edits -> explicit confirm -> real order. Nothing is saved before the confirm step.
-export default function DraftOrder({ message: initialMessage = '', source: initialSource = 'whatsapp', customerName, conversationId, editable = false, onCreated }) {
+export default function DraftOrder({ message: initialMessage = '', source: initialSource = 'whatsapp', customerName, conversationId, editable = false, autoStart = false, onCancel, onCreated }) {
   const [message, setMessage] = useState(initialMessage);
   const [source, setSource] = useState(initialSource);
   const [stage, setStage] = useState('idle'); // idle | extracting | review | manual | created
@@ -15,6 +15,9 @@ export default function DraftOrder({ message: initialMessage = '', source: initi
   const [saveError, setSaveError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState(null);
+
+  // autoStart: the seller already pressed "Extract order" elsewhere, so read the message straight away.
+  useEffect(() => { if (autoStart && initialMessage.trim()) extract(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function extract() {
     setStage('extracting'); setError(null);
@@ -56,7 +59,7 @@ export default function DraftOrder({ message: initialMessage = '', source: initi
         )}
         {saveError && <div className="notice error" role="alert">{saveError.message}</div>}
         <OrderForm initial={draft?.draft ?? { customerName, source }} missing={draft?.missingFields ?? []} uncertain={uncertain}
-          serverErrors={saveError?.details} submitting={saving} submitLabel="Confirm & create order" onSubmit={confirm} onCancel={() => setStage('idle')} />
+          serverErrors={saveError?.details} submitting={saving} submitLabel="Confirm & create order" onSubmit={confirm} onCancel={() => (onCancel ? onCancel() : setStage('idle'))} />
       </div>
     );
   }
@@ -78,6 +81,7 @@ export default function DraftOrder({ message: initialMessage = '', source: initi
         </div>
       )}
       <div className="form-actions draft-actions">
+        {onCancel && <button type="button" className="btn" onClick={onCancel} disabled={stage === 'extracting'}>Cancel</button>}
         <button type="button" className="btn btn-primary" disabled={stage === 'extracting' || !message.trim()} onClick={extract}>
           <Sparkles size={15} aria-hidden="true" />{stage === 'extracting' ? 'Reading the message…' : 'Draft order with AI'}
         </button>

@@ -1,0 +1,5 @@
+.deadlines > .ws-section:first-child { padding-bottom: 1.6rem; }
+.dl-demo { margin-top: -1rem; }
+.dl-timeline { padding: 0.5rem 0 3rem; }
+.deadlines .ws-section { border-top: 0; }
+.deadlines #risk, .deadlines #simulation { border-top: 1px solid var(--border); }

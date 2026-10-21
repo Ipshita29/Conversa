@@ -1,9 +1,11 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Orders from './pages/Orders.jsx';
 import Operations from './pages/Operations.jsx';
+import Deadlines from './pages/Deadlines.jsx';
+import Inbox from './pages/Inbox.jsx';
 import Calendar from './pages/Calendar.jsx';
 import Settings from './pages/Settings.jsx';
 
@@ -18,7 +20,8 @@ export default function App() {
             <Route path="/orders" element={<Orders />} />
             <Route path="/operations" element={<Operations />} />
             <Route path="/calendar" element={<Calendar />} />
-            <Route path="/inbox" element={<Navigate to="/#inbox" replace />} />
+            <Route path="/deadlines" element={<Deadlines />} />
+            <Route path="/inbox" element={<Inbox />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
