@@ -35,7 +35,7 @@ export default function TodaySection({ dashboard, planner, orders, eyebrow = 'To
           {todays.map((o) => {
             const nd = OPEN.includes(o.status) && needsDetails.has(o.id);
             return (
-              <li key={o.id} className="work-row">
+              <li key={o.id} className={`work-row ${o.status === 'in_progress' ? 'is-progress' : 'is-pending'}`}>
                 <div className="work-main">
                   <strong>{o.customerName}{isDemoOrder(o) && <span className="demo-tag">Demo</span>}</strong>
                   <span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span>
