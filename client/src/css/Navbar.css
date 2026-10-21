@@ -1,29 +1,36 @@
-.navbar { position: fixed; inset: 0 auto 0 0; width: var(--sidebar); display: flex; flex-direction: column; padding: 1.75rem 1.25rem 1.5rem; background: var(--ivory); border-right: 1px solid var(--border); z-index: 40; }
-.navbar-top { display: flex; align-items: center; justify-content: space-between; }
-.wordmark { font-family: var(--serif); font-size: 1.65rem; color: var(--cocoa); text-decoration: none; letter-spacing: -0.01em; }
+/* A small floating control instead of a sidebar: nothing reserves layout space. */
+.navbar { position: fixed; top: 16px; left: 16px; z-index: 80; }
+.navbar-pill { display: flex; align-items: center; gap: 0.7rem; padding: 5px 16px 5px 5px; background: rgba(255, 255, 255, 0.94); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow); }
+.menu-trigger { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--cocoa); color: var(--ivory); cursor: pointer; transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
+.menu-trigger:hover { background: var(--caramel-ink); }
+.menu-trigger:active { transform: scale(0.94); }
+.menu-trigger[aria-expanded='true'] { background: var(--caramel-ink); }
+.menu-trigger:focus-visible { outline-offset: 3px; }
+.wordmark { font-family: var(--serif); font-size: 1.5rem; line-height: 1; color: var(--cocoa); text-decoration: none; letter-spacing: -0.01em; }
 .wordmark span { color: var(--caramel); }
-.menu-trigger { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; transition: background 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease); }
-.menu-trigger:hover, .menu-trigger[aria-expanded='true'] { background: var(--papaya); color: var(--cocoa); border-color: var(--border); }
-.you-are-here { display: flex; align-items: center; gap: 0.5rem; margin: 0.9rem 0 0.4rem; font-size: 0.82rem; color: var(--muted); }
+.you-are-here { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding-left: 0.8rem; border-left: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
 .you-are-here i { width: 6px; height: 6px; border-radius: 50%; background: var(--caramel); }
 
-.menu { overflow: hidden; max-height: 0; opacity: 0; transition: max-height 0.35s var(--ease), opacity 0.25s var(--ease); }
-.menu.is-open { max-height: 640px; opacity: 1; }
-.menu-list { list-style: none; margin: 0.4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
-.menu-link { display: flex; align-items: center; gap: 0.7rem; width: 100%; padding: 0.55rem 0.6rem; border: 0; border-left: 2px solid transparent; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: none; color: var(--muted); font: inherit; font-size: 0.92rem; text-align: left; text-decoration: none; cursor: pointer; transition: color 0.18s var(--ease), background 0.18s var(--ease); }
-.menu-link small { display: block; font-size: 0.72rem; color: var(--muted); opacity: 0.85; }
+/* The menu is a popover under the pill. */
+.menu { position: absolute; top: calc(100% + 10px); left: 0; width: 310px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 0.35rem 0.5rem 0.9rem; background: var(--white); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 18px 50px rgba(51, 39, 31, 0.16); opacity: 0; visibility: hidden; transform: translateY(-8px) scale(0.98); transform-origin: 20px 0; pointer-events: none; transition: opacity 0.22s var(--ease), transform 0.28s var(--ease), visibility 0s linear 0.28s; }
+.menu.is-open { opacity: 1; visibility: visible; transform: none; pointer-events: auto; transition-delay: 0s; }
+.menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.menu-link { display: flex; align-items: center; gap: 0.75rem; width: 100%; padding: 0.5rem 0.7rem; border: 0; border-left: 2px solid transparent; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: none; color: var(--muted); font: inherit; font-size: 0.94rem; text-align: left; text-decoration: none; cursor: pointer; transition: color 0.18s var(--ease), background 0.18s var(--ease); }
+.menu-link small { display: block; font-size: 0.74rem; line-height: 1.3; color: var(--muted); opacity: 0.85; }
+.menu-link svg { flex-shrink: 0; }
+.menu-link:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: -2px; border-radius: var(--radius-sm); }
 .menu-link:hover { color: var(--cocoa); background: var(--papaya-soft); }
 .menu-link.active { color: var(--cocoa); font-weight: 600; border-left-color: var(--caramel); background: var(--papaya-soft); }
-.menu-group { margin: 1.1rem 0 0.2rem 0.6rem; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
-.menu-sections .menu-link { padding-block: 0.38rem; font-size: 0.86rem; }
-
-.navbar-tagline { margin: auto 0 0; font-family: var(--serif); font-style: italic; font-size: 0.95rem; line-height: 1.45; color: var(--muted); }
-.navbar-demo { margin: 0.9rem 0 0; font-size: 0.72rem; color: var(--blue-ink); }
+.menu-link.active svg { color: var(--caramel-ink); }
+.menu-group { margin: 0.7rem 0 0.15rem 0.7rem; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.menu-foot { margin: 0.9rem 0.7rem 0; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+.menu-small { font-size: 0.84rem; color: var(--muted); }
+.menu-small:hover { color: var(--caramel-ink); }
+.navbar-tagline { margin: 0.7rem 0 0; font-family: var(--serif); font-style: italic; font-size: 0.92rem; color: var(--muted); }
+.navbar-demo { margin: 0.5rem 0 0; font-size: 0.72rem; color: var(--blue-ink); }
 
 @media (max-width: 860px) {
-  .navbar { position: sticky; inset: 0 auto auto 0; width: 100%; flex-direction: column; padding: 0.7rem 1.1rem; border-right: 0; border-bottom: 1px solid var(--border); }
-  .you-are-here { position: absolute; left: 50%; top: 1.15rem; margin: 0; transform: translateX(-50%); }
-  .menu { position: absolute; left: 0; right: 0; top: 100%; background: var(--ivory); border-bottom: 1px solid var(--border); padding: 0 1.1rem; box-shadow: var(--shadow); }
-  .menu.is-open { padding-bottom: 1rem; }
-  .navbar-tagline, .navbar-demo { display: none; }
+  .navbar { top: 10px; left: 10px; }
+  .menu { width: min(310px, calc(100vw - 20px)); }
 }
+@media (max-width: 360px) { .you-are-here { display: none; } .navbar-pill { padding-right: 14px; } } /* only the very smallest phones drop the page label */
