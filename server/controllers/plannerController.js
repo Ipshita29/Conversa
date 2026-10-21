@@ -1,7 +1,7 @@
 import Order from '../models/Order.js';
 import { asyncHandler, badQuery, validationError } from '../utils/errors.js';
 import { getSettings } from '../services/settingsService.js';
-import { computePlan, publicPlan, simulate } from '../services/workloadEngine.js';
+import { computePlan, publicPlan, simulate, suggestScenario } from '../services/workloadEngine.js';
 import { zonedTimeToUtc } from '../utils/timezone.js';
 import { isPlainObject } from '../utils/validation.js';
 
@@ -26,13 +26,16 @@ function parseRange(src, fail) {
 export const getPlanner = asyncHandler(async (req, res) => {
   const { days, from } = parseRange(req.query, badQuery);
   const [orders, settings] = await Promise.all([Order.find().limit(5000), getSettings()]);
-  res.json(publicPlan(computePlan({ orders, settings, now: planningStart(from, settings.timezone), rangeDays: days })));
+  const now = planningStart(from, settings.timezone);
+  res.json({ ...publicPlan(computePlan({ orders, settings, now, rangeDays: days })), suggestedScenario: suggestScenario({ orders, settings, now, rangeDays: days }) });
 });
 
 export const simulatePlanner = asyncHandler(async (req, res) => {
   if (!isPlainObject(req.body)) throw validationError([{ field: 'body', message: 'Request body must be a JSON object.' }]);
   const { days, from } = parseRange(req.body, validationError);
+  const probeMinutes = req.body.probeMinutes === undefined ? 60 : req.body.probeMinutes;
+  if (!Number.isInteger(probeMinutes) || probeMinutes < 15 || probeMinutes > 480) throw validationError([{ field: 'probeMinutes', message: 'Must be a whole number of minutes from 15 to 480.' }]);
   const [orders, settings] = await Promise.all([Order.find().limit(5000), getSettings()]);
   // Read-only: orders are only read, never written.
-  res.json(simulate({ orders, changes: req.body.changes, settings, now: planningStart(from, settings.timezone), rangeDays: days }));
+  res.json(simulate({ orders, changes: req.body.changes, settings, now: planningStart(from, settings.timezone), rangeDays: days, probeMinutes }));
 });
