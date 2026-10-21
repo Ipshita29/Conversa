@@ -17,6 +17,7 @@ import { ApiError } from '../utils/errors.js';
 
 const MIN = 60000;
 export const HORIZON_DAYS = 60;
+export const NEAR_WORKING_DAYS = 2;
 
 export function buildCapacityDays({ now, settings, count = HORIZON_DAYS }) {
   const tz = settings.timezone;
@@ -44,6 +45,7 @@ export function normalizeOrder(o) {
     id: String(o.id ?? o._id),
     customerName: o.customerName,
     item: o.item,
+    quantity: o.quantity ?? 1,
     status: o.status,
     paymentStatus: o.paymentStatus ?? 'unverified',
     prepTimeMinutes: o.prepTimeMinutes ?? null,
@@ -134,6 +136,21 @@ export function computePlan({ orders, settings, now = new Date(), rangeDays = 7 
   const overloadedDays = shown.filter((d) => d.capacityMinutes > 0 && d.plannedMinutes >= d.capacityMinutes)
     .map((d) => ({ date: d.date, plannedMinutes: d.plannedMinutes, capacityMinutes: d.capacityMinutes }));
 
+  // Uninterrupted free time: the engine packs work from the start of each day, so what is left of a day's capacity is one
+  // contiguous block at its end. These are the windows where a new job could be slotted in without moving anything.
+  const freeWindows = shown
+    .filter((d) => d.capacityMinutes - d.plannedMinutes > 0)
+    .map((d) => {
+      const startMs = d.start.getTime() + d.plannedMinutes * MIN;
+      const minutes = d.capacityMinutes - d.plannedMinutes;
+      return { date: d.date, start: new Date(startMs).toISOString(), end: new Date(startMs + minutes * MIN).toISOString(), minutes };
+    });
+  const largest = (list) => list.reduce((best, w) => (!best || w.minutes > best.minutes ? w : best), null);
+  const largestFreeWindow = largest(freeWindows);
+  // Where a free hour matters most: the next two working days. (Later in the week there is usually plenty of room.)
+  const nearDates = shown.filter((d) => d.capacityMinutes > 0).slice(0, NEAR_WORKING_DAYS).map((d) => d.date);
+  const nearFreeWindow = largest(freeWindows.filter((w) => nearDates.includes(w.date)));
+
   const byId = Object.fromEntries(open.map((o) => [o.id, o]));
   const risks = schedule.filter((r) => r.risk !== 'low')
     .sort((a, b) => RANK[a.risk] - RANK[b.risk] || byId[a.orderId].deadline - byId[b.orderId].deadline)
@@ -150,8 +167,70 @@ export function computePlan({ orders, settings, now = new Date(), rangeDays = 7 
     overloadedDays,
     schedule,
     recommendations: buildRecommendations({ open: byId, risks, unscheduledOrders, overloadedDays, now, settings, rangeDays }),
+    freeWindows,
+    largestFreeWindow,
+    nearFreeWindow,
+    nextMoves: buildNextMoves({ open, schedule, unscheduledOrders, settings }),
+    nextMovesRule: NEXT_MOVES_RULE,
     results,
   };
+}
+
+export const NEXT_MOVES_RULE = 'Overdue first, then orders predicted to miss their deadline, then tight buffers, then orders blocked by missing details, then on-track work. Within each group the earliest deadline comes first.';
+
+const TIERS = {
+  deadline_passed: { tier: 0, label: 'Already past due' },
+  unschedulable: { tier: 1, label: 'Cannot be scheduled' },
+  late: { tier: 1, label: 'Predicted to be late' },
+  tight: { tier: 2, label: 'Tight buffer' },
+  needs_details: { tier: 3, label: 'Needs details' },
+  on_track: { tier: 4, label: 'On track' },
+};
+
+// One recommended ACTION per open order, ranked. Every number in the text comes from the schedule above; nothing is estimated here.
+function buildNextMoves({ open, schedule, unscheduledOrders, settings }) {
+  const tz = settings.timezone;
+  const when = (iso) => formatInZone(new Date(iso), tz);
+  const entry = Object.fromEntries(schedule.map((e, i) => [e.orderId, { ...e, sequence: i + 1 }]));
+  const missingOf = Object.fromEntries(unscheduledOrders.map((u) => [u.id, u.reason]));
+  const MISSING = { missing_prep_time: 'a preparation time', missing_deadline: 'a deadline', missing_both: 'a deadline and a preparation time' };
+
+  const moves = open.map((o) => {
+    const e = entry[o.id];
+    let kind; let action; let why; let recovery = null;
+    if (!e) {
+      kind = 'needs_details';
+      const m = MISSING[missingOf[o.id]];
+      action = `Confirm details with ${o.customerName}, then add ${m}`;
+      why = `It cannot be scheduled without ${m}, so it is left out of capacity planning. One message to ${o.customerName} unblocks it.`;
+    } else {
+      kind = e.kind;
+      const queue = e.precededBy.length ? ` ${e.precededBy.length} earlier-deadline ${e.precededBy.length === 1 ? 'order is' : 'orders are'} scheduled before it.` : '';
+      if (kind === 'deadline_passed') {
+        action = `Contact ${o.customerName} about the missed deadline`;
+        why = `The promised deadline (${when(e.deadline)}) has already passed.`;
+        recovery = e.scheduledEnd ? `Agree a new date with ${o.customerName}. The earliest the scheduler can finish it is ${when(e.scheduledEnd)}.` : null;
+      } else if (kind === 'unschedulable') {
+        action = `Defer or decline ${o.item}`;
+        why = e.reason;
+      } else if (kind === 'late') {
+        action = `Decide now: speed up ${o.item} or ask ${o.customerName} for more time`;
+        why = `Predicted to finish ${fmtDur(e.shortfallMinutes)} after its deadline (${when(e.scheduledEnd)} vs ${when(e.deadline)}).${queue}`;
+        recovery = e.suggestedDeadline ? `Offer ${o.customerName} a deadline of ${when(e.suggestedDeadline)}, or free ${fmtDur(e.shortfallMinutes)} of preparation time before ${when(e.deadline)}.` : null;
+      } else if (kind === 'tight') {
+        action = `Start ${o.item} on schedule (${when(e.scheduledStart)}) and protect its buffer`;
+        why = `It fits, but finishes only ${fmtDur(e.bufferMinutes)} before the deadline, under your ${fmtDur(settings.riskBufferMinutes)} safety buffer.${queue}`;
+        recovery = `Avoid taking new work that is due before ${when(e.deadline)}.`;
+      } else {
+        action = o.status === 'in_progress' ? `Keep going on ${o.item}` : `Up next: ${o.item}, starting ${when(e.scheduledStart)}`;
+        why = `${fmtDur(e.bufferMinutes)} to spare before the deadline. Number ${e.sequence} in your work queue.${queue}`;
+      }
+    }
+    return { orderId: o.id, kind, state: TIERS[kind].label, tier: TIERS[kind].tier, deadlineMs: o.deadline ? o.deadline.getTime() : Infinity, workSequence: e?.sequence ?? null, action, why, recovery };
+  });
+
+  moves.sort((a, b) => a.tier - b.tier || a.deadlineMs - b.deadlineMs || a.orderId.localeCompare(b.orderId));
+  return moves.map(({ tier, deadlineMs, ...m }, i) => ({ rank: i + 1, ...m }));
 }
 
 function buildRecommendations({ open, risks, unscheduledOrders, overloadedDays, now, settings, rangeDays }) {
@@ -187,8 +266,35 @@ function buildRecommendations({ open, risks, unscheduledOrders, overloadedDays, 
 
 export const publicPlan = ({ results, schedule, ...rest }) => ({ ...rest, schedule });
 
+const riskCounts = (plan) => ({
+  high: plan.schedule.filter((e) => e.risk === 'high').length,
+  medium: plan.schedule.filter((e) => e.risk === 'medium').length,
+  low: plan.schedule.filter((e) => e.risk === 'low').length,
+  details: plan.unscheduledOrders.length,
+});
+
+// Would one more job of `minutes` fit? Asked of the engine itself: add a probe order due when the largest free window ends and
+// see whether it (and everything else) stays safe. No new scheduling logic.
+function probeFit({ hypo, after, settings, now, rangeDays, minutes }) {
+  const near = after.nearFreeWindow && after.nearFreeWindow.minutes >= minutes ? after.nearFreeWindow : null;
+  const window = near ?? after.largestFreeWindow;
+  if (!window || window.minutes < minutes) {
+    return { minutes, fits: false, window: null, scope: null, reason: `There is no uninterrupted ${fmtDur(minutes)} window in the next ${rangeDays} days.` };
+  }
+  const scope = near ? 'next_working_days' : 'later';
+  const probe = { id: 'probe', customerName: 'New order', item: 'New order', quantity: 1, status: 'pending', paymentStatus: 'unverified', prepTimeMinutes: minutes, deadline: new Date(window.end) };
+  const withProbe = computePlan({ orders: [...hypo, probe], settings, now, rangeDays });
+  const mine = withProbe.schedule.find((e) => e.orderId === 'probe');
+  const rank = { low: 0, medium: 1, high: 2 };
+  const baseRisk = Object.fromEntries(after.schedule.map((e) => [e.orderId, e.risk]));
+  const worsened = withProbe.schedule.filter((e) => e.orderId !== 'probe' && rank[e.risk] > rank[baseRisk[e.orderId]]).map((e) => e.orderId);
+  const fits = Boolean(mine) && mine.risk !== 'high' && worsened.length === 0;
+  return { minutes, fits, window, scope, startsAt: mine?.scheduledStart ?? null, finishesAt: mine?.scheduledEnd ?? null, risk: mine?.risk ?? null, worsenedOrderIds: worsened,
+    reason: fits ? null : worsened.length ? 'Fitting it in would push an existing order closer to (or past) its deadline.' : 'It would not finish in time even in the free window.' };
+}
+
 // ---- What-if simulation -------------------------------------------------------------------------------------------
-export function simulate({ orders, changes, settings, now = new Date(), rangeDays = 7 }) {
+export function simulate({ orders, changes, settings, now = new Date(), rangeDays = 7, probeMinutes = 60 }) {
   const invalid = (details) => new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed.', details);
   if (!Array.isArray(changes) || changes.length < 1 || changes.length > 20) throw invalid([{ field: 'changes', message: 'Provide between 1 and 20 changes.' }]);
 
@@ -235,10 +341,19 @@ export function simulate({ orders, changes, settings, now = new Date(), rangeDay
     }
   }
 
+  const fit = probeFit({ hypo, after, settings, now, rangeDays, minutes: probeMinutes });
+
   return {
     simulated: true,
     planner: publicPlan(after),
     comparison: {
+      currentCounts: riskCounts(before),
+      simulatedCounts: riskCounts(after),
+      currentNearFreeWindow: before.nearFreeWindow,
+      simulatedNearFreeWindow: after.nearFreeWindow,
+      currentLargestFreeWindow: before.largestFreeWindow,
+      simulatedLargestFreeWindow: after.largestFreeWindow,
+      fit,
       pendingMinutesDelta: after.workload.pendingMinutes - before.workload.pendingMinutes,
       currentWorkload: before.workload,
       simulatedWorkload: after.workload,
@@ -249,4 +364,75 @@ export function simulate({ orders, changes, settings, now = new Date(), rangeDay
       suggestedAdjustments,
     },
   };
+}
+
+// ---- Suggested experiment --------------------------------------------------------------------------------------------
+// Tries a handful of concrete changes through simulate() and keeps the best one that creates no new risk. Goal: an
+// uninterrupted free hour in the next two working days, and fewer deadline risks.
+//  * "give one order a day more": reorders work, so it can resolve risks. It can NOT free time (the scheduler works ASAP).
+//  * "prepare one order faster": an ASSUMPTION (batching, pre-making). It is the only kind of change that frees time, so it
+//    is labelled as an assumption and the engine reports what it really does.
+// Falls back to a capacity check. Deterministic, and nothing is saved.
+export function suggestScenario({ orders, settings, now = new Date(), rangeDays = 7, goalMinutes = 60 }) {
+  const tz = settings.timezone;
+  const base = computePlan({ orders, settings, now, rangeDays });
+  const baseNear = base.nearFreeWindow?.minutes ?? 0;
+  const norm = Object.fromEntries(orders.map(normalizeOrder).map((o) => [o.id, o]));
+  const nameOf = (id) => norm[id]?.customerName ?? id;
+
+  const evaluate = (change) => {
+    const c = simulate({ orders, changes: [change], settings, now, rangeDays, probeMinutes: goalMinutes }).comparison;
+    const afterNear = c.simulatedNearFreeWindow?.minutes ?? 0;
+    return { change, resolved: c.resolvedRisks.map((r) => r.orderId), newRisks: c.newRisks.length, afterNear,
+      opensHour: baseNear < goalMinutes && afterNear >= goalMinutes, gain: afterNear - baseNear };
+  };
+
+  const scored = [];
+  for (const e of base.schedule) {
+    const o = norm[e.orderId];
+    const to = new Date(o.deadline.getTime() + 24 * 3600000);
+    scored.push({ kind: 'move_deadline', o, to, ...evaluate({ type: 'update_order', orderId: o.id, order: { deadline: to.toISOString() } }) });
+    if (baseNear < goalMinutes && o.prepTimeMinutes > 30) {
+      const cut = Math.min(o.prepTimeMinutes - 15, Math.ceil(Math.max(goalMinutes - baseNear, 30) / 15) * 15);
+      scored.push({ kind: 'reduce_prep', o, cut, ...evaluate({ type: 'update_order', orderId: o.id, order: { prepTimeMinutes: o.prepTimeMinutes - cut } }) });
+    }
+  }
+  const useful = scored.filter((c) => c.newRisks === 0 && (c.opensHour || c.resolved.length > 0 || c.gain > 0));
+  useful.sort((a, b) => Number(b.opensHour) - Number(a.opensHour) || b.resolved.length - a.resolved.length || b.gain - a.gain || (a.kind === 'move_deadline' ? -1 : 1));
+
+  if (useful.length) {
+    const t = useful[0];
+    const outcome = [t.opensHour ? `opens an uninterrupted free hour in your next two working days` : null, t.resolved.length ? `resolves the deadline risk on ${t.resolved.map(nameOf).join(' and ')}'s order` : null].filter(Boolean).join(' and ');
+    if (t.kind === 'reduce_prep') {
+      return {
+        kind: 'reduce_prep',
+        title: `What if ${t.o.customerName}'s ${t.o.item} took ${fmtDur(t.cut)} less?`,
+        summary: `Assume you can prepare it in ${fmtDur(t.o.prepTimeMinutes - t.cut)} instead of ${fmtDur(t.o.prepTimeMinutes)}, for example by batching similar items or pre-making components.`,
+        why: `This is an assumption, not a fact: change the minutes to what is realistic. In the scheduler's pre-check, this ${outcome || 'frees time'} without making any other order worse.`,
+        goalMinutes,
+        changes: [{ type: 'update_order', orderId: t.o.id, order: { prepTimeMinutes: t.o.prepTimeMinutes - t.cut } }],
+      };
+    }
+    return {
+      kind: 'move_deadline',
+      title: `Ask ${t.o.customerName} for one more day`,
+      summary: `Move ${t.o.customerName}'s promised deadline for ${t.o.item} from ${formatInZone(t.o.deadline, tz)} to ${formatInZone(t.to, tz)}.`,
+      why: `This reorders your work. In the scheduler's pre-check it ${outcome || 'improves the schedule'} without making any other order worse. It cannot free extra time on its own.`,
+      goalMinutes,
+      changes: [{ type: 'update_order', orderId: t.o.id, order: { deadline: t.to.toISOString() } }],
+    };
+  }
+
+  const w = base.nearFreeWindow ?? base.largestFreeWindow;
+  if (w && w.minutes >= goalMinutes) {
+    return {
+      kind: 'capacity_check',
+      title: `Could you take a ${fmtDur(goalMinutes)} rush order?`,
+      summary: `Add a ${fmtDur(goalMinutes)} order due when your free window ends (${formatInZone(new Date(w.end), tz)}).`,
+      why: `Nothing needs rescuing, and you already have an uninterrupted free window of ${fmtDur(w.minutes)}. This checks that a new order fits without hurting the others.`,
+      goalMinutes,
+      changes: [{ type: 'add_order', order: { customerName: 'New customer', item: 'Rush order', quantity: 1, prepTimeMinutes: goalMinutes, deadline: w.end, source: 'manual' } }],
+    };
+  }
+  return null;
 }
