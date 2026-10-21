@@ -25,22 +25,37 @@
 
 ## 2. Demo script (3–4 minutes)
 
-Setup, right before presenting (deadlines are relative to "now", so reseed each time):
+Setup, right before presenting (the seed places deadlines from the scheduler's own finish times, so the story holds at any time of day; reseeding just refreshes the clock):
 
 ```bash
-cd server && npm run seed:demo      # 5 demo orders, marked "[DEMO]" in notes
+cd server && npm run seed:demo      # 5 demo orders + 6 demo messages, marked [DEMO]
 npm run dev                         # terminal 1  (http://localhost:5000)
 cd ../client && npm run dev         # terminal 2  (http://localhost:5173)
 ```
 
-| Step | Page | What to say / do |
+### The five demo orders (a small home bakery)
+
+| # | Customer | Order | Channel | State the demo shows |
+|---|---|---|---|---|
+| 1 | **Aanya Sharma** | Birthday cake (2 kg), name in blue icing, 4 h | WhatsApp | **On track**: in progress, ~6 h of buffer, payment verified |
+| 2 | **Rohan Mehta** | Festive gift hampers × 3, 5 h | Instagram | **Tight (medium risk)**: fits with only 2 h of buffer, payment pending |
+| 3 | **Meera Iyer** | Wedding favour boxes × 50, 5 h | WhatsApp | **Late (high risk)**: predicted 1 h 40 m after her deadline, payment unverified |
+| 4 | **Kabir Singh** | Custom cupcake tower, flavours still to be confirmed | Instagram | **Needs details**: no prep time, so it cannot be scheduled |
+| 5 | **Tara Bose** | Brownie tray × 2 | Phone (manual) | **Done**: delivered and paid |
+
+Six inbox messages go with them (5 read, 1 unread). The unread one is a *new* rush enquiry from Nikhil Rao ("30 cake pops by tomorrow noon?") that has no order yet: it is the natural "turn a message into an order" and "can I say yes?" moment.
+
+### Walkthrough
+
+| Step | Where | What to say / do |
 |---|---|---|
-| 1 | **Dashboard** | "Here's the seller's morning: 5 orders, workload vs available hours, and *Next actions* ranked by urgency." Point at the at-risk count and the workload chart. |
-| 2 | **Inbox** | Paste: *"Hi! Can I get 2 dozen chocolate cupcakes with names on them by Friday evening? - Priya"* → **Extract order details**. Show the draft: quantity 24, deadline Fri 18:00, prep time *marked as an estimate*, and highlighted uncertainties. "Nothing is saved yet — the seller confirms." Click **Confirm & create order**. |
-| 3 | **Orders** | The new order is in the list. Show search/filter, an inline status change, and the risk badge per order. |
-| 4 | **Calendar** | The day-by-day plan: each order scheduled into real capacity; Rohan's hamper is flagged. Then **What-if simulation**: add a rush order due tomorrow 12:00 → show the red "new risks" and the suggested new deadline. Click **Discard** — "nothing changed". |
-| 5 | **Operations** | Priority queue, deadline conflicts with reasons, recommended actions ("Prioritise…", "Add a preparation time…", "Confirm payment…"). |
-| 6 | **Settings** | Honest integration status: WhatsApp / Instagram are **unavailable** until Meta credentials are configured. |
+| 1 | **Hero → Today** | "Here is the seller's morning." Scroll: the hero lingers and fades into *Your day, at a glance*: orders due today, in progress, completed, needing attention. |
+| 2 | **Your next moves** | "Not a list of orders, a list of *actions*, ranked by the scheduler." #1 decide about Meera's late order; #2 protect Rohan's buffer; #3 message Kabir to unblock his order; #4 keep going on Aanya's cake. Open one *Why #n* and its *Recovery*. |
+| 3 | **Orders at risk** | Meera is **1 h 40 m late**, Rohan has **2 h to spare**; Kabir sits apart under *Needs details*. Expand Meera: promised deadline → expected finish, why, the orders scheduled ahead of her, the timeline, a suggested new deadline. |
+| 4 | **What-if** | Click **Run this experiment** ("Ask Meera for one more day"). Show the before/after table (high-risk 1 → 0), the plain-language summary, whether a free hour appears, and whether another order would fit. **Discard** or **Apply this schedule…** (it asks for confirmation and reminds you the customer must agree). |
+| 5 | **Inbox** | Open Nikhil's unread rush message → **Draft order with AI**: quantity, deadline in your timezone, a prep estimate marked *estimate*. "Nothing is saved until you confirm." |
+| 6 | **Orders / Operations / Calendar** | Menu (⋮): all orders with search and status tabs; capacity and risks in one place; the week with deadlines and scheduled work. |
+| 7 | **Integrations** | Honest status: WhatsApp and Instagram are **unavailable** until Meta credentials are configured. |
 
 ## 3. What is real, demo, and not built
 
@@ -92,43 +107,46 @@ Done in `server/services/workloadEngine.js`. No AI is involved; the same inputs 
 
 For a high-risk order the engine also reports how late it would be (`shortfallMinutes`) and a **suggested new deadline** (estimated finish + the safety buffer).
 
-### Worked example (the 5 demo orders, Tue 09:30)
+### Worked example (the 5 demo orders, Tue 20 Oct 09:30)
 
 | Order | Prep | Deadline | Scheduled | Buffer | Risk |
 |---|---|---|---|---|---|
-| Aanya – birthday cake | 4 h | Wed 17:00 | Tue 09:30 → 13:30 | 27.5 h | **Low** |
-| Rohan – gift hampers | 7 h | Wed 17:00 | Tue 13:30–15:30 (2 h) + Wed 09:00–14:00 (5 h) | **3 h** | **Medium** (< 4 h) |
-| Priya – cupcake box | 3 h | Fri 12:00 | Wed 14:00–15:00 + Thu 09:00–11:00 | 25 h | **Low** |
-| Kabir – portrait | — | Sat 17:00 | not scheduled | — | **Needs prep time** |
-| Tara – sketch | — | — | completed | — | ignored |
+| Aanya: birthday cake | 4 h | Tue 19:30 | Tue 09:30 → 13:30 | **6 h** | **Low** (≥ 4 h) |
+| Rohan: gift hampers | 5 h | Wed 14:00 | Tue 13:30 → 15:30 (2 h) + Wed 09:00 → 12:00 (3 h) | **2 h** | **Medium** (< 4 h) |
+| Meera: wedding favours | 5 h | Thu 09:20 | Wed 12:00 → 15:00 (3 h) + Thu 09:00 → 11:00 (2 h) | **−1 h 40 m** | **High** (finishes after the deadline) |
+| Kabir: cupcake tower | none | Sat 17:00 | not scheduled | — | **Needs details** |
+| Tara: brownie tray | 1.5 h | past | completed | — | ignored |
 
-Day load: Tue 360/360 min, Wed 360/360, Thu 120/360. Rohan's order is exactly the "looks fine on a calendar but has no breathing room" situation Conversa exists to catch. Run the same data at 15:00 and Rohan turns **High**, because less of today is left.
+Day load: Tue 360/360 min, Wed 360/360, Thu 120/360. Meera's order is the classic case: nothing is wrong with any single order, but the queue ahead of her (Aanya, then Rohan) leaves no room before her deadline. The seed places each deadline relative to the scheduler's *own* finish time (+6 h, +2 h, −1 h 40 m), which is why this story holds whatever the time of day.
 
 Dashboard and Planner use the same function, so their totals always match.
 
 ## 6. What-if simulation (example)
 
-`POST /api/planner/simulate` takes a list of hypothetical changes (`add_order`, `update_order`, `cancel_order`), recomputes the whole plan in memory and compares it with the current plan. **It reads orders but never writes.** Saving a change is a separate, explicit `POST`/`PATCH /api/orders` (the UI asks for a second confirmation).
+`POST /api/planner/simulate` takes a list of hypothetical changes (`add_order`, `update_order`, `cancel_order`), recomputes the whole plan in memory and compares it with the current plan. **It reads orders but never writes.** Saving a change is a separate, explicit `PATCH`/`POST /api/orders` (the UI asks for a second confirmation).
 
-**Question:** *"A customer wants 30 cake pops (4 h of prep) by tomorrow 12:00. Can I say yes?"*
+**The suggested experiment.** `GET /api/planner` also returns a `suggestedScenario`, found by trying changes through the same simulation and keeping the best one that creates no new risk. For the demo data it is:
+
+> **Ask Meera Iyer for one more day.** Move her promised deadline for the wedding favour boxes from Thu 22 Oct 09:20 to Fri 23 Oct 09:20.
 
 ```json
 POST /api/planner/simulate
-{ "changes": [ { "type": "add_order", "order": {
-    "customerName": "Rush Customer", "item": "Cake pops", "quantity": 30,
-    "prepTimeMinutes": 240, "deadline": "2026-10-21T06:30:00.000Z" } } ] }
+{ "changes": [ { "type": "update_order", "orderId": "<Meera's order id>",
+                 "order": { "deadline": "2026-10-23T03:50:00.000Z" } } ], "days": 14, "probeMinutes": 60 }
 ```
 
-Result (abridged, from the real engine):
+Result, from the real engine (Tue 09:30):
 
-* Pending workload **+240 min**; utilisation of the next 3 days **78% → 100%**.
-* The new order itself fits (it is earliest-deadline, so it is scheduled first)…
-* …but it **pushes Rohan's hampers from Medium to High**: *"Estimated to finish 19h after the deadline (Thu 22 Oct, 12:00)."*
-* **Suggested adjustment** (`extend_deadline`): *"Moving its deadline to Thu 22 Oct, 16:00 restores a safe buffer."*
+* Risk counts **high 1 → 0**, medium 1 → 1, low 1 → 2, needs details 1 → 1: it resolves 1 risk and introduces none.
+* Pending workload and utilisation are unchanged (19%): moving a deadline only *reorders* work.
+* **Did it free an uninterrupted hour in the next two working days?** No (both days stay fully booked), and the panel says so. A deadline move can never create free time, because the scheduler always works as soon as possible.
+* **Would another 1-hour order fit?** Yes, but only later: Fri 09:00, without making any existing order later. (Change the length in the panel to test 30, 90 or 120 minutes.)
 
-**Second question:** *"What if I ask Rohan to accept Thursday 17:00 instead?"* → `update_order` with the new deadline → Rohan's risk is **resolved** and no new risks appear.
+**Freeing time needs less work.** When the next two working days have *almost* an hour spare, the engine instead suggests *"What if this order took N minutes less?"*, framed as an assumption (batching, pre-making components). The simulation then reports what that really does. The engine never claims batching saves time on its own.
 
-So the seller learns, in seconds and *before replying to the customer*, that the rush order costs them another customer's deadline — and what to offer instead.
+**The unread rush message** (Nikhil, 30 cake pops by tomorrow noon) is the second what-if: add it as a rush order and the table shows who it pushes later.
+
+So the seller learns, in seconds and *before replying to the customer*, what a request costs and what to offer instead.
 
 ## 7. AI extraction (example)
 
