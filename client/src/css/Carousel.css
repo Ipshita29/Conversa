@@ -1,9 +1,7 @@
 /* ---------- Priority carousel ("What needs you first") ----------
-   The ACTIVE card is the largest; cards after it step down. Sizes are driven by one animated length per card (--w), so
-   width, height (square), padding and type all grow and shrink together. The track slides on the same duration and easing. */
-@property --w { syntax: '<length>'; inherits: true; initial-value: 256px; }
-
-.pc { --w1: 372px; --w2: 312px; --w3: 276px; --w4: 256px; --gap: 1.1rem; --dur: 0.6s; --curve: cubic-bezier(0.22, 0.61, 0.36, 1); }
+   Every card is identical in size and layout. About three show at once with the next one peeking in; the first priority is
+   marked by a caramel border only. The track slides by one card per step (see PriorityCarousel.jsx). */
+.pc { --gap: 1.1rem; --per: 3.25; --gaps: 3; }
 .pc-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
 .pc-count { font-size: 0.92rem; color: var(--muted); }
 .pc-count b { color: var(--cocoa); font-weight: 600; }
@@ -13,71 +11,55 @@
 .pc-arrow:hover:not(:disabled) { background: var(--papaya-soft); border-color: #DCC8B4; }
 .pc-arrow:active:not(:disabled) { transform: scale(0.94); }
 .pc-arrow:disabled { opacity: 0.35; cursor: default; }
+.pc-arrow:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: 2px; }
 
-/* The viewport clips (it never scrolls), so a focused card can't make the browser shift the layout. Its height is fixed to the
-   largest card, so the page below never moves while sizes change. Side padding leaves room for the active card's shadow. */
-.pc-viewport { position: relative; overflow: hidden; overflow: clip; touch-action: pan-y; user-select: none; -webkit-user-select: none; padding: 1.1rem 12px 3rem; cursor: grab; }
+/* The viewport clips (it never scrolls). Padding leaves room for the card shadows so nothing is cut off. */
+.pc-viewport { position: relative; overflow: hidden; overflow: clip; touch-action: pan-y; user-select: none; -webkit-user-select: none; padding: 0.9rem 12px 2.2rem; margin-inline: -12px; cursor: grab; }
 .pc-viewport:active { cursor: grabbing; }
 .pc-viewport:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: 2px; border-radius: 12px; }
-.pc-track { display: flex; align-items: flex-end; gap: var(--gap); height: var(--w1); margin: 0; padding: 0; list-style: none; transition: transform var(--dur) var(--curve); will-change: transform; }
+.pc-track { display: flex; align-items: stretch; gap: var(--gap); margin: 0; padding: 0; list-style: none; transition: transform 0.6s cubic-bezier(0.22, 0.61, 0.36, 1); will-change: transform; }
 .pc-track.is-dragging { transition: none; }
-.pc-static .pc-track { transition: none; } /* browsers without registered custom properties: switch sizes and position together, instantly */
 
-.pc-card { --w: var(--w4); position: relative; flex: 0 0 auto; width: var(--w); aspect-ratio: 1; box-sizing: border-box; display: grid; grid-template-areas: 'rank risk' 'action action' 'who who' 'when when' 'why why' 'cta cta'; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; row-gap: 0.22rem;
-  padding: calc(16.8px + (var(--w) - 256px) * 0.062); background: var(--white); border: 1px solid var(--border); border-radius: 22px; overflow: hidden;
-  box-shadow: 0 1px 2px rgba(51, 39, 31, 0.05), 0 10px 26px rgba(51, 39, 31, 0.06);
-  transition: --w var(--dur) var(--curve), opacity var(--dur) var(--curve), box-shadow var(--dur) var(--curve), border-color 0.3s var(--ease), background-color 0.3s var(--ease); }
-.pc-t1 { --w: var(--w1); opacity: 1; }
-.pc-t2 { --w: var(--w2); opacity: 0.92; }
-.pc-t3 { --w: var(--w3); opacity: 0.82; }
-.pc-t4 { --w: var(--w4); opacity: 0.72; }
-.pc-card:hover { opacity: 1; box-shadow: 0 2px 4px rgba(51, 39, 31, 0.06), 0 14px 30px rgba(51, 39, 31, 0.12); }
-.pc-card:focus-within { opacity: 1; outline: 2px solid var(--blue-ink); outline-offset: 3px; }
-.pc-probe { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; padding: 0; border: 0; box-shadow: none; transition: none; } /* measures the smallest card for this breakpoint */
-/* The active card (whichever priority it is) gets the restrained accent. */
-.pc-card.is-active { border: 2px solid var(--caramel); background-image: linear-gradient(180deg, var(--papaya-soft) 0%, var(--white) 58%); box-shadow: 0 1px 2px rgba(51, 39, 31, 0.05), 0 14px 30px rgba(191, 126, 70, 0.24); }
+.pc-card { position: relative; flex: 0 0 auto; box-sizing: border-box; width: calc((100% - var(--gaps) * var(--gap)) / var(--per)); min-height: 20.5rem; display: grid;
+  grid-template-areas: 'rank risk' 'action action' 'who who' 'when when' 'why why' 'cta cta'; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; row-gap: 0.3rem;
+  padding: 1.3rem 1.35rem 1.2rem; background: var(--white); border: 1px solid var(--border); border-radius: 20px; overflow: hidden;
+  box-shadow: 0 1px 2px rgba(51, 39, 31, 0.05), 0 8px 22px rgba(51, 39, 31, 0.06); transition: box-shadow 0.25s var(--ease), border-color 0.25s var(--ease), transform 0.25s var(--ease); }
+.pc-card:hover { transform: translateY(-3px); box-shadow: 0 2px 4px rgba(51, 39, 31, 0.06), 0 14px 30px rgba(51, 39, 31, 0.12); }
+.pc-card:focus-within { outline: 2px solid var(--blue-ink); outline-offset: 3px; }
+/* The first priority: a subtle caramel border, same size as the rest. */
+.pc-card.is-first { border-color: var(--caramel); box-shadow: 0 0 0 1px var(--caramel), 0 8px 22px rgba(191, 126, 70, 0.16); }
+.pc-card.is-first:hover { box-shadow: 0 0 0 1px var(--caramel), 0 14px 30px rgba(191, 126, 70, 0.24); }
 
-/* Type scales with the card: the same --w that sizes the card sizes everything in it (with readable minimums). */
-.pc-rank { grid-area: rank; font-family: var(--serif); line-height: 0.9; color: var(--caramel-ink); font-size: max(26px, calc(30px + (var(--w) - 256px) * 0.241)); transition: color 0.3s var(--ease); }
-.pc-card:not(.is-active) .pc-rank { color: var(--muted); }
+.pc-rank { grid-area: rank; font-family: var(--serif); font-size: 2.2rem; line-height: 0.9; color: var(--muted); }
+.pc-card.is-first .pc-rank { color: var(--caramel-ink); }
 .pc-risk { grid-area: risk; justify-self: end; align-self: start; }
-.pc-action { grid-area: action; margin: 0.2rem 0 0; line-height: 1.18; font-size: max(14.5px, calc(16px + (var(--w) - 256px) * 0.086)); }
-.pc-link { color: inherit; text-decoration: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.pc-card.is-active .pc-link { -webkit-line-clamp: 3; }
+.pc-risk .badge, .pc-risk > * { font-size: 0.72rem; padding-block: 0.12rem; white-space: nowrap; }
+.pc-action { grid-area: action; margin: 0.35rem 0 0; font-size: 1.15rem; line-height: 1.22; }
+.pc-link { color: inherit; text-decoration: none; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pc-link::after { content: ''; position: absolute; inset: 0; border-radius: inherit; } /* the whole card is the link */
 .pc-link:focus-visible { outline: none; }
-.pc-who { grid-area: who; margin: 0; color: var(--muted); font-size: max(12px, calc(12.8px + (var(--w) - 256px) * 0.022)); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-.pc-card.is-active .pc-who { -webkit-line-clamp: 2; }
+.pc-who { grid-area: who; margin: 0; color: var(--muted); font-size: 0.86rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .pc-who strong { color: var(--cocoa); font-weight: 600; }
-.pc-when { grid-area: when; margin: 0; display: flex; flex-direction: column; color: var(--muted); font-size: max(11.5px, calc(12.2px + (var(--w) - 256px) * 0.005)); font-variant-numeric: tabular-nums; }
-.pc-when b { font-weight: 600; color: var(--cocoa); font-size: max(13.5px, calc(14px + (var(--w) - 256px) * 0.031)); }
+.pc-when { grid-area: when; margin: 0.35rem 0 0; display: flex; flex-direction: column; color: var(--muted); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.pc-when b { font-weight: 600; color: var(--cocoa); font-size: 0.95rem; }
 .pc-overdue b { color: var(--high); }
-/* The explanation fills whatever room is left and fades out at the bottom if it is longer, so nothing is ever cut mid-line. */
-.pc-why { grid-area: why; margin: 0.1rem 0 0; min-height: 0; overflow: hidden; line-height: 1.36; color: var(--cocoa); font-size: max(12px, calc(12.4px + (var(--w) - 256px) * 0.017));
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.15lh), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 1.15lh), transparent); }
-.pc-foot { grid-area: cta; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.pc-why { grid-area: why; margin: 0.45rem 0 0.5rem; min-height: 0; color: #5E4D40; font-size: 0.84rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; align-self: start; }
+.pc-foot { grid-area: cta; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.55rem; border-top: 1px solid var(--border); }
 .pc-foot .demo-tag { margin: 0; }
-.pc-cta { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 13.6px; font-weight: 600; color: var(--caramel-ink); transition: background-color 0.3s var(--ease), padding 0.3s var(--ease); }
-.pc-card.is-active .pc-cta { padding: 0.5rem 0.95rem; background: var(--caramel); color: var(--on-caramel); border-radius: 999px; }
-.pc-card:hover .pc-cta svg { transform: translateX(3px); }
+.pc-cta { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.88rem; font-weight: 600; color: var(--caramel-ink); }
 .pc-cta svg { transition: transform 0.25s var(--ease); }
+.pc-card:hover .pc-cta svg { transform: translateX(4px); }
 
 /* Cards glide in one after another when the section scrolls into view. */
 @media (prefers-reduced-motion: no-preference) {
-  .reveal.is-visible .pc-card:not(.pc-probe) { animation: pcIn 0.75s var(--ease) backwards; }
+  .reveal.is-visible .pc-card { animation: pcIn 0.7s var(--ease) backwards; }
   .reveal.is-visible .pc-card:nth-child(2) { animation-delay: 0.1s; }
   .reveal.is-visible .pc-card:nth-child(3) { animation-delay: 0.2s; }
-  .reveal.is-visible .pc-card:nth-child(4) { animation-delay: 0.3s; }
-  .reveal.is-visible .pc-card:nth-child(n + 5) { animation-delay: 0.4s; }
+  .reveal.is-visible .pc-card:nth-child(n + 4) { animation-delay: 0.3s; }
 }
-@keyframes pcIn { from { opacity: 0; translate: 34px 0; } }
-@media (prefers-reduced-motion: reduce) { .pc { --dur: 0.01s; } .pc-card, .pc-arrow, .pc-track { transition-duration: 0.01s; } }
+@keyframes pcIn { from { opacity: 0; translate: 30px 0; } }
+@media (prefers-reduced-motion: reduce) { .pc-track, .pc-card, .pc-arrow, .pc-cta svg { transition-duration: 0.01s; } .pc-card:hover { transform: none; } }
 
-/* Tablet: smaller cards, same hierarchy. */
-@media (max-width: 1024px) { .pc { --w1: 330px; --w2: 288px; --w3: 258px; --w4: 244px; } }
-/* Phone: one dominant card with the next one peeking in. */
-@media (max-width: 700px) {
-  .pc { --w1: min(80vw, 316px); --w2: min(70vw, 256px); --w3: min(70vw, 256px); --w4: min(70vw, 256px); --gap: 0.8rem; }
-  .pc-viewport { padding-inline: 8px; }
-  .pc-timeline { margin-right: 0; }
-}
+/* Tablet: two cards and a peek. Phone: one card and a peek of the next. */
+@media (max-width: 1024px) { .pc { --per: 2.25; --gaps: 2; } }
+@media (max-width: 700px) { .pc { --per: 1.14; --gaps: 1; --gap: 0.8rem; } .pc-timeline { margin-right: 0; } .pc-card { min-height: 19.5rem; } }

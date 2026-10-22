@@ -9,7 +9,6 @@ import '../css/Carousel.css';
 
 const RISK_OF = { deadline_passed: 'high', unschedulable: 'high', late: 'high', tight: 'medium', on_track: 'low' };
 const plural = (n, one, many) => (n === 1 ? one : many);
-const PROPS_OK = typeof CSS !== 'undefined' && 'registerProperty' in CSS; // animated card sizes need registered custom properties
 
 // How much time is left (or how overdue the order is), measured at the moment the scheduler produced its plan.
 function timing(order, nowIso) {
@@ -19,10 +18,8 @@ function timing(order, nowIso) {
 }
 
 // Priority cards for the homepage. Rank, action, explanation and risk all come from the scheduling engine (planner.nextMoves),
-// the same source as the Deadlines timeline. The ACTIVE card is always the largest; the ones after it step down in size.
-//
-// Layout stays stable on purpose: the active card is pinned to the left edge and the track slides by exactly the width the
-// cards before it will have. Card width and the slide use the same duration and easing, so both stay in step (no jumps, no clipping).
+// the same source as the Deadlines timeline. Every card has the same size and layout; only the first priority carries a caramel border.
+// The track slides by exactly one card (card width + gap) per step, so the layout never reflows while browsing.
 export default function PriorityCarousel({ planner, orders }) {
   const tz = planner.range.timezone;
   const byId = Object.fromEntries(orders.map((o) => [o.id, o]));
@@ -30,22 +27,28 @@ export default function PriorityCarousel({ planner, orders }) {
   const n = moves.length;
   const viewportRef = useRef(null);
   const trackRef = useRef(null);
-  const probeRef = useRef(null);
   const gesture = useRef({ acc: 0, lockUntil: 0, startX: null, dx: 0, dragged: false });
   const focusAfter = useRef(false);
-  const [active, setActive] = useState(0);
-  const [step, setStep] = useState(272); // width of a smallest card + the gap: how far one position slides the track
+  const [active, setActive] = useState(0); // index of the first card in view
+  const [step, setStep] = useState(300);   // card width + gap: how far one position slides the track
+  const [visible, setVisible] = useState(3); // how many cards fit completely
   const [drag, setDrag] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const last = Math.max(0, n - visible);     // the furthest position: the final card sits at the right edge
 
-  const to = useCallback((i) => setActive((a) => Math.max(0, Math.min(n - 1, typeof i === 'function' ? i(a) : i))), [n]);
-  useEffect(() => { if (active > n - 1) setActive(Math.max(0, n - 1)); }, [n, active]);
+  const to = useCallback((i) => setActive((a) => Math.max(0, Math.min(last, typeof i === 'function' ? i(a) : i))), [last]);
+  useEffect(() => { if (active > last) setActive(last); }, [last, active]);
 
-  // Measure the smallest card (a hidden probe, so it reflects the current breakpoint) plus the gap.
+  // Measure a card plus the gap, and how many whole cards the track shows (the next one peeks in beside them).
   useLayoutEffect(() => {
     const measure = () => {
-      if (!probeRef.current || !trackRef.current) return;
-      setStep(probeRef.current.offsetWidth + (parseFloat(getComputedStyle(trackRef.current).columnGap) || 0));
+      const track = trackRef.current;
+      const card = track?.children[0];
+      if (!card) return;
+      const gap = parseFloat(getComputedStyle(track).columnGap) || 0;
+      const st = card.offsetWidth + gap;
+      setStep(st);
+      setVisible(Math.max(1, Math.floor((track.clientWidth + gap) / st + 0.01)));
     };
     measure();
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
@@ -95,7 +98,7 @@ export default function PriorityCarousel({ planner, orders }) {
   const onKey = (e) => {
     const keys = { ArrowRight: 1, ArrowLeft: -1 };
     if (e.key in keys) { e.preventDefault(); stepBy(keys[e.key], viewportRef.current.contains(document.activeElement) && document.activeElement !== viewportRef.current); }
-    else if (e.key === 'Home') { e.preventDefault(); to(0); } else if (e.key === 'End') { e.preventDefault(); to(n - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); to(0); } else if (e.key === 'End') { e.preventDefault(); to(last); }
   };
   useEffect(() => { // after a keyboard step, keep keyboard focus on the new active card
     if (focusAfter.current) { focusAfter.current = false; trackRef.current?.children[active]?.querySelector('a')?.focus({ preventScroll: true }); }
@@ -110,13 +113,13 @@ export default function PriorityCarousel({ planner, orders }) {
     <>
       <SectionHead eyebrow="Urgent" title="What needs you first.">{subtitle}</SectionHead>
       {n === 0 ? <StateMessage message="Nothing is waiting on you right now." /> : (
-        <div className={`pc${PROPS_OK ? '' : ' pc-static'}`}>
+        <div className="pc">
           <div className="pc-bar">
-            <p className="pc-count" aria-live="polite"><b>{n}</b> actionable {plural(n, 'order', 'orders')} · showing priority <b>{active + 1}</b> of {n}</p>
+            <p className="pc-count" aria-live="polite"><b>{n}</b> actionable {plural(n, 'order', 'orders')} · showing {visible > 1 ? <>priorities <b>{active + 1}–{Math.min(n, active + visible)}</b></> : <>priority <b>{active + 1}</b></>} of {n}</p>
             <div className="pc-nav">
               <Link to="/deadlines" className="pc-timeline">See full timeline <ArrowRight size={14} aria-hidden="true" /></Link>
               <button type="button" className="pc-arrow" onClick={() => stepBy(-1)} disabled={active === 0} aria-label="Previous priority"><ChevronLeft size={20} aria-hidden="true" /></button>
-              <button type="button" className="pc-arrow" onClick={() => stepBy(1)} disabled={active >= n - 1} aria-label="Next priority"><ChevronRight size={20} aria-hidden="true" /></button>
+              <button type="button" className="pc-arrow" onClick={() => stepBy(1)} disabled={active >= last} aria-label="Next priority"><ChevronRight size={20} aria-hidden="true" /></button>
             </div>
           </div>
 
@@ -127,9 +130,8 @@ export default function PriorityCarousel({ planner, orders }) {
                 const o = byId[m.orderId];
                 const t = timing(o, planner.generatedAt);
                 const blocked = m.kind === 'needs_details';
-                const tier = i < active ? 4 : Math.min(i - active + 1, 4); // 1 = active (largest) ... 4 = smallest
                 return (
-                  <li key={m.orderId} className={`pc-card pc-t${tier}${tier === 1 ? ' is-active' : ''}`} aria-label={`Priority ${m.rank} of ${n}`} onFocusCapture={() => to(i)}>
+                  <li key={m.orderId} className={`pc-card${m.rank === 1 ? ' is-first' : ''}`} aria-label={`Priority ${m.rank} of ${n}`} onFocusCapture={() => to(i)}>
                     <span className="pc-rank" aria-hidden="true">{m.rank}</span>
                     <h3 className="pc-action"><Link className="pc-link" to={`/orders?edit=${o.id}`} title={m.action}>{m.action}</Link></h3>
                     <p className="pc-who"><strong>{o.customerName}</strong> · {o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</p>
@@ -144,7 +146,6 @@ export default function PriorityCarousel({ planner, orders }) {
                 );
               })}
             </ol>
-            <span className="pc-card pc-t4 pc-probe" ref={probeRef} aria-hidden="true" />
           </div>
         </div>
       )}
