@@ -71,6 +71,13 @@ test('timeouts, rate limits, auth failures and garbage responses become AI_UNAVA
   const resp = (status, body, headers = {}) => async () => ({ ok: status < 400, status, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
   await assert.rejects(groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(429, {}, { 'retry-after': '12' }) }), (e) => e.status === 503 && e.retryAfter === '12' && /rate-limited/.test(e.message));
   await assert.rejects(groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(401, {}) }), (e) => e.status === 503 && !e.message.includes('sk-secret'));
+  const quiet = console.error; console.error = () => {};
+  try {
+    await assert.rejects(groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(400, { error: { code: 'json_validate_failed', message: 'x' } }) }), (e) => e.status === 503 && /enter the order manually/.test(e.message) && !/HTTP/.test(e.message));
+    await assert.rejects(groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(404, { error: { code: 'model_not_found' } }) }), (e) => /GROQ_MODEL/.test(e.message));
+    await assert.rejects(groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(503, {}) }), (e) => /having problems/.test(e.message));
+    await assert.rejects(groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(400, { error: { code: 'other' } }) }), (e) => /server log/.test(e.message));
+  } finally { console.error = quiet; }
   await assert.rejects(groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(200, { choices: [{ message: { content: 'not json' } }] }) }), (e) => e.status === 503 && /unreadable/.test(e.message));
   const ok = await groqJson({ system: 's', user: 'u' }, { cfg, fetchImpl: resp(200, { choices: [{ message: { content: '{"a":1}' } }] }) });
   assert.deepEqual(ok, { a: 1 });
