@@ -420,6 +420,27 @@ Rules: **read-only** — no order, task or schedule is persisted; a repeat call 
 
 ---
 
+## 7b. Monthly analytics
+
+### `GET /api/analytics/monthly?month=YYYY-MM`
+
+Business insights for one calendar month in the business timezone (`month` defaults to the current month; an invalid value returns `400 VALIDATION_ERROR`). Implemented by `server/services/analyticsService.js` (pure function of orders, settings, month and now). The in-browser demo backend calls the same function, so demo and live agree.
+
+Every metric is either `{ available: true, value, ... }` or `{ available: false, reason }`. A metric is unavailable when the order schema cannot support it; the API never returns an estimated or illustrative value in its place.
+
+| Section | Fields | Basis |
+|---|---|---|
+| `quality` | `mode` (`real` \| `demo` \| `mixed` \| `empty`), `ordersInMonth`, `historyMonths`, `incomplete[]` | `[DEMO]` notes mark demo orders |
+| `overview` | `received` (+`previous`, `change`), `completed`, `pending`, `cancelled` | orders whose `createdAt` is in the month, by current status. `change` needs 3+ orders in the previous month |
+| `sales` | `receivedByWeek`, `bestSellers`, `busiestWeek`, `customers` | grouped by product name; new vs returning only from `customerContact` (never names) |
+| `fulfilment` | `dueByWeek`, `due`, `dueCompleted`, `overdueOpen`, `atRisk`, `carryover` | orders whose `deadline` is in the month. `atRisk` is the scheduler's PREDICTION, not an actual late delivery |
+| `payments` | `statusCounts`, `recordedNotes` | `paymentStatus` counts; `paymentEvidence` amounts are seller notes, not verified money |
+| `customers` | `repeatCustomers`, `followUps` | needs `customerContact`; follow-ups come from open orders only |
+| `capacity` | `days[]` (14 days from now), `overloadedDates`, `sameDayDeadlines`, `spareMinutes` | `computePlan`; always the next 14 days |
+| `opportunities[]` | `insight`, `evidence`, `why`, `action`, `link` | only generated when the data supports them |
+
+Always `available: false` today, with the field each one needs: `overview.revenue`, `outstandingBalance` and `sales.weeklyRevenue`, `averageOrderValue`, `customers.topBySpend` (order **price**); `overview.onTimeRate`, `fulfilment.averageFulfilmentTime`, `lateCompletions` (**completedAt**); `fulfilment.delayReasons` (**delayReason**); `payments.advances`, `refunds`, `outstanding` (**amount paid / refunds**); `payments.profit` (**costs**); `customers.complaints` (**complaint / rework record**); `customers.reorderReminders`, `capacity.recurringDelays` (**several months of history with completion times**).
+
 ## 8. Integrations
 
 > **Not implemented.** Real WhatsApp and Instagram flows use the Meta platform (OAuth / Embedded Signup, webhooks, app review and permissions). The routes and payloads below are the *intended* shape only and **must be verified against the implemented Meta integrations** before the frontend relies on them. Until then, the backend should report `demo` or `unavailable`, never `connected`.

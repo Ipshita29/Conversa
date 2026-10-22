@@ -1,9 +1,9 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar.jsx';
 import Footer from './components/Footer.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Orders from './pages/Orders.jsx';
-import Operations from './pages/Operations.jsx';
+import Analytics from './pages/Analytics.jsx';
 import Deadlines from './pages/Deadlines.jsx';
 import Inbox from './pages/Inbox.jsx';
 import Calendar from './pages/Calendar.jsx';
@@ -18,7 +18,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/orders" element={<Orders />} />
-            <Route path="/operations" element={<Operations />} />
+            <Route path="/dashboard" element={<Analytics />} />
+            <Route path="/operations" element={<Navigate to="/dashboard" replace />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/deadlines" element={<Deadlines />} />
             <Route path="/inbox" element={<Inbox />} />

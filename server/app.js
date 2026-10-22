@@ -5,6 +5,7 @@ import { isDbReady } from './config/db.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import orders from './routes/orders.js';
 import dashboard from './routes/dashboard.js';
+import analytics from './routes/analytics.js';
 import planner from './routes/planner.js';
 import ai from './routes/ai.js';
 import settings from './routes/settings.js';
@@ -22,6 +23,7 @@ export function createApp() {
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok', database: isDbReady() ? 'connected' : 'disconnected' }));
   app.use('/api/dashboard', dashboard);
+  app.use('/api/analytics', analytics);
   app.use('/api/orders', orders);
   app.use('/api/ai', ai);
   app.use('/api/planner', planner);

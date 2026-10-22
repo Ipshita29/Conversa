@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { MoreVertical, LayoutDashboard, AlarmClock, FlaskConical, Inbox, ShoppingBag, Gauge, CalendarDays } from 'lucide-react';
+import { MoreVertical, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag, CalendarDays } from 'lucide-react';
 import { scrollToTop } from '../utils/scroll.js';
 import { DEMO_MODE } from '../services/api.js';
 import '../css/Navbar.css';
 
 // Routes. "What-if simulation" is a section of the Deadlines page, so it links to /deadlines#simulation.
 const WORKSPACE = [
-  { key: 'overview', to: '/', label: 'Overview', hint: 'Your business at a glance', icon: LayoutDashboard },
+  { key: 'overview', to: '/', label: 'Overview', hint: 'Your business at a glance', icon: House },
   { key: 'deadlines', to: '/deadlines', label: 'Deadlines', hint: 'Production timeline and risks', icon: AlarmClock },
   { key: 'simulation', to: '/deadlines#simulation', label: 'What-if simulation', hint: 'Test a change to the plan', icon: FlaskConical },
   { key: 'inbox', to: '/inbox', label: 'Inbox', hint: 'Messages from every channel', icon: Inbox },
 ];
 const PAGES = [
   { key: 'orders', to: '/orders', label: 'Orders', hint: 'Every order, every channel', icon: ShoppingBag },
-  { key: 'operations', to: '/operations', label: 'Operations', hint: 'Workload, risks, simulation', icon: Gauge },
+  { key: 'dashboard', to: '/dashboard', label: 'Dashboard', hint: 'Business insights at a glance.', icon: LayoutGrid },
   { key: 'calendar', to: '/calendar', label: 'Calendar', hint: 'Deadlines and scheduled work', icon: CalendarDays },
 ];
-const TITLES = { '/': 'Overview', '/deadlines': 'Deadlines', '/inbox': 'Inbox', '/orders': 'Orders', '/operations': 'Operations', '/calendar': 'Calendar', '/settings': 'Integrations' };
+const TITLES = { '/': 'Overview', '/deadlines': 'Deadlines', '/inbox': 'Inbox', '/orders': 'Orders', '/dashboard': 'Dashboard', '/calendar': 'Calendar', '/settings': 'Integrations' };
 // Sections the pill follows while you scroll a page.
 const SPY = { '/deadlines': { timeline: 'Deadlines', risk: 'Orders at risk', simulation: 'What-if' } };
 

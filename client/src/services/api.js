@@ -47,6 +47,7 @@ const qs = (params = {}) => {
 };
 
 export const getDashboard = () => request('GET', '/dashboard');
+export const getMonthlyAnalytics = (month) => request('GET', `/analytics/monthly${qs({ month })}`);
 
 export const listOrders = (params) => request('GET', `/orders${qs(params)}`);
 export const createOrder = (order) => request('POST', '/orders', order);
