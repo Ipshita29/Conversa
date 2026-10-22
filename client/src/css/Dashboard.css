@@ -14,7 +14,7 @@
 .hero-meta { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
 .hero-greeting { margin: 1.6rem 0 0.6rem; color: var(--muted); font-size: 1.05rem; }
 .hero-line { display: block; }
-.hero h1 { max-width: 12em; font-size: clamp(3.1rem, 8.4vw, 7.6rem); line-height: 0.98; letter-spacing: -0.025em; text-wrap: balance; }
+.hero h1 { max-width: 12em; font-size: clamp(3rem, 7vw, 6.6rem); line-height: 0.98; letter-spacing: -0.025em; text-wrap: balance; }
 .hero-lede { max-width: 36rem; margin: 1.8rem 0 2.2rem; font-size: clamp(1.1rem, 1.6vw, 1.3rem); color: var(--muted); }
 .hero-actions { display: flex; align-items: center; gap: 1.4rem; flex-wrap: wrap; }
 .hero-actions .btn { min-height: 48px; padding-inline: 1.4rem; font-size: 0.98rem; }
@@ -23,19 +23,38 @@
 .hero-statement span:nth-child(2) { color: var(--caramel-ink); }
 .hero-statement span:nth-child(3) { color: var(--blue-ink); }
 
-.hero-orb { position: absolute; right: -7vw; top: 14%; width: clamp(240px, 44vw, 640px); aspect-ratio: 1; border-radius: 50%; background: var(--papaya); z-index: 0; pointer-events: none; will-change: transform;
-  transform: translate3d(0, calc(var(--hero-p, 0) * -70px), 0) scale(calc(1 + var(--hero-p, 0) * 0.22)); }
-.hero-orb i { position: absolute; left: 9%; bottom: 16%; width: 15%; aspect-ratio: 1; border-radius: 50%; background: var(--blue); opacity: 0.85; }
+/* Hero: the photo fills the whole section. A muted, cream-washed copy sits underneath; the vivid original shows through a feathered
+   circular mask that follows the pointer (--mx / --my / --r are set from HeroSection). A cream scrim keeps the copy readable. */
+.hero { display: block; }
+.hero-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: var(--ivory); pointer-events: none; --mx: 74%; --my: 46%; --r: 0px; }
+.hero-bg img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 62% 50%; }
+.hero-bg-muted { filter: saturate(0.35) sepia(0.2) contrast(0.9); }
+/* Outside the spotlight the photo is almost cream. Inside it, the vivid original shows untouched: it sits above the cream wash,
+   with no filter, tint or blur. The edge feathers over --f (about 64px) so it reads as soft light, not a cut-out. */
+.hero-bg-scrim { position: absolute; inset: 0; background: rgba(255, 249, 241, 0.88); }
+.hero-bg-vivid { --f: 64px;
+  -webkit-mask-image: radial-gradient(circle at var(--mx) var(--my), #000 max(0px, calc(var(--r) - var(--f))), rgba(0, 0, 0, 0.55) max(0px, calc(var(--r) - var(--f) * 0.45)), transparent max(1px, var(--r)));
+  mask-image: radial-gradient(circle at var(--mx) var(--my), #000 max(0px, calc(var(--r) - var(--f))), rgba(0, 0, 0, 0.55) max(0px, calc(var(--r) - var(--f) * 0.45)), transparent max(1px, var(--r))); }
+.hero-bg::after { content: ''; position: absolute; inset: 55% 0 0; background: linear-gradient(180deg, transparent, var(--papaya-soft)); } /* the hero melts into the next section */
+.hero-copy { max-width: 46rem; text-shadow: 0 0 22px rgba(255, 250, 244, 0.75), 0 0 6px rgba(255, 250, 244, 0.5); } /* the reveal passes beneath the copy, so keep it legible on any part of the photo */
+.hero-copy .btn { text-shadow: none; }
+.hero-lede, .hero-greeting, .hero-summary { color: #5A4A3E; }
+@media (prefers-reduced-motion: no-preference) {
+  .hero-bg { animation: heroIn 1.4s var(--ease) backwards; }
+  .hero-bg img { animation: heroSettle 2.2s var(--ease) backwards; }
+}
+@media (hover: none) { .hero-bg-muted { filter: saturate(0.9); } .hero-bg-scrim { opacity: 0.55; } } /* touch: the photo stays in colour, gently washed under the copy */
+@keyframes heroIn { from { opacity: 0; } }
+@keyframes heroSettle { from { transform: scale(1.08); } }
 @media (max-width: 860px) {
   .home { margin-top: -4.8rem; }
   .home .ws-section { padding-inline: var(--gutter); }
   #overview { padding-top: 6rem; padding-bottom: 3.5rem; }
   .hero-greeting { margin-top: 1.2rem; }
   .hero-statement { margin-top: 2rem; }
-  .hero-orb { right: -26vw; top: 3%; width: 78vw; }
-  .hero-orb i { left: 22%; top: 12%; bottom: auto; }
+    .hero-bg img { object-position: 70% 50%; }
 }
-@media (prefers-reduced-motion: reduce) { .hero-copy, .hero-orb { transform: none; opacity: 1; will-change: auto; } }
+@media (prefers-reduced-motion: reduce) { .hero-copy { transform: none; opacity: 1; will-change: auto; } .hero-bg, .hero-bg img { animation: none !important; } }
 
 /* ---------- Today ---------- */
 .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 2.5rem; padding: 1.5rem 0.5rem; background: var(--papaya-soft); border-radius: 14px; }

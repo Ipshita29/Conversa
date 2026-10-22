@@ -168,7 +168,7 @@ textarea { resize: vertical; min-height: 96px; }
 
 /* ---------- Lenis-driven scroll effects (all disabled for reduced motion) ---------- */
 .scroll-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 70; pointer-events: none; background: var(--caramel); transform-origin: 0 50%; transform: scaleX(var(--scroll-progress, 0)); }
-.hero-copy, .hero-orb, .section-head h2 { will-change: transform; }
+.hero-copy, .section-head h2 { will-change: transform; }
 @media (prefers-reduced-motion: no-preference) {
   /* Rows, tiles and counters rise in one after another when their section scrolls into view. */
   .reveal.is-visible :is(.metric, .rk-sum, .work-row, .rk-list > li, .msg-list > li, .day-bars li, .action) { animation: rise 0.7s var(--ease) both; }
