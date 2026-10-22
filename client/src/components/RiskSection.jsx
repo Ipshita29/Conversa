@@ -47,7 +47,7 @@ function Row({ order, entry, tz, planner, byId, rec, recLabel = 'Recommended', b
       <div className="rk-head">
         <div className="rk-who"><strong>{order.customerName}</strong><span>{order.item}{qty(order)}</span></div>
         <div className="rk-when"><small>Promised deadline</small>{order.deadline ? formatInTz(order.deadline, tz) : '—'}</div>
-        <div className="rk-when"><small>Expected finish</small>{finish ? formatInTz(finish, tz) : entry.kind === 'unschedulable' ? 'Not within the horizon' : '—'}</div>
+        <div className="rk-when"><small>Predicted finish</small>{finish ? formatInTz(finish, tz) : entry.kind === 'unschedulable' ? 'Not within the horizon' : '—'}</div>
         <div className={`rk-impact rk-impact-${imp?.tone ?? 'ok'}`}>{imp?.text ?? '—'}</div>
         <RiskBadge risk={entry.risk} />
         <button type="button" className="rk-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
@@ -140,7 +140,6 @@ export default function RiskSection({ planner, orders, onSimulate, eyebrow = 'Or
   const details = planner.unscheduledOrders.filter((u) => byId[u.id]);
   const overdue = high.filter((e) => e.kind === 'deadline_passed').length;
   const predicted = high.length - overdue;
-  const atRisk = [...high, ...medium];
 
   const sentences = [];
   if (predicted > 0) sentences.push(`${predicted} ${plural(predicted, 'order is', 'orders are')} predicted to miss ${plural(predicted, 'its deadline', 'their deadlines')}.`);
@@ -159,23 +158,32 @@ export default function RiskSection({ planner, orders, onSimulate, eyebrow = 'Or
         <StateMessage message="No open orders to schedule." />
       ) : (
         <>
-          {sentences.length > 0 && <p className="rk-headline" aria-live="polite">{sentences.join(' ')}</p>}
-          <dl className="rk-summary">
-            <div className="rk-sum rk-sum-high"><dt><RiskBadge risk="high" /></dt><dd><CountUp value={high.length} /></dd><small>Predicted to miss the deadline</small></div>
-            <div className="rk-sum rk-sum-medium"><dt><RiskBadge risk="medium" /></dt><dd><CountUp value={medium.length} /></dd><small>Less than {formatMinutes(buf)} of buffer</small></div>
-            <div className="rk-sum rk-sum-low"><dt><RiskBadge risk="low" /></dt><dd><CountUp value={low.length} /></dd><small>{formatMinutes(buf)} or more of buffer</small></div>
-            <div className="rk-sum rk-sum-details"><dt><RiskBadge needsDetails /></dt><dd><CountUp value={details.length} /></dd><small>Missing preparation time or deadline</small></div>
+          {sentences.length > 0 && <p className="sr-only" aria-live="polite">{sentences.join(' ')}</p>}
+          <dl className="rk-overview" aria-label="Risk overview">
+            <div className="rk-ov rk-ov-high"><dt>High risk</dt><dd><CountUp value={high.length} /></dd><small>{overdue > 0 ? `${overdue} already past due` : 'Predicted to miss the deadline'}</small></div>
+            <div className="rk-ov rk-ov-medium"><dt>Tight buffer</dt><dd><CountUp value={medium.length} /></dd><small>Under {formatMinutes(buf)} to spare</small></div>
+            <div className="rk-ov rk-ov-low"><dt>On track</dt><dd><CountUp value={low.length} /></dd><small>{formatMinutes(buf)} or more to spare</small></div>
+            <div className="rk-ov rk-ov-details"><dt>Needs details</dt><dd><CountUp value={details.length} /></dd><small>Can't be scheduled yet</small></div>
           </dl>
 
-          {atRisk.length > 0 && (
-            <section className="rk-group" aria-label="At risk">
-              <h3>At risk <span>{atRisk.length}</span></h3>
-              <ol className="rk-list">{atRisk.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} recLabel={recLabelFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
+          {high.length > 0 && (
+            <section className="rk-group rk-group-high" aria-label="High risk">
+              <h3>High risk <span>{high.length}</span></h3>
+              <p>Predicted to miss the promised deadline, or already past it. Most urgent first.</p>
+              <ol className="rk-list">{high.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} recLabel={recLabelFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
+            </section>
+          )}
+
+          {medium.length > 0 && (
+            <section className="rk-group rk-group-medium" aria-label="Tight buffer">
+              <h3>Tight buffer <span>{medium.length}</span></h3>
+              <p>On time, but with less than {formatMinutes(buf)} of safety buffer.</p>
+              <ol className="rk-list">{medium.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} recLabel={recLabelFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
             </section>
           )}
 
           {details.length > 0 && (
-            <section className="rk-group" aria-label="Needs details">
+            <section className="rk-group rk-group-details" aria-label="Needs details">
               <h3>Needs details <span>{details.length}</span></h3>
               <p className="muted">Left out of scheduling until complete. Nothing is guessed: no finish time and no risk is assigned.</p>
               <ul className="rk-list">
@@ -198,7 +206,7 @@ export default function RiskSection({ planner, orders, onSimulate, eyebrow = 'Or
           )}
 
           {low.length > 0 && (
-            <section className="rk-group" aria-label="On track">
+            <section className="rk-group rk-group-low" aria-label="On track">
               <h3>On track <span>{low.length}</span></h3>
               <ol className="rk-list">{low.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={null} buf={buf} />)}</ol>
             </section>
