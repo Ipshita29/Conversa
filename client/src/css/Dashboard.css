@@ -132,11 +132,48 @@
 .sim-warn { margin: 0.9rem 0 0; background: var(--blue-soft); color: var(--blue-ink); border-color: var(--blue); }
 
 /* ---------- Overview: doors to the dedicated pages (the priority carousel has its own file, Carousel.css) ---------- */
-.explore { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; }
-.explore-card { display: flex; flex-direction: column; gap: 0.35rem; padding: 1.6rem; background: var(--white); border: 1px solid var(--border); border-radius: 22px; color: var(--cocoa); text-decoration: none; box-shadow: var(--shadow); transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease), border-color 0.25s var(--ease); }
-.explore-card:hover { transform: translateY(-3px); border-color: #DCC8B4; box-shadow: 0 18px 44px rgba(51, 39, 31, 0.1); }
-.explore-card svg { color: var(--caramel-ink); }
-.explore-card h3 { font-size: 1.7rem; margin-top: 0.4rem; }
-.explore-card p { color: var(--muted); }
-.explore-go { display: inline-flex; align-items: center; gap: 0.4rem; margin-top: 0.8rem; font-size: 0.9rem; font-weight: 600; color: var(--caramel-ink); }
+/* Go deeper: two compact, slightly asymmetrical doors into the dedicated pages, each with a small live preview. */
+.explore { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: stretch; }
+.explore-card { position: relative; display: flex; flex-direction: column; gap: 0.3rem; padding: 1.25rem 1.35rem 1.15rem; background: var(--white); border: 1px solid var(--border); border-radius: 18px; color: var(--cocoa); text-decoration: none; overflow: hidden; box-shadow: var(--shadow);
+  transition: transform 0.35s var(--ease), box-shadow 0.35s var(--ease), border-color 0.35s var(--ease), background-color 0.45s var(--ease); }
+.explore-card::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--caramel); opacity: 0.7; transition: width 0.35s var(--ease); }
+.explore-card::after { content: ''; position: absolute; inset: 0; background: linear-gradient(120deg, var(--papaya) 0%, var(--papaya-soft) 70%); opacity: 0; transition: opacity 0.45s var(--ease); z-index: 0; }
+.explore-card > * { position: relative; z-index: 1; }
+.explore-card:hover, .explore-card:focus-visible { transform: translateY(-4px); border-color: #E3BE98; box-shadow: 0 16px 36px -14px rgba(143, 90, 43, 0.28); }
+.explore-card:hover::after, .explore-card:focus-visible::after { opacity: 1; }
+.explore-card:hover::before { width: 5px; }
+.explore-card:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: 3px; }
+.explore-top { display: flex; align-items: center; gap: 0.6rem; }
+.explore-icon { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; background: var(--papaya); color: var(--caramel-ink); transition: background-color 0.35s var(--ease); }
+.explore-card:hover .explore-icon { background: var(--white); }
+.explore-kicker { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--caramel-ink); }
+.explore-card h3 { margin: 0.35rem 0 0; font-size: 1.55rem; line-height: 1.1; }
+.explore-card p { margin: 0; color: #5E4D40; font-size: 0.93rem; }
+.explore-preview { flex: 1; align-content: center; min-height: 5.2rem; margin: 0.6rem 0 0.2rem; }
+.explore-go { display: inline-flex; align-items: center; gap: 0.4rem; margin-top: auto; padding-top: 0.6rem; font-size: 0.88rem; font-weight: 600; color: var(--caramel-ink); }
+.explore-go svg { transition: transform 0.35s var(--ease); }
+.explore-card:hover .explore-go svg, .explore-card:focus-visible .explore-go svg { transform: translateX(6px); }
+
+/* Mini timeline: one dot per priority, coloured by risk, joined by a line. */
+.explore-line { display: flex; justify-content: space-between; position: relative; list-style: none; padding: 0; align-items: center; }
+.explore-line::before { content: ''; position: absolute; left: 10px; right: 10px; top: 50%; height: 2px; background: repeating-linear-gradient(90deg, #DCC8B4 0 6px, transparent 6px 11px); }
+.explore-line li { position: relative; }
+.explore-line i { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--white); font: 600 0.7rem var(--sans); font-style: normal; transition: transform 0.35s var(--ease); }
+.explore-card:hover .explore-line i { transform: translateY(-2px) scale(1.08); }
+.explore-card:hover .explore-line li:nth-child(2) i { transition-delay: 0.04s; } .explore-card:hover .explore-line li:nth-child(3) i { transition-delay: 0.08s; }
+.explore-card:hover .explore-line li:nth-child(4) i { transition-delay: 0.12s; } .explore-card:hover .explore-line li:nth-child(5) i { transition-delay: 0.16s; }
+.el-high i { background: var(--high-bg); color: var(--high); box-shadow: 0 0 0 1px var(--high); }
+.el-medium i { background: var(--medium-bg); color: var(--medium); box-shadow: 0 0 0 1px var(--medium); }
+.el-low i { background: var(--low-bg); color: var(--low); box-shadow: 0 0 0 1px var(--low); }
+.el-info i { background: var(--blue-soft); color: var(--blue-ink); box-shadow: 0 0 0 1px var(--blue); }
+
+/* Message snippets. */
+.explore-msgs { list-style: none; padding: 0; display: grid; gap: 0.4rem; }
+.explore-msgs li { display: flex; align-items: baseline; gap: 0.5rem; padding: 0.45rem 0.7rem; background: var(--blue-soft); border-radius: 10px; font-size: 0.82rem; min-width: 0; transition: transform 0.35s var(--ease); }
+.explore-msgs li:nth-child(2) { margin-left: 0.9rem; }
+.explore-card:hover .explore-msgs li { transform: translateX(3px); }
+.explore-msgs b { flex: none; color: var(--cocoa); font-weight: 600; }
+.explore-msgs span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #5E4D40; }
+.explore-msgs .is-unread b::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 0.4rem; border-radius: 50%; background: var(--caramel); }
 @media (max-width: 760px) { .explore { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .explore-card, .explore-card *, .explore-card::before, .explore-card::after { transition: none !important; } .explore-card:hover { transform: none; } }
