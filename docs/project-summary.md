@@ -54,7 +54,7 @@ Six inbox messages go with them (5 read, 1 unread). The unread one is a *new* ru
 | 3 | **Orders at risk** | Meera is **1 h 40 m late**, Rohan has **2 h to spare**; Kabir sits apart under *Needs details*. Expand Meera: promised deadline → expected finish, why, the orders scheduled ahead of her, the timeline, a suggested new deadline. |
 | 4 | **What-if** | Click **Run this experiment** ("Ask Meera for one more day"). Show the before/after table (high-risk 1 → 0), the plain-language summary, whether a free hour appears, and whether another order would fit. **Discard** or **Apply this schedule…** (it asks for confirmation and reminds you the customer must agree). |
 | 5 | **Inbox** | Open Nikhil's unread rush message → **Draft order with AI**: quantity, deadline in your timezone, a prep estimate marked *estimate*. "Nothing is saved until you confirm." |
-| 6 | **Orders / Operations / Calendar** | Menu (⋮): all orders with search and status tabs; capacity and risks in one place; the week with deadlines and scheduled work. |
+| 6 | **Orders / Plan / Insights** | Menu (⋮): all orders with search and filters; the day-by-day production plan with risks; a lightweight monthly view. |
 | 7 | **Integrations** | Honest status: WhatsApp and Instagram are **unavailable** until Meta credentials are configured. |
 
 ## 3. What is real, demo, and not built
@@ -68,7 +68,7 @@ Six inbox messages go with them (5 read, 1 unread). The unread one is a *new* ru
 
 ```
 client/                         React + Vite, plain CSS
-  src/pages/                    Dashboard, Orders, Inbox, Calendar (planner + simulation), Operations, Settings
+  src/pages/                    Dashboard (home), Orders, Plan, Insights, What-if, Inbox, Settings
   src/components/               Navbar (sidebar), OrderForm, Badge, Modal, WorkloadChart, StateMessage…
   src/services/api.js           every API call; the only place that talks to the backend
   src/mock/                     in-browser demo backend (used only when VITE_DEMO_MODE=true)

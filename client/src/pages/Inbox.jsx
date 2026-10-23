@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
-import { ArrowLeft, Camera, Copy, ExternalLink, LayoutGrid, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Settings, ShoppingBag, Sparkles, Users, Check } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check } from 'lucide-react';
 import { getConversations, getIntegrations, listOrders, updateConversation, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { CHANNEL_LABEL, STATUS_LABEL } from '../utils/format.js';
@@ -88,18 +88,8 @@ export default function Inbox() {
     }
   }
 
-  const rail = (
-    <nav className="im-rail" aria-label="Workspace">
-      <NavLink to="/inbox" className="im-rail-link is-active" aria-label="Inbox" title="Inbox" aria-current="page"><MessageSquare size={20} aria-hidden="true" />{unreadTotal > 0 && <i className="im-rail-badge">{unreadTotal}</i>}</NavLink>
-      <NavLink to="/orders" className="im-rail-link" aria-label="Orders" title="Orders"><ShoppingBag size={20} aria-hidden="true" /></NavLink>
-      <NavLink to="/dashboard" className="im-rail-link" aria-label="Dashboard" title="Dashboard"><LayoutGrid size={20} aria-hidden="true" /></NavLink>
-      <button type="button" className="im-rail-link" aria-disabled="true" aria-label="Customers (not built yet)" title="Customers: this page isn't built yet"><Users size={20} aria-hidden="true" /></button>
-      <NavLink to="/settings" className="im-rail-link im-rail-end" aria-label="Integrations and settings" title="Integrations and settings"><Settings size={20} aria-hidden="true" /></NavLink>
-    </nav>
-  );
-
-  if (conv.status === 'loading' && !conv.data) return <section className="page inbox-page"><div className="im">{rail}<div className="im-state"><StateMessage kind="loading" message="Loading conversations…" /></div></div></section>;
-  if (conv.status === 'error') return <section className="page inbox-page"><div className="im">{rail}<div className="im-state"><StateMessage kind="error" message={`Couldn't load conversations. ${conv.error.message}`} onRetry={conv.reload} /></div></div></section>;
+  if (conv.status === 'loading' && !conv.data) return <section className="page inbox-page"><div className="im"><div className="im-state"><StateMessage kind="loading" message="Loading conversations…" /></div></div></section>;
+  if (conv.status === 'error') return <section className="page inbox-page"><div className="im"><div className="im-state"><StateMessage kind="error" message={`Couldn't load conversations. ${conv.error.message}`} onRetry={conv.reload} /></div></div></section>;
 
   const items = integrations.data?.items ?? [];
   const groups = [];
@@ -112,7 +102,7 @@ export default function Inbox() {
   return (
     <section className="page inbox-page">
       <div className={`im${chatOpen ? ' is-chat' : ''}`}>
-        {rail}
+        
 
         <aside className="im-side" aria-label="Conversations">
           <header className="im-side-head">
