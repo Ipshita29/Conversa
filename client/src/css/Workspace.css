@@ -1,0 +1,26 @@
+/* ---------- Under the hero: today's workspace ---------- */
+.dw-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; margin: 0 0 2rem; padding: 0; }
+.dw-metrics > div { padding: 1rem 1.2rem; background: var(--white); border: 1px solid var(--border); border-radius: 14px; }
+.dw-metrics dt { font-size: 0.78rem; color: var(--muted); }
+.dw-metrics dd { margin: 0.2rem 0 0; font-family: var(--serif); font-size: 2.4rem; line-height: 1; }
+.dw-metrics .is-risk dd { color: var(--high); }
+.dw-block { margin-bottom: 2rem; }
+.dw-block h3 { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.7rem; font-size: 1.3rem; }
+.dw-block h3 span { padding: 0.05rem 0.55rem; border-radius: 999px; background: var(--high-bg); color: var(--high); font: 600 0.76rem var(--sans); }
+.dw-empty { margin: 0; padding: 1.2rem; background: var(--white); border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); }
+.dw-attn, .dw-plan { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.dw-attn li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.3fr) auto; gap: 0.2rem 1.2rem; align-items: center; padding: 0.8rem 1rem; background: var(--white); border: 1px solid var(--border); border-left: 4px solid #C9736B; border-radius: 12px; }
+.dw-attn .dw-attn-medium { border-left-color: #C79A3A; } .dw-attn .dw-attn-details { border-left-color: var(--blue); }
+.dw-main, .dw-when { display: flex; flex-direction: column; min-width: 0; font-size: 0.88rem; }
+.dw-main span { color: var(--muted); } .dw-when span:first-child { color: var(--cocoa); font-variant-numeric: tabular-nums; } .dw-when span:last-child { color: #5E4D40; font-size: 0.82rem; }
+.dw-why { grid-column: 1 / -1; margin: 0.15rem 0 0; font-size: 0.82rem; color: #5E4D40; }
+.dw-more { display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.6rem; font-size: 0.86rem; font-weight: 600; }
+.dw-plan li { display: grid; grid-template-columns: 4.6rem minmax(0, 1.3fr) minmax(0, 1.2fr) auto; gap: 0.3rem 1rem; align-items: center; padding: 0.7rem 1rem; background: var(--white); border: 1px solid var(--border); border-radius: 12px; font-size: 0.9rem; }
+.dw-time { font-family: var(--serif); font-size: 1.15rem; color: var(--caramel-ink); font-variant-numeric: tabular-nums; }
+.dw-meta { display: flex; flex-direction: column; font-size: 0.84rem; color: #5E4D40; font-variant-numeric: tabular-nums; }
+.dw-badges { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 700px) {
+  .dw-metrics { gap: 0.5rem; } .dw-metrics > div { padding: 0.8rem; } .dw-metrics dd { font-size: 1.9rem; }
+  .dw-attn li { grid-template-columns: 1fr auto; } .dw-when { grid-column: 1 / -1; grid-row: 2; }
+  .dw-plan li { grid-template-columns: 3.8rem minmax(0, 1fr); } .dw-meta, .dw-badges { grid-column: 2; flex-direction: row; gap: 0.2rem 1rem; justify-content: flex-start; flex-wrap: wrap; }
+}

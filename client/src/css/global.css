@@ -53,7 +53,15 @@ a { color: var(--caramel-ink); text-underline-offset: 3px; }
 .page-header h1 { font-size: clamp(2rem, 4vw, 2.8rem); margin: 0.35rem 0 0.4rem; }
 .page-header-actions { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
 
-/* ---------- Sections (home workspace) ---------- */
+/* ---------- Shared small pieces ---------- */
+.stepbar { list-style: none; margin: 0; padding: 0; display: flex; gap: 4px; }
+.stepbar li { width: 22px; height: 4px; border-radius: 2px; background: var(--border); }
+.stepbar li.done { background: var(--blue); }
+.stepbar li.now { background: var(--caramel); }
+.step-cancelled { font-size: 0.82rem; }
+.demo-tag { margin-left: 0.5rem; padding: 0.05rem 0.45rem; border: 1px solid var(--blue); border-radius: 999px; background: var(--blue-soft); color: var(--blue-ink); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 2px; }
+
+/* ---------- Sections ---------- */
 .ws-section { padding: 3.5rem 0; border-top: 1px solid var(--border); scroll-margin-top: 1rem; }
 .ws-section:first-child { border-top: 0; padding-top: 0; }
 .section-head { max-width: 46rem; margin-bottom: 2rem; }

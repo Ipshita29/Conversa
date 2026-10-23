@@ -1,25 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { MoreVertical, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag, CalendarDays } from 'lucide-react';
+import { MoreVertical, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag } from 'lucide-react';
 import { scrollToTop } from '../utils/scroll.js';
 import { DEMO_MODE } from '../services/api.js';
 import '../css/Navbar.css';
 
-// Routes. "What-if simulation" is a section of the Deadlines page, so it links to /deadlines#simulation.
+// Five places in the menu; messages sit in a small secondary group.
 const WORKSPACE = [
-  { key: 'overview', to: '/', label: 'Overview', hint: 'Your business at a glance', icon: House },
-  { key: 'deadlines', to: '/deadlines', label: 'Deadlines', hint: 'Production timeline and risks', icon: AlarmClock },
-  { key: 'simulation', to: '/deadlines#simulation', label: 'What-if simulation', hint: 'Test a change to the plan', icon: FlaskConical },
-  { key: 'inbox', to: '/inbox', label: 'Inbox', hint: 'Messages from every channel', icon: Inbox },
+  { key: 'overview', to: '/', label: 'Home', hint: 'Your day, organised', icon: House },
+  { key: 'orders', to: '/orders', label: 'Orders', hint: 'Every order, every channel', icon: ShoppingBag },
+  { key: 'plan', to: '/plan', label: 'Plan', hint: 'What to make, and when', icon: AlarmClock },
+  { key: 'insights', to: '/insights', label: 'Insights', hint: 'Your month at a glance', icon: LayoutGrid },
+  { key: 'whatif', to: '/whatif', label: 'What-if', hint: 'Test a change first', icon: FlaskConical },
 ];
 const PAGES = [
-  { key: 'orders', to: '/orders', label: 'Orders', hint: 'Every order, every channel', icon: ShoppingBag },
-  { key: 'dashboard', to: '/dashboard', label: 'Dashboard', hint: 'Business insights at a glance.', icon: LayoutGrid },
-  { key: 'calendar', to: '/calendar', label: 'Calendar', hint: 'Deadlines and scheduled work', icon: CalendarDays },
+  { key: 'inbox', to: '/inbox', label: 'Messages', hint: 'Chats from every channel', icon: Inbox },
 ];
-const TITLES = { '/': 'Overview', '/deadlines': 'Deadlines', '/inbox': 'Inbox', '/orders': 'Orders', '/dashboard': 'Dashboard', '/calendar': 'Calendar', '/settings': 'Integrations' };
+const TITLES = { '/': 'Home', '/plan': 'Plan', '/whatif': 'What-if', '/inbox': 'Messages', '/orders': 'Orders', '/insights': 'Insights', '/settings': 'Integrations' };
 // Sections the pill follows while you scroll a page.
-const SPY = { '/deadlines': { timeline: 'Deadlines', risk: 'Orders at risk', simulation: 'What-if' } };
+const SPY = {};
 
 export default function Navbar() {
   const { pathname, hash } = useLocation();
@@ -33,7 +32,7 @@ export default function Navbar() {
   const lockUntil = useRef(0); // while a click-initiated scroll runs, the pill keeps the chosen label instead of flickering
 
   const close = useCallback((refocus = false) => { setOpen(false); if (refocus) triggerRef.current?.focus(); }, []);
-  useEffect(() => { setOpen(false); setActive(pathname === '/deadlines' && hash === '#simulation' ? 'simulation' : null); }, [pathname, hash]);
+  useEffect(() => { setOpen(false); setActive(null); }, [pathname, hash]);
 
   // Close on outside click.
   useEffect(() => {
@@ -70,11 +69,7 @@ export default function Navbar() {
     }
   }
 
-  const isOn = (item) => {
-    if (item.key === 'simulation') return pathname === '/deadlines' && active === 'simulation';
-    if (item.key === 'deadlines') return pathname === '/deadlines' && active !== 'simulation';
-    return pathname === item.to;
-  };
+  const isOn = (item) => pathname === item.to;
 
   const items = () => [...(menuRef.current?.querySelectorAll('a') ?? [])];
   function onMenuKey(e) {
@@ -121,7 +116,7 @@ export default function Navbar() {
           })}
         </ul>
 
-        <p className="menu-group" id="menu-pages">Pages</p>
+        <p className="menu-group" id="menu-pages">More</p>
         <ul className="menu-list" aria-labelledby="menu-pages">
           {PAGES.map(({ to, label, hint, icon: Icon }) => (
             <li key={to}>
