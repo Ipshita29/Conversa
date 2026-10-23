@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check } from 'lucide-react';
 import { getConversations, getIntegrations, listOrders, updateConversation, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
@@ -54,8 +54,9 @@ export default function Inbox() {
   const ordersQ = useAsync(() => listOrders({ pageSize: 100 }));
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
-  const [selId, setSelId] = useState(null);
-  const [chatOpen, setChatOpen] = useState(false); // phones: list or chat, one at a time
+  const [params] = useSearchParams();
+  const [selId, setSelId] = useState(params.get('conversation'));
+  const [chatOpen, setChatOpen] = useState(Boolean(params.get('conversation'))); // phones: list or chat, one at a time
   const [drafting, setDrafting] = useState(false);
   const [createdFor, setCreatedFor] = useState(null);
   const [paste, setPaste] = useState(false);

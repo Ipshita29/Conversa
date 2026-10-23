@@ -43,9 +43,9 @@ function OrderEditor({ orderId, onClose, onSaved }) {
 }
 
 export default function Orders() {
-  const [tab, setTab] = useState('all');
-  const [search, setSearch] = useState('');
   const [params, setParams] = useSearchParams();
+  const [tab, setTab] = useState(() => (['all', 'pending', 'risk', 'completed'].includes(params.get('tab')) ? params.get('tab') : 'all'));
+  const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null); // null | 'new' | orderId
   const [openId, setOpenId] = useState(null);   // the row whose details are expanded
 
