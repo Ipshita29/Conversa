@@ -2,7 +2,7 @@
 /* Full-bleed and roughly one screen tall. The home page pulls up under the (fixed, floating) menu pill. */
 .home { position: relative; isolation: isolate; margin: -5.5rem calc(50% - 50vw) 0; }
 .home .ws-section { padding-inline: var(--gutter); }
-#overview { position: relative; display: flex; align-items: center; min-height: 100vh; min-height: 100svh; padding-top: 7rem; padding-bottom: 5rem; border-top: 0; overflow: clip; background: linear-gradient(180deg, var(--ivory) 0%, var(--ivory) 60%, var(--papaya-soft) 100%); }
+#overview { position: relative; display: flex; align-items: center; min-height: min(82svh, 780px); padding-top: 6.5rem; padding-bottom: 3.5rem; border-top: 0; overflow: clip; background: linear-gradient(180deg, var(--ivory) 0%, var(--ivory) 60%, var(--papaya-soft) 100%); }
 /* ...and the next section starts on that same warm tone, so the two read as one continuous surface. */
 .home #today { border-top: 0; padding-top: 4.5rem; background: linear-gradient(180deg, var(--papaya-soft) 0, var(--ivory) 360px); }
 

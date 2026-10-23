@@ -4,6 +4,7 @@ import Reveal from '../components/Reveal.jsx';
 import StateMessage from '../components/StateMessage.jsx';
 import HeroSection from '../components/HeroSection.jsx';
 import DayWorkspace from '../components/DayWorkspace.jsx';
+import { summarise } from '../utils/homeSummary.js';
 import useHashScroll from '../hooks/useHashScroll.js';
 import '../css/Dashboard.css';
 
@@ -28,8 +29,8 @@ export default function Dashboard() {
   const { dashboard, planner, orders } = data;
   return (
     <section className="page home">
-      <Reveal as="section" id="overview" className="ws-section"><HeroSection stats={dashboard.stats} /></Reveal>
-      <Reveal as="section" id="today" className="ws-section"><DayWorkspace dashboard={dashboard} planner={planner} orders={orders} /></Reveal>
+      <Reveal as="section" id="overview" className="ws-section"><HeroSection stats={dashboard.stats} attention={summarise({ planner, orders }).attention} /></Reveal>
+      <Reveal as="section" id="today" className="ws-section"><DayWorkspace planner={planner} orders={orders} /></Reveal>
     </section>
   );
 }

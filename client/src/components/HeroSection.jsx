@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { ArrowDown } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRight } from 'lucide-react';
 import { greeting } from '../utils/format.js';
-import { scrollToSection } from '../utils/scroll.js';
 import DemoBadge from './DemoBadge.jsx';
 
 const REVEAL_RADIUS = 260; // px radius of the vivid spotlight (capped at a fraction of the viewport); the feathered edge is --f in Dashboard.css
@@ -70,7 +70,7 @@ function useHoverReveal(sectionRef, bgRef) {
   }, [sectionRef, bgRef]);
 }
 
-export default function HeroSection({ stats }) {
+export default function HeroSection({ stats, attention }) {
   const rootRef = useRef(null);
   const bgRef = useRef(null);
   useHoverReveal(rootRef, bgRef);
@@ -87,8 +87,8 @@ export default function HeroSection({ stats }) {
       <h1><span className="hero-line">Your business,</span> <span className="hero-line">in better rhythm.</span></h1>
       <p className="hero-lede">Every order, every deadline, every conversation — thoughtfully brought together in one place.</p>
       <div className="hero-actions">
-        <button type="button" className="btn btn-primary" onClick={() => scrollToSection('today')}>Review today's orders <ArrowDown size={16} aria-hidden="true" /></button>
-        {stats && <p className="hero-summary">{stats.total} orders · {open} open · {stats.atRisk} {stats.atRisk === 1 ? 'needs' : 'need'} a closer look</p>}
+        <Link to="/plan" className="btn btn-primary">Review today's orders <ArrowRight size={16} aria-hidden="true" /></Link>
+        {stats && <p className="hero-summary">{stats.total} {stats.total === 1 ? 'order' : 'orders'} · {open} open · {attention ?? stats.atRisk} {(attention ?? stats.atRisk) === 1 ? 'needs' : 'need'} attention</p>}
       </div>
       <p className="hero-statement"><span>The AI reads.</span> <span>Rules decide.</span> <span>You approve.</span></p>
       </div>
