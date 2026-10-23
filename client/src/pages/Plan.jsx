@@ -100,6 +100,7 @@ export default function Plan() {
 
   const { planner, orders, sum, move, cols } = model;
   const { tz, today } = sum;
+  const byIdAll = sum.byId;
   const convByOrder = Object.fromEntries((conv.data?.items ?? []).filter((c) => c.orderId).map((c) => [c.orderId, c.id]));
   const dueDates = [...new Set([...cols.critical, ...cols.upcoming, ...cols.details].filter((x) => x.o.deadline).map((x) => dateKey(x.o.deadline, tz)))].sort();
   const navList = ['all', ...dueDates];
@@ -153,6 +154,7 @@ export default function Plan() {
         ) : (
           <div className="kb-detail">
             {col !== 'done' && why && <p className="kb-why">{why}</p>}
+            {col !== 'done' && e?.precededBy?.length > 0 && <p className="kb-rec">Scheduled behind {e.precededBy.length} {plural(e.precededBy.length, 'order', 'orders')} with earlier deadlines ({formatMinutes(e.precededBy.reduce((t, x) => t + x.minutes, 0))} of preparation): {e.precededBy.map((x) => byIdAll[x.orderId]?.customerName ?? 'another order').join(', ')}.</p>}
             <dl>
               <div><dt>Status</dt><dd>{STATUS_LABEL[o.status]}</dd></div>
               <div><dt>Promised deadline</dt><dd>{formatInTz(o.deadline, tz)}</dd></div>

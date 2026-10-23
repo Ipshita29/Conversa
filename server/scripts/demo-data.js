@@ -40,9 +40,9 @@ export function buildDemoOrders(settings, now = new Date(), others = []) {
   const real = others.map((o, i) => ({ customerName: o.customerName, item: o.item, status: o.status, paymentStatus: o.paymentStatus, prepTimeMinutes: o.prepTimeMinutes ?? null, deadline: o.deadline ?? null, id: `x${i}` }));
 
   // Place the three queued deadlines relative to the scheduler's OWN finish times: comfortable (+buffer+2h), tight (half the
-  // buffer), 100 min short. Real orders can sit in front of or behind these, which changes the finish times, so repeat
+  // buffer), 3 hours short. Real orders can sit in front of or behind these, which changes the finish times, so repeat
   // until the deadlines and the schedule they produce agree (a fixed point; it settles in a pass or two).
-  const offsets = [buf + 120, Math.round(buf / 2), -100];
+  const offsets = [buf + 120, Math.round(buf / 2), -180]; // comfortable, tight, and a modest 3-hour slip
   let deadlines = QUEUE.map((_, i) => new Date(now.getTime() + (30 + i) * 86400000)); // far, ascending: a first guess
   for (let pass = 0; pass < 8; pass++) {
     const trial = QUEUE.map((o, i) => ({ ...o, id: `q${i}`, deadline: deadlines[i] }));

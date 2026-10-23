@@ -38,3 +38,14 @@
 .sim-probe select { width: auto; min-height: 34px; padding: 0.2rem 0.6rem; }
 .sim-warn { margin: 0.9rem 0 0; background: var(--blue-soft); color: var(--blue-ink); border-color: var(--blue); }
 
+
+/* Scenario story */
+.sim-scn { margin: 0 0 1.1rem; padding: 0.9rem 1.1rem; background: var(--white); border: 1px solid var(--border); border-radius: 12px; }
+.sim-scn h3 { margin: 0 0 0.4rem; font-size: 1.1rem; } .sim-scn p { margin: 0 0 0.4rem; font-size: 0.92rem; }
+.sim-sbs { width: 100%; margin-top: 0.5rem; border-collapse: collapse; font-size: 0.88rem; }
+.sim-sbs th, .sim-sbs td { padding: 0.4rem 0.6rem; text-align: left; border-top: 1px solid var(--border); } .sim-sbs thead th { border-top: 0; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.sim-sbs tbody th { font-weight: 500; color: #5E4D40; width: 34%; } .sim-sbs td:last-child { font-weight: 600; color: var(--cocoa); }
+.verdict > div { display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; } .verdict strong { font-family: var(--serif); font-weight: 400; font-size: 1.25rem; } .verdict span { font-family: var(--sans); font-size: 0.92rem; color: #5E4D40; }
+.sim-alt { color: var(--cocoa) !important; font-weight: 500; }
+.sim-tag { display: block; font-weight: 400; color: var(--muted); font-size: 0.72rem; }
+.sim-stale { opacity: 0.45; pointer-events: none; }

@@ -76,41 +76,13 @@ function extract(body) {
   return { draft, missingFields, uncertainties, isDraft: true };
 }
 
-function simulate(body) {
-  const changes = body.changes;
-  if (!Array.isArray(changes) || changes.length < 1 || changes.length > 20) {
-    throw invalid([{ field: 'changes', message: 'Provide between 1 and 20 changes.' }]);
-  }
-  let hypo = clone(orders);
-  changes.forEach((c, i) => {
-    if (c.type === 'add_order') {
-      const details = validateOrder(c.order || {});
-      if (details.length) throw invalid(details.map((d) => ({ ...d, field: `changes[${i}].order.${d.field}` })));
-      hypo.push({ id: `change_${i}`, source: 'manual', quantity: 1, prepTimeMinutes: null, deadline: null, status: 'pending', paymentStatus: 'unverified', ...c.order });
-    } else if (c.type === 'update_order' || c.type === 'cancel_order') {
-      const idx = hypo.findIndex((o) => o.id === c.orderId);
-      if (idx < 0) throw notFound(c.orderId);
-      hypo[idx] = c.type === 'cancel_order' ? { ...hypo[idx], status: 'cancelled' } : { ...hypo[idx], ...(c.order || {}) };
-    } else throw invalid([{ field: `changes[${i}].type`, message: 'Must be add_order, update_order or cancel_order.' }]);
-  });
+const demoSettings = () => ({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workingDays: [1, 2, 3, 4, 5, 6], workStart: '09:00', workEnd: '18:00', dailyCapacityMinutes: 360, riskBufferMinutes: 240, customisationMinutes: 30, prepRules: [] });
 
-  const range = { from: undefined, days: Math.min(Number(body.days) || 7, 30) };
-  const before = buildPlanner(orders, new Date(), range.days);
-  const after = buildPlanner(hypo, new Date(), range.days);
-  const beforeRisk = Object.fromEntries(before.risks.map((r) => [r.orderId, r]));
-  const afterRisk = Object.fromEntries(after.risks.map((r) => [r.orderId, r]));
-  return {
-    simulated: true,
-    planner: after,
-    comparison: {
-      pendingMinutesDelta: after.workload.pendingMinutes - before.workload.pendingMinutes,
-      currentWorkload: before.workload,
-      simulatedWorkload: after.workload,
-      suggestedAdjustments: [],
-      newRisks: after.risks.filter((r) => !beforeRisk[r.orderId] || (beforeRisk[r.orderId].risk === 'medium' && r.risk === 'high')),
-      resolvedRisks: before.risks.filter((r) => !afterRisk[r.orderId]).map((r) => ({ orderId: r.orderId })),
-    },
-  };
+// The what-if runs on the same scheduler the real server uses, so the demo explains itself exactly like the live app.
+async function simulateWithRealEngine(body) {
+  const { simulate: run } = await import('../../../server/services/workloadEngine.js');
+  const days = Math.min(Number(body.days) || 7, 30);
+  return clone(run({ orders, changes: body.changes, settings: demoSettings(), now: new Date(), rangeDays: days, probeMinutes: body.probeMinutes ?? 60 }));
 }
 
 export async function handleMockRequest(method, path, body = {}) {
@@ -125,7 +97,7 @@ export async function handleMockRequest(method, path, body = {}) {
   if (method === 'GET' && p === '/analytics/monthly') {
     // Same pure function the real server uses, so demo and live numbers are produced by one implementation.
     const { buildMonthly, isMonth, DATASETS } = await import('../../../server/services/analyticsService.js');
-    const settings = { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workingDays: [1, 2, 3, 4, 5, 6], workStart: '09:00', workEnd: '18:00', dailyCapacityMinutes: 360, riskBufferMinutes: 240, customisationMinutes: 30, prepRules: [] };
+    const settings = demoSettings();
     const now = new Date();
     const month = q.get('month') || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     if (!isMonth(month)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'month', message: 'Must be a month in YYYY-MM format.' }]);
@@ -186,7 +158,7 @@ export async function handleMockRequest(method, path, body = {}) {
     if (!Number.isInteger(days) || days < 1 || days > 30) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'days', message: 'Must be between 1 and 30.' }]);
     return buildPlanner(orders, new Date(), days);
   }
-  if (method === 'POST' && p === '/planner/simulate') return simulate(body);
+  if (method === 'POST' && p === '/planner/simulate') return simulateWithRealEngine(body);
 
   if (method === 'GET' && p === '/integrations') return { items: clone(integrations) };
   if (method === 'POST' && (m = p.match(/^\/integrations\/(whatsapp|instagram)\/connect$/))) {

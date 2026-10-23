@@ -30,7 +30,7 @@ test('at every moment of the day and week the story holds: on track, tight, late
     const [low, medium, high] = plan.schedule;
     assert.ok(low.bufferMinutes >= settings.riskBufferMinutes, `on-track buffer at ${label}`);
     assert.ok(medium.bufferMinutes > 0 && medium.bufferMinutes < settings.riskBufferMinutes && Math.abs(medium.bufferMinutes - 120) <= 3, `tight buffer ${medium.bufferMinutes} at ${label}`);
-    assert.ok(Math.abs(high.shortfallMinutes - 100) <= 3, `late by ${high.shortfallMinutes} at ${label}`);
+    assert.ok(Math.abs(high.shortfallMinutes - 180) <= 3, `late by ${high.shortfallMinutes} at ${label}`); // modest: well under a working day
     assert.ok(high.suggestedDeadline, label);
     assert.deepEqual(plan.unscheduledOrders.map((u) => orders.find((o) => o.id === u.id).customerName), ['Kabir Singh'], label);
     assert.equal(plan.schedule.length + plan.unscheduledOrders.length, 4, label); // the completed order is ignored

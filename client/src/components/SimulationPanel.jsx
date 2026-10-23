@@ -5,6 +5,7 @@ import { formatInTz, formatTimeInTz, formatMinutes, toLocalInput, fromLocalInput
 import SectionHead from './SectionHead.jsx';
 import StateMessage from './StateMessage.jsx';
 import { RiskBadge } from './Badge.jsx';
+import { buildStory } from '../utils/simulationStory.js';
 
 const RANK = { high: 0, medium: 1, low: 2 };
 const EMPTY = { customerName: '', item: '', prep: '', deadline: '', orderId: '' };
@@ -27,6 +28,8 @@ export default function SimulationPanel({ planner, orders, onApplied, prefill, e
   const [lastRun, setLastRun] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [done, setDone] = useState(null);
+  const [ranKey, setRanKey] = useState(null); // which form values the shown result was run with
+  const formKey = () => JSON.stringify([mode, form]);
   const [probe, setProbe] = useState(60);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -44,9 +47,9 @@ export default function SimulationPanel({ planner, orders, onApplied, prefill, e
     : mode === 'prep' ? { type: 'update_order', orderId: form.orderId, order: { prepTimeMinutes: Number(form.prep) } }
       : { type: 'update_order', orderId: form.orderId, order: { deadline: fromLocalInput(form.deadline) } });
 
-  async function runChange(change, source, probeMinutes = probe) {
+  async function runChange(change, source, probeMinutes = probe, key = formKey()) {
     setBusy(true); setError(null); setConfirming(false); setDone(null); setLastRun({ change, source });
-    try { setSim({ change, source, result: await simulatePlanner({ changes: [change], days, probeMinutes }) }); }
+    try { setSim({ change, source, result: await simulatePlanner({ changes: [change], days, probeMinutes }) }); setRanKey(key); }
     catch (err) { setSim(null); setError(err); }
     finally { setBusy(false); }
   }
@@ -60,7 +63,17 @@ export default function SimulationPanel({ planner, orders, onApplied, prefill, e
     else { setMode('add'); setForm({ ...EMPTY, customerName: change.order.customerName, item: change.order.item, prep: String(change.order.prepTimeMinutes), deadline: toLocalInput(change.order.deadline) }); }
     document.getElementById('sim-form')?.scrollIntoView?.({ block: 'nearest' });
   }
-  function discard() { setSim(null); setError(null); setConfirming(false); setForm(EMPTY); setLastRun(null); }
+  function discard() { setSim(null); setError(null); setConfirming(false); setDone(null); setForm(EMPTY); setLastRun(null); setRanKey(null); }
+
+  // The scheduler's own earliest realistic deadline, tested as a new scenario (never applied silently).
+  function tryDeadline(deadline) {
+    const base = sim.change;
+    const change = base.type === 'add_order' ? { ...base, order: { ...base.order, deadline } } : { type: 'update_order', orderId: base.orderId, order: { deadline } };
+    const nextMode = base.type === 'add_order' ? 'add' : 'change';
+    const nextForm = base.type === 'add_order' ? { ...form, deadline: toLocalInput(deadline) } : { ...EMPTY, orderId: base.orderId, deadline: toLocalInput(deadline) };
+    setMode(nextMode); setForm(nextForm);
+    runChange(change, 'form', probe, JSON.stringify([nextMode, nextForm]));
+  }
 
   async function apply() {
     setBusy(true); setError(null);
@@ -77,36 +90,20 @@ export default function SimulationPanel({ planner, orders, onApplied, prefill, e
   const win = (w) => (w ? `${formatInTz(w.start, tz)} to ${formatTimeInTz(w.end, tz)} (${formatMinutes(w.minutes)})` : 'None in the next ' + days + ' days');
 
   let view = null;
+  let story = null;
   if (sim) {
     const c = sim.result.comparison;
-    const before = Object.fromEntries((planner.schedule ?? []).map((s) => [s.orderId, s]));
-    const afterList = sim.result.planner.schedule ?? [];
-    const after = Object.fromEntries(afterList.map((s) => [s.orderId, s]));
-    const targetId = sim.change.type === 'add_order' ? 'change_0' : sim.change.orderId;
-    const rows = Object.keys({ ...before, ...after })
-      .filter((id) => !before[id] || !after[id] || before[id].risk !== after[id].risk || before[id].scheduledEnd !== after[id].scheduledEnd)
-      .sort((a, b) => (a === targetId ? -1 : b === targetId ? 1 : (RANK[after[a]?.risk] ?? 3) - (RANK[after[b]?.risk] ?? 3)));
-    view = { c, before, after, rows, targetId, target: after[targetId], changedRisk: rows.filter((id) => id !== targetId && before[id] && after[id] && before[id].risk !== after[id].risk).length };
+    // "Before" comes from the same scheduler run as "after" (same moment), so any difference is caused by the change alone.
+    const baseline = sim.result.baseline ?? { schedule: planner.schedule ?? [], unscheduledOrders: planner.unscheduledOrders ?? [] };
+    story = buildStory({ change: sim.change, baseline, after: sim.result.planner, byId, tz });
+    view = { c, story };
   }
-
-  const verdict = () => {
-    const { target, targetId } = view;
-    const what = sim.change.type === 'add_order' ? 'the proposed order' : `${nameOf(targetId)}'s order`;
-    if (!target) return { tone: 'details', text: `The scheduler could not place ${what}: it needs a preparation time and a deadline.` };
-    const buf = formatMinutes(Math.abs(target.bufferMinutes ?? 0));
-    if (target.risk === 'low') return { tone: 'low', text: `Yes, it fits. ${what[0].toUpperCase() + what.slice(1)} should finish ${formatInTz(target.scheduledEnd, tz)}, about ${buf} before its deadline.` };
-    if (target.risk === 'medium') return { tone: 'medium', text: `It fits, but only just. Estimated finish ${formatInTz(target.scheduledEnd, tz)}, ${buf} before the deadline.` };
-    return { tone: 'high', text: target.scheduledEnd ? `Not as requested. It would finish ${formatInTz(target.scheduledEnd, tz)}, ${buf} after the deadline.` : 'Not as requested. It cannot be scheduled within the planning horizon.' };
-  };
+  const stale = Boolean(sim && sim.source === 'form' && ranKey !== formKey());
 
   // Plain-language reading of the engine's numbers.
   const summary = () => {
     const { c } = view;
-    const names = (list) => list.map((r) => nameOf(r.orderId)).join(', ');
     const out = [];
-    if (c.resolvedRisks.length) out.push(`Resolves ${c.resolvedRisks.length} deadline ${c.resolvedRisks.length === 1 ? 'risk' : 'risks'} (${names(c.resolvedRisks)}).`);
-    out.push(c.newRisks.length ? `Introduces ${c.newRisks.length} new ${c.newRisks.length === 1 ? 'risk' : 'risks'} (${names(c.newRisks)}).` : 'Introduces no new risks.');
-    if (!c.resolvedRisks.length && !c.newRisks.length) out.push('No order changes its risk level.');
     const goal = suggestion?.goalMinutes ?? 60;
     if ('simulatedNearFreeWindow' in c) {
       const nb = c.currentNearFreeWindow?.minutes ?? 0;
@@ -202,8 +199,24 @@ export default function SimulationPanel({ planner, orders, onApplied, prefill, e
         {sim && (
           <div className="sim-result" aria-live="polite">
             <p className="sim-label">Simulation, nothing has been saved</p>
-            {(() => { const v = verdict(); return <p className={`verdict verdict-${v.tone}`}><RiskBadge risk={v.tone === 'details' ? null : v.tone} needsDetails={v.tone === 'details'} /> <span>{v.text}</span></p>; })()}
-
+            {stale && <div className="notice sim-warn" role="status">You changed the form after this result. Rerun the simulation to update it; until then it can't be applied.</div>}
+            <div className={stale ? 'sim-stale' : undefined}>
+              <div className="sim-scn">
+                <h3>What you're testing</h3>
+                <p>{view.story.lines[0]}</p>
+                <p className="muted">{view.story.checked}</p>
+                <table className="sim-sbs">
+                  <thead><tr><th /><th>Original</th><th>Proposed</th></tr></thead>
+                  <tbody>{view.story.compare.map((r) => <tr key={r.label}><th scope="row">{r.label}</th><td>{r.original}</td><td>{r.proposed}</td></tr>)}</tbody>
+                </table>
+              </div>
+              <div className={`verdict verdict-${view.story.headline.tone}`}>
+                <RiskBadge risk={view.story.headline.tone === 'details' ? null : view.story.headline.tone} needsDetails={view.story.headline.tone === 'details'} />
+                <div><strong>{view.story.headline.title}</strong><span>{view.story.headline.text}</span>
+                  {view.story.headline.alternative && <span className="sim-alt">{view.story.headline.alternative}</span>}
+                  {view.story.headline.alt && <button type="button" className="btn btn-sm" disabled={busy} onClick={() => tryDeadline(view.story.headline.alt.deadline)}>{view.story.headline.alt.label}</button>}
+                </div>
+              </div>
             <div className="table-wrap">
               <table className="table compare metrics-table">
                 <caption>Before and after, from the scheduler</caption>
@@ -222,25 +235,24 @@ export default function SimulationPanel({ planner, orders, onApplied, prefill, e
               </label>
             </div>
 
-            <h3 className="sim-sub">Orders affected</h3>
+            <h3 className="sim-sub">What changes, order by order</h3>
             <div className="table-wrap">
               <table className="table compare">
                 <caption className="sr-only">Orders affected by this scenario, before and after</caption>
-                <thead><tr><th>Order</th><th>Before</th><th>After</th><th>Why</th></tr></thead>
+                <thead><tr><th>Order</th><th>Before</th><th>After</th><th>What happens, and why</th></tr></thead>
                 <tbody>
-                  {view.rows.map((id) => (
-                    <tr key={id}>
-                      <th scope="row">{nameOf(id)}</th>
-                      <td>{view.before[id] ? <><RiskBadge risk={view.before[id].risk} /><small>{formatInTz(view.before[id].scheduledEnd, tz)}</small></> : <span className="muted">New</span>}</td>
-                      <td>{view.after[id] ? <><RiskBadge risk={view.after[id].risk} /><small>{formatInTz(view.after[id].scheduledEnd, tz)}</small></> : <span className="muted">-</span>}</td>
-                      <td>{view.after[id]?.reason ?? '-'}</td>
+                  {view.story.rows.map((r) => (
+                    <tr key={r.id}>
+                      <th scope="row">{r.name}{r.isTarget && <small className="sim-tag">{view.story.kind === 'rush' ? 'new order' : 'the order you changed'}</small>}</th>
+                      <td>{r.before ? <><RiskBadge risk={r.before.risk} /><small>{formatInTz(r.before.scheduledEnd, tz)}</small></> : <span className="muted">{r.isTarget && view.story.kind === 'rush' ? 'Not an order yet' : '—'}</span>}</td>
+                      <td>{r.after ? <><RiskBadge risk={r.after.risk} /><small>{r.after.scheduledEnd ? formatInTz(r.after.scheduledEnd, tz) : 'Not within the planning window'}</small></> : <span className="muted">—</span>}</td>
+                      <td>{r.text}</td>
                     </tr>
                   ))}
-                  {view.rows.length === 0 && <tr><td colSpan="4" className="muted">No existing order is affected.</td></tr>}
+                  {view.story.rows.length === 0 && <tr><td colSpan="4" className="muted">No order's risk or finish time changes.</td></tr>}
                 </tbody>
               </table>
             </div>
-
             {view.c.suggestedAdjustments?.length > 0 && (
               <div className="suggest">
                 <h3>Suggested adjustments</h3>
@@ -248,10 +260,11 @@ export default function SimulationPanel({ planner, orders, onApplied, prefill, e
               </div>
             )}
 
+            </div>
             <div className="form-actions">
               <button type="button" className="btn" onClick={discard} disabled={busy}>Discard scenario</button>
               {!confirming
-                ? <button type="button" className="btn btn-primary" onClick={() => setConfirming(true)}>Apply this schedule…</button>
+                ? <button type="button" className="btn btn-primary" disabled={stale || view.story.headline.tone === 'details'} onClick={() => setConfirming(true)}>Apply this schedule…</button>
                 : (
                   <>
                     <button type="button" className="btn" onClick={() => setConfirming(false)} disabled={busy}>Not yet</button>

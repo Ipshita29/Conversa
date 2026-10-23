@@ -345,6 +345,8 @@ export function simulate({ orders, changes, settings, now = new Date(), rangeDay
 
   return {
     simulated: true,
+    // The "before" plan from the SAME moment as the simulated one, so differences are caused only by the change, never by the clock.
+    baseline: { generatedAt: before.generatedAt, schedule: before.schedule, unscheduledOrders: before.unscheduledOrders },
     planner: publicPlan(after),
     comparison: {
       currentCounts: riskCounts(before),
