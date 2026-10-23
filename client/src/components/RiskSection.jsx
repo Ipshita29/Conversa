@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, ChevronDown, FlaskConical, CalendarDays, Pencil, Info } from 'lucide-react';
+import { ArrowRight, ChevronDown, FlaskConical, Pencil, Info } from 'lucide-react';
 import { formatInTz, formatLongInTz, formatMinutes } from '../utils/format.js';
 import SectionHead from './SectionHead.jsx';
 import StateMessage from './StateMessage.jsx';
@@ -92,7 +92,6 @@ function Row({ order, entry, tz, planner, byId, rec, recLabel = 'Recommended', b
                 {rec && <p className="rk-rec"><b>{recLabel}:</b> {rec}</p>}
                 <div className="rk-actions">
                   {onSimulate && <button type="button" className="btn btn-sm btn-primary" onClick={() => onSimulate({ orderId: order.id, deadline: entry.suggestedDeadline ?? order.deadline })}><FlaskConical size={14} aria-hidden="true" />{entry.suggestedDeadline ? 'Try the suggested deadline' : 'Simulate a schedule change'}</button>}
-                  <Link className="btn btn-sm" to="/calendar"><CalendarDays size={14} aria-hidden="true" />Review the schedule</Link>
                   <Link className="btn btn-sm" to={`/orders?edit=${order.id}`}><Pencil size={14} aria-hidden="true" />Edit this order</Link>
                 </div>
               </div>

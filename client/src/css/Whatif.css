@@ -1,0 +1,40 @@
+/* ---------- Simulation ---------- */
+.sim { position: relative; }
+.sim .field-label { color: #6C5846; }
+.seg { display: inline-flex; padding: 3px; margin-bottom: 1.2rem; background: rgba(255, 255, 255, 0.6); border: 1px solid #F0D9BC; border-radius: var(--radius); }
+.seg button { border: 0; background: none; padding: 0.4rem 1rem; border-radius: var(--radius-sm); font: inherit; font-size: 0.86rem; color: var(--muted); cursor: pointer; transition: background 0.18s var(--ease), color 0.18s var(--ease); }
+.seg button.is-on { background: var(--white); color: var(--cocoa); font-weight: 600; box-shadow: 0 1px 2px rgba(51, 39, 31, 0.1); }
+.sim-result { margin-top: 1.8rem; padding-top: 1.5rem; border-top: 1px dashed #E2C7A6; animation: rise 0.35s var(--ease); }
+.sim-label { display: inline-block; margin-bottom: 0.9rem; padding: 0.15rem 0.7rem; border-radius: 999px; background: var(--blue-soft); color: var(--blue-ink); border: 1px solid var(--blue); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.verdict { display: flex; gap: 0.7rem; align-items: baseline; font-family: var(--serif); font-size: 1.35rem; line-height: 1.3; margin-bottom: 0.8rem; }
+.verdict .badge { font-family: var(--sans); font-size: 0.74rem; flex-shrink: 0; }
+.sim-impact { margin-bottom: 1.2rem; color: var(--muted); font-size: 0.92rem; }
+.sim-impact b { color: var(--cocoa); }
+.compare { background: rgba(255, 255, 255, 0.7); border-radius: var(--radius); }
+.compare th[scope='row'] { text-transform: none; letter-spacing: 0; font-size: 0.92rem; color: var(--cocoa); font-weight: 600; padding: 0.9rem 0.75rem; border-bottom: 1px solid var(--border); }
+.compare td small { display: block; margin-top: 0.3rem; color: var(--muted); font-size: 0.76rem; }
+.compare td:last-child { font-size: 0.86rem; max-width: 22rem; }
+.suggest { margin-top: 1.2rem; padding: 1rem 1.2rem; background: rgba(255, 255, 255, 0.7); border-radius: var(--radius); }
+.suggest h3 { font-size: 1.1rem; margin-bottom: 0.4rem; }
+.suggest ul { margin: 0; padding-left: 1.1rem; font-size: 0.92rem; }
+
+/* ---------- Simulation: suggested experiment, metrics, plain-language summary ---------- */
+.sim-suggest { margin-bottom: 1.8rem; padding: 1.4rem 1.5rem; background: rgba(255, 255, 255, 0.75); border: 1px solid #F0D9BC; border-radius: var(--radius); }
+.sim-suggest h3 { margin: 0.2rem 0 0.4rem; font-size: 1.5rem; }
+.sim-suggest p { margin: 0 0 0.5rem; }
+.sim-why { font-size: 0.88rem; }
+.sim-suggest-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.9rem; }
+.sim-label-accent { display: inline-flex; align-items: center; gap: 0.4rem; background: var(--papaya); color: var(--caramel-ink); border-color: #E7CBA6; }
+.sim-form-title { margin: 0 0 0.7rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.metrics-table caption { padding: 0.7rem 0.75rem 0.3rem; text-align: left; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.metrics-table td, .metrics-table th[scope='row'] { font-variant-numeric: tabular-nums; }
+.metrics-table tr.is-changed td:last-child { font-weight: 600; color: var(--cocoa); background: rgba(152, 197, 226, 0.22); }
+.sim-meaning { margin: 1.3rem 0 1.6rem; padding: 1.1rem 1.3rem; background: rgba(255, 255, 255, 0.75); border-radius: var(--radius); border-left: 3px solid var(--blue); }
+.sim-meaning h3, .sim-sub { font-size: 1.15rem; margin: 0 0 0.5rem; }
+.sim-sub { margin-top: 1.4rem; }
+.sim-meaning ul { margin: 0 0 0.9rem; padding-left: 1.1rem; font-size: 0.95rem; }
+.sim-meaning li { margin-bottom: 0.35rem; }
+.sim-probe { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; color: var(--muted); flex-wrap: wrap; }
+.sim-probe select { width: auto; min-height: 34px; padding: 0.2rem 0.6rem; }
+.sim-warn { margin: 0.9rem 0 0; background: var(--blue-soft); color: var(--blue-ink); border-color: var(--blue); }
+
