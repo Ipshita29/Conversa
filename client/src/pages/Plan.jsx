@@ -13,8 +13,6 @@ import '../css/Plan.css';
 
 const plural = (n, one, many) => (n === 1 ? one : many);
 const MISSING = { missing_prep_time: 'preparation time', missing_deadline: 'deadline', missing_both: 'preparation time and deadline' };
-const LABEL = { overdue: 'Overdue', late: 'At risk', tight: 'At risk', ok: 'On track', details: 'Needs details' };
-
 // "Today · 4:00 PM", "Tomorrow · 12:00 PM", "Yesterday · 4:00 PM", otherwise "Sat 24 Oct · 12:00 PM".
 function dueLabel(iso, tz, today) {
   if (!iso) return 'No deadline';
@@ -57,6 +55,13 @@ function MissingRow({ order, reason, onSaved }) {
 
 
 
+const COLUMNS = [
+  { key: 'critical', title: 'Critical', hint: 'Overdue or predicted late' },
+  { key: 'upcoming', title: 'Upcoming', hint: 'Nearest deadline first' },
+  { key: 'details', title: 'Needs details', hint: "Can't be scheduled yet" },
+  { key: 'done', title: 'Completed', hint: '' },
+];
+
 export default function Plan() {
   const { status, data, error, reload } = useWorkspace();
   const conv = useAsync(getConversations); // optional: only to link an order to its chat
@@ -66,42 +71,42 @@ export default function Plan() {
   const [openId, setOpenId] = useState(params.get('focus') === 'missing' ? 'missing' : null);
   const [busy, setBusy] = useState(null);
   const [actionError, setActionError] = useState(null);
-  const [showDone, setShowDone] = useState(false);
 
   const model = useMemo(() => {
     if (!data) return null;
     const { planner, orders } = data;
     const sum = summarise({ planner, orders });
     const move = Object.fromEntries((planner.nextMoves ?? []).map((m) => [m.orderId, m]));
-    // One list. The scheduler's classification sets the rank; inside a rank the most urgent comes first.
-    //   0 overdue, 1 predicted late / cannot fit, 2 thin buffer, 3 on track, 4 missing details (always last)
-    const rank = (e) => (e.kind === 'deadline_passed' ? 0 : e.kind === 'late' || e.kind === 'unschedulable' ? 1 : e.kind === 'tight' ? 2 : 3);
-    const scheduled = planner.schedule.filter((e) => sum.byId[e.orderId]).map((e) => ({ id: e.orderId, e, o: sum.byId[e.orderId], rank: rank(e) }))
-      .sort((a, b) => a.rank - b.rank || (a.rank === 2 ? a.e.bufferMinutes - b.e.bufferMinutes : 0) || Date.parse(a.o.deadline) - Date.parse(b.o.deadline));
-    const missing = planner.unscheduledOrders.filter((u) => sum.byId[u.id]).map((u) => ({ id: u.id, u, o: sum.byId[u.id], rank: 4 }))
-      .sort((a, b) => (a.o.deadline ? Date.parse(a.o.deadline) : Infinity) - (b.o.deadline ? Date.parse(b.o.deadline) : Infinity));
-    return { planner, orders, sum, move, rows: [...scheduled, ...missing] };
+    const ms = (o) => (o.deadline ? Date.parse(o.deadline) : Infinity);
+    // The column comes from the scheduler's classification and the order's status. Cards cannot be dragged: a manual move must never
+    // override a risk calculation, so the only way an order changes column is a real change to the order (status, deadline, prep time).
+    const items = planner.schedule.filter((e) => sum.byId[e.orderId]).map((e) => ({ id: e.orderId, e, o: sum.byId[e.orderId] }));
+    const critical = items.filter((x) => x.e.risk === 'high')
+      .sort((a, b) => (b.e.kind === 'deadline_passed') - (a.e.kind === 'deadline_passed') || ms(a.o) - ms(b.o));
+    const upcoming = items.filter((x) => x.e.risk !== 'high').sort((a, b) => ms(a.o) - ms(b.o));
+    const details = planner.unscheduledOrders.filter((u) => sum.byId[u.id]).map((u) => ({ id: u.id, u, o: sum.byId[u.id] })).sort((a, b) => ms(a.o) - ms(b.o));
+    const done = orders.filter((o) => o.status === 'completed').map((o) => ({ id: o.id, o })).sort((a, b) => ms(b.o) - ms(a.o));
+    return { planner, orders, sum, move, cols: { critical, upcoming, details, done } };
   }, [data]);
 
   const head = (nav, sub) => (
-    <header className="pq-head">
-      <div className="pq-head-row"><h1>Production plan</h1><div className="pq-head-side">{nav}<DemoBadge /></div></div>
-      {sub && <p className="pq-count">{sub}</p>}
+    <header className="kb-head">
+      <div><h1>Production board</h1><p>Every order, by what it needs from you.{sub && <b>{sub}</b>}</p></div>
+      <div className="kb-head-side">{nav}<DemoBadge /></div>
     </header>
   );
-  if (status === 'loading' && !data) return <section className="page plan">{head()}<StateMessage kind="loading" message="Building your plan…" /></section>;
-  if (status === 'error') return <section className="page plan">{head()}<StateMessage kind="error" message={`Couldn't load your plan. ${error.message}`} onRetry={reload} /></section>;
+  if (status === 'loading' && !data) return <section className="page plan">{head()}<StateMessage kind="loading" message="Building your board…" /></section>;
+  if (status === 'error') return <section className="page plan">{head()}<StateMessage kind="error" message={`Couldn't load your board. ${error.message}`} onRetry={reload} /></section>;
 
-  const { planner, orders, sum, move, rows } = model;
-  const { tz, today, riskIds } = sum;
-  const done = orders.filter((o) => o.status === 'completed');
+  const { planner, orders, sum, move, cols } = model;
+  const { tz, today } = sum;
   const convByOrder = Object.fromEntries((conv.data?.items ?? []).filter((c) => c.orderId).map((c) => [c.orderId, c.id]));
-  const dueDates = [...new Set(rows.filter((r) => r.o.deadline).map((r) => dateKey(r.o.deadline, tz)))].sort();
+  const dueDates = [...new Set([...cols.critical, ...cols.upcoming, ...cols.details].filter((x) => x.o.deadline).map((x) => dateKey(x.o.deadline, tz)))].sort();
   const navList = ['all', ...dueDates];
   const navIdx = Math.max(0, navList.indexOf(day));
-  const shown = day === 'all' ? rows : rows.filter((r) => r.o.deadline && dateKey(r.o.deadline, tz) === day);
+  const inDay = (x) => day === 'all' || (x.o.deadline && dateKey(x.o.deadline, tz) === day);
   const open = sum.open.length;
-  const sub = `${open} open ${plural(open, 'order', 'orders')} · ${riskIds.size} at risk`;
+  const sub = ` ${open} open ${plural(open, 'order', 'orders')}`;
   const simulate = (o, e) => navigate('/whatif', { state: { prefill: { orderId: o.id, deadline: e?.suggestedDeadline ?? o.deadline, nonce: Date.now() } } });
 
   async function setStatus(o, next) {
@@ -112,18 +117,24 @@ export default function Plan() {
   }
 
   const nav = dueDates.length > 0 && (
-    <div className="pq-daynav" role="group" aria-label="Choose a day">
+    <div className="pq-daynav" role="group" aria-label="Filter by deadline day">
       <button type="button" onClick={() => setDay(navList[navIdx - 1])} disabled={navIdx === 0} aria-label="Previous day"><ChevronLeft size={16} aria-hidden="true" /></button>
       <span aria-live="polite">{day === 'all' ? 'All days' : day === today ? 'Due today' : `Due ${formatDayInTz(day)}`}</span>
       <button type="button" onClick={() => setDay(navList[navIdx + 1])} disabled={navIdx >= navList.length - 1} aria-label="Next day"><ChevronRight size={16} aria-hidden="true" /></button>
     </div>
   );
 
-  const renderRow = (r) => {
-    const { o, e, u, rank } = r;
-    const kind = rank === 0 ? 'overdue' : rank <= 2 ? (rank === 1 ? 'late' : 'tight') : rank === 3 ? 'ok' : 'details';
-    const tone = rank <= 1 ? 'red' : rank === 2 ? 'amber' : rank === 4 ? 'blue' : 'plain';
-    const isOpen = openId === o.id || (rank === 4 && openId === 'missing');
+  const indicator = (col, x) => {
+    if (col === 'done') return ['Completed', 'green'];
+    if (col === 'details') return [`Missing ${MISSING[x.u.reason]}`, 'blue'];
+    if (col === 'critical') return [x.e.kind === 'deadline_passed' ? 'Overdue' : x.e.kind === 'unschedulable' ? 'Cannot fit' : 'Predicted late', 'red'];
+    return x.e.risk === 'medium' ? ['Thin buffer', 'amber'] : ['On track', 'plain'];
+  };
+
+  const renderCard = (col, x) => {
+    const { o, e, u } = x;
+    const isOpen = openId === o.id || (col === 'details' && openId === 'missing');
+    const [label, tone] = indicator(col, x);
     const m = move[o.id];
     const chatId = convByOrder[o.id];
     const why = !e ? null : e.kind === 'deadline_passed' ? `Deadline passed by ${formatMinutes(Math.max(1, Math.round((Date.parse(planner.generatedAt) - Date.parse(o.deadline)) / 60000)))}.`
@@ -131,32 +142,30 @@ export default function Plan() {
         : e.kind === 'unschedulable' ? `Cannot be scheduled within the next ${planner.rules?.horizonDays ?? 60} days of working capacity.`
           : `Estimated to finish ${formatMinutes(e.bufferMinutes)} before the deadline.`;
     return (
-      <li key={o.id} className={`pq-item is-${tone}${isOpen ? ' is-open' : ''}`}>
-        <button type="button" className="pq-row" aria-expanded={isOpen} onClick={() => setOpenId(isOpen ? null : o.id)}>
-          <span className="pq-who">{o.customerName}{isDemoOrder(o) && <span className="demo-tag">Demo</span>}</span>
-          <span className="pq-what">{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span>
-          <span className="pq-flag">{LABEL[kind]}</span>
-          <span className="pq-due">{o.deadline ? dueLabel(o.deadline, tz, today) : 'No deadline'}</span>
-          <ChevronDown size={15} className="pq-chev" aria-hidden="true" />
+      <li key={o.id} className={`kb-card is-${col}${col === 'upcoming' && tone === 'amber' ? ' is-thin' : ''}${isOpen ? ' is-open' : ''}`}>
+        <button type="button" className="kb-main" aria-expanded={isOpen} onClick={() => setOpenId(isOpen ? null : o.id)}>
+          <span className="kb-who">{o.customerName}{isDemoOrder(o) && <span className="demo-tag">Demo</span>}</span>
+          <span className="kb-what">{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span>
+          <span className="kb-meta"><span className={`kb-due${col === 'critical' ? ' is-late' : ''}`}>{o.deadline ? dueLabel(o.deadline, tz, today) : 'No deadline'}</span><span className={`kb-flag is-${tone}`}>{label}</span></span>
         </button>
-        {isOpen && (rank === 4 ? (
-          <div className="pq-detail"><p className="pq-why">Missing {MISSING[u.reason]}, so this order can't be scheduled yet.</p><ul className="pq-missing"><MissingRow order={o} reason={u.reason} onSaved={reload} /></ul></div>
+        {isOpen && (col === 'details' ? (
+          <div className="kb-detail"><ul className="pq-missing"><MissingRow order={o} reason={u.reason} onSaved={reload} /></ul></div>
         ) : (
-          <div className="pq-detail">
-            <p className="pq-why">{why}</p>
+          <div className="kb-detail">
+            {col !== 'done' && why && <p className="kb-why">{why}</p>}
             <dl>
               <div><dt>Status</dt><dd>{STATUS_LABEL[o.status]}</dd></div>
               <div><dt>Promised deadline</dt><dd>{formatInTz(o.deadline, tz)}</dd></div>
-              <div><dt>{rank === 0 ? 'Earliest possible finish' : 'Predicted finish'}</dt><dd>{e.scheduledEnd ? formatInTz(e.scheduledEnd, tz) : 'Not within the planning horizon'}</dd></div>
-              <div><dt>Preparation</dt><dd>{formatMinutes(o.prepTimeMinutes)}, starting {formatInTz(e.scheduledStart, tz)}</dd></div>
+              {e && <div><dt>{e.kind === 'deadline_passed' ? 'Earliest finish' : 'Predicted finish'}</dt><dd>{e.scheduledEnd ? formatInTz(e.scheduledEnd, tz) : 'Not within the planning horizon'}</dd></div>}
+              <div><dt>Preparation</dt><dd>{formatMinutes(o.prepTimeMinutes)}{e && <>, starting {formatInTz(e.scheduledStart, tz)}</>}</dd></div>
             </dl>
-            {m && m.kind !== 'on_track' && <p className="pq-rec"><b>Recommended:</b> {m.recovery ?? m.action}{e.suggestedDeadline ? ` Suggested new deadline: ${formatInTz(e.suggestedDeadline, tz)}.` : ''}</p>}
-            {o.notes && !isDemoOrder(o) && <p className="pq-rec"><b>Notes:</b> {o.notes}</p>}
-            <div className="pq-actions">
+            {col !== 'done' && m && m.kind !== 'on_track' && <p className="kb-rec"><b>Recommended:</b> {m.recovery ?? m.action}{e?.suggestedDeadline ? ` Suggested new deadline: ${formatInTz(e.suggestedDeadline, tz)}.` : ''}</p>}
+            {o.notes && !isDemoOrder(o) && <p className="kb-rec"><b>Notes:</b> {o.notes}</p>}
+            <div className="kb-actions">
               <Link className="btn btn-sm" to={`/orders?edit=${o.id}`}><Pencil size={13} aria-hidden="true" /> Open order</Link>
-              {chatId && <Link className="btn btn-sm" to={`/inbox?conversation=${chatId}`}>Open conversation</Link>}
-              <button type="button" className="btn btn-sm" onClick={() => simulate(o, e)}><FlaskConical size={13} aria-hidden="true" /> Simulate a change</button>
-              <label className="pq-status"><span>Status</span>
+              {chatId && <Link className="btn btn-sm" to={`/inbox?conversation=${chatId}`}>Conversation</Link>}
+              {col !== 'done' && <button type="button" className="btn btn-sm" onClick={() => simulate(o, e)}><FlaskConical size={13} aria-hidden="true" /> Simulate</button>}
+              <label className="kb-status"><span>Status</span>
                 <select value={o.status} disabled={busy === o.id} onChange={(ev) => setStatus(o, ev.target.value)} aria-label={`Status for ${o.customerName}`}>
                   {ORDER_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
                 </select></label>
@@ -167,21 +176,23 @@ export default function Plan() {
     );
   };
 
-  if (rows.length === 0 && done.length === 0) return <section className="page plan">{head(null)}<StateMessage message="No orders yet. Add one from Orders, or draft one from a customer message." /></section>;
+  if (orders.length === 0) return <section className="page plan">{head(null, null)}<StateMessage message="No orders yet. Add one from Orders, or draft one from a customer message." /></section>;
 
   return (
     <section className="page plan">
       {head(nav, sub)}
       {actionError && <div className="notice error" role="alert">{actionError}</div>}
-      {shown.length > 0 ? <ul className="pq-list">{shown.map(renderRow)}</ul>
-        : <p className="pq-empty">{rows.length === 0 ? 'No open orders right now.' : 'No order is due on this day.'}</p>}
-
-      {done.length > 0 && (
-        <div className="pq-done">
-          <button type="button" className="pq-donebar" aria-expanded={showDone} onClick={() => setShowDone(!showDone)}><span>Completed orders ({done.length})</span><ChevronDown size={15} className="pq-chev" aria-hidden="true" /></button>
-          {showDone && <ul className="pq-done-list">{done.map((o) => <li key={o.id}><strong>{o.customerName}</strong><span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></li>)}</ul>}
-        </div>
-      )}
+      <div className="kb-board" role="list">
+        {COLUMNS.map((c) => {
+          const list = c.key === 'done' ? cols.done : cols[c.key].filter(inDay);
+          return (
+            <section key={c.key} className={`kb-col is-${c.key}`} aria-label={`${c.title}, ${list.length} ${plural(list.length, 'order', 'orders')}`} role="listitem">
+              <header className="kb-col-head"><h2>{c.title}</h2><b>{list.length}</b>{c.hint && <span>{c.hint}</span>}</header>
+              {list.length === 0 ? <p className="kb-none">{day !== 'all' && c.key !== 'done' ? 'None due this day' : 'None'}</p> : <ul className="kb-cards">{list.map((x) => renderCard(c.key, x))}</ul>}
+            </section>
+          );
+        })}
+      </div>
       <p className="pq-foot"><Link to="/risks">Full risk breakdown <ArrowRight size={12} aria-hidden="true" /></Link></p>
     </section>
   );
