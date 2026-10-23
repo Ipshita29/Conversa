@@ -124,12 +124,14 @@ export async function handleMockRequest(method, path, body = {}) {
 
   if (method === 'GET' && p === '/analytics/monthly') {
     // Same pure function the real server uses, so demo and live numbers are produced by one implementation.
-    const { buildMonthly, isMonth } = await import('../../../server/services/analyticsService.js');
+    const { buildMonthly, isMonth, DATASETS } = await import('../../../server/services/analyticsService.js');
     const settings = { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workingDays: [1, 2, 3, 4, 5, 6], workStart: '09:00', workEnd: '18:00', dailyCapacityMinutes: 360, riskBufferMinutes: 240, customisationMinutes: 30, prepRules: [] };
     const now = new Date();
     const month = q.get('month') || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     if (!isMonth(month)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'month', message: 'Must be a month in YYYY-MM format.' }]);
-    return clone(buildMonthly({ orders, settings, month, now }));
+    const dataset = q.get('dataset') || 'all';
+    if (!DATASETS.includes(dataset)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'dataset', message: 'Must be real, demo or all.' }]);
+    return clone(buildMonthly({ orders, settings, month, now, dataset }));
   }
 
   if (method === 'GET' && p === '/orders') {

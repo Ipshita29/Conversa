@@ -63,3 +63,14 @@ test('payment notes are reported as notes, only when they carry an amount in the
   const r = buildMonthly({ orders: [o({ paymentEvidence: [{ kind: 'note', reference: 'x', amount: 500, addedAt: '2026-10-06T10:00:00Z' }, { kind: 'note', reference: 'y', addedAt: '2026-10-06T10:00:00Z' }] })], settings, month: '2026-10', now });
   assert.equal(r.payments.recordedNotes.value.total, 500); assert.equal(r.payments.recordedNotes.value.count, 1);
 });
+
+test('dataset filter keeps demo orders out of real figures (and the reverse)', () => {
+  const orders = [o({ notes: '[DEMO] sample' }), o({ notes: '[DEMO] sample', status: 'completed' }), o({ notes: null })];
+  const real = buildMonthly({ orders, settings, month: '2026-10', now, dataset: 'real' });
+  const demo = buildMonthly({ orders, settings, month: '2026-10', now, dataset: 'demo' });
+  const all = buildMonthly({ orders, settings, month: '2026-10', now });
+  assert.deepEqual([real.overview.received.value, demo.overview.received.value, all.overview.received.value], [1, 2, 3]);
+  assert.equal(real.quality.mode, 'real'); assert.equal(demo.quality.mode, 'demo'); assert.equal(all.quality.mode, 'mixed');
+  assert.deepEqual([real.datasets.real, real.datasets.demo], [1, 2]);
+  assert.equal(real.overview.completed.value, 0); assert.equal(demo.overview.completed.value, 1);
+});

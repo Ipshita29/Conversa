@@ -422,9 +422,9 @@ Rules: **read-only** — no order, task or schedule is persisted; a repeat call 
 
 ## 7b. Monthly analytics
 
-### `GET /api/analytics/monthly?month=YYYY-MM`
+### `GET /api/analytics/monthly?month=YYYY-MM&dataset=all|real|demo`
 
-Business insights for one calendar month in the business timezone (`month` defaults to the current month; an invalid value returns `400 VALIDATION_ERROR`). Implemented by `server/services/analyticsService.js` (pure function of orders, settings, month and now). The in-browser demo backend calls the same function, so demo and live agree.
+Business insights for one calendar month in the business timezone (`month` defaults to the current month; `dataset` defaults to `all`: `real` excludes orders whose notes start with `[DEMO]`, `demo` includes only those, and the filter is applied before every metric. The response carries `datasets: { real, demo, selected }` with the order counts. An invalid value returns `400 VALIDATION_ERROR`). Implemented by `server/services/analyticsService.js` (pure function of orders, settings, month and now). The in-browser demo backend calls the same function, so demo and live agree.
 
 Every metric is either `{ available: true, value, ... }` or `{ available: false, reason }`. A metric is unavailable when the order schema cannot support it; the API never returns an estimated or illustrative value in its place.
 

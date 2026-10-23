@@ -41,11 +41,17 @@ function counts(orders, tz, m) {
   };
 }
 
-export function buildMonthly({ orders: raw, settings, month, now = new Date() }) {
+export const DATASETS = ['all', 'real', 'demo'];
+
+// dataset: 'real' = orders without a [DEMO] note, 'demo' = only the sample bakery orders, 'all' = both. The filter is applied before ANY
+// metric (including the scheduler's capacity view), so demo orders can never leak into figures about the real business.
+export function buildMonthly({ orders: raw, settings, month, now = new Date(), dataset = 'all' }) {
   const tz = settings.timezone;
   const prev = shiftMonth(month, -1);
   const thisMonth = monthOf(now, tz);
-  const orders = raw.map((o) => ({ ...o, id: String(o.id ?? o._id) }));
+  const everything = raw.map((o) => ({ ...o, id: String(o.id ?? o._id) }));
+  const datasets = { real: everything.filter((o) => !isDemo(o)).length, demo: everything.filter(isDemo).length, selected: dataset };
+  const orders = dataset === 'real' ? everything.filter((o) => !isDemo(o)) : dataset === 'demo' ? everything.filter(isDemo) : everything;
   const cur = counts(orders, tz, month);
   const pre = counts(orders, tz, prev);
   const weeks = weeksOf(month);
@@ -175,7 +181,7 @@ export function buildMonthly({ orders: raw, settings, month, now = new Date() })
   if (pre.received.filter(live).length >= 3) for (const p of bestSellers) { const before = prevProducts.get(normItem(p.product)) ?? 0; if (p.orders >= 2 && p.orders > before) { opportunities.push({ id: `rising-${normItem(p.product)}`, insight: `Orders for ${p.product} rose from ${before} to ${p.orders}.`, evidence: `${prev} versus ${month}. Two months is a small sample, so treat it as a hint.`, why: 'Early notice helps you buy ingredients ahead.', action: 'Check you have stock for the next few weeks.', link: { to: '/orders', label: 'See orders' } }); break; } }
   if (plan.unscheduledOrders.length) opportunities.push({ id: 'missing-details', insight: `${plan.unscheduledOrders.length} open ${plan.unscheduledOrders.length === 1 ? 'order is' : 'orders are'} missing a preparation time or deadline.`, evidence: 'Counted from your open orders right now.', why: 'Orders without both are left out of the schedule, so capacity looks freer than it is.', action: 'Complete the details.', link: { to: '/orders', label: 'Open orders' } });
   if (atRisk.some((r) => r.risk === 'high')) opportunities.push({ id: 'high-risk', insight: `${atRisk.filter((r) => r.risk === 'high').length} open ${atRisk.filter((r) => r.risk === 'high').length === 1 ? 'order is' : 'orders are'} predicted to miss ${atRisk.filter((r) => r.risk === 'high').length === 1 ? 'its' : 'their'} deadline.`, evidence: 'Predicted by the scheduler from your preparation times and working hours (a forecast, not a late delivery).', why: 'Moving a deadline or freeing time now is cheaper than apologising later.', action: 'Review the plan and consider a what-if.', link: { to: '/deadlines', label: 'Open Deadlines' } });
-  if (capacity.overloadedDates.length) opportunities.push({ id: 'full-days', insight: `${capacity.overloadedDates.length} of the next ${PLAN_DAYS} days ${capacity.overloadedDates.length === 1 ? 'is' : 'are'} fully booked.`, evidence: 'Planned preparation minutes reach the daily capacity in your settings.', why: 'New orders for those dates would need other work to move.', action: 'Point new customers to a day with spare time.', link: { to: '/calendar', label: 'Open Calendar' } });
+  if (capacity.overloadedDates.length) opportunities.push({ id: 'full-days', insight: `${capacity.overloadedDates.length} of the next ${PLAN_DAYS} days ${capacity.overloadedDates.length === 1 ? 'is' : 'are'} fully booked.`, evidence: 'Planned preparation minutes reach the daily capacity in your settings.', why: 'New orders for those dates would need other work to move.', action: 'Point new customers to a day with spare time.', link: { to: '/plan', label: 'Open Plan' } });
 
   const demoCount = cur.received.filter(isDemo).length;
   const quality = {
@@ -185,5 +191,5 @@ export function buildMonthly({ orders: raw, settings, month, now = new Date() })
     historyMonths: new Set(orders.map((o) => (o.createdAt ? monthOf(new Date(o.createdAt), tz) : null)).filter(Boolean)).size,
   };
 
-  return { month, previousMonth: prev, isCurrentMonth: month === thisMonth, timezone: tz, generatedAt: now.toISOString(), quality, overview, sales, fulfilment, payments, customers, capacity, opportunities };
+  return { month, previousMonth: prev, datasets, isCurrentMonth: month === thisMonth, timezone: tz, generatedAt: now.toISOString(), quality, overview, sales, fulfilment, payments, customers, capacity, opportunities };
 }
