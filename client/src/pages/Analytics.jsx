@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRight, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import useAsync from '../hooks/useAsync.js';
 import { getMonthlyAnalytics } from '../services/api.js';
 import PageHeader from '../components/PageHeader.jsx';
-import Reveal from '../components/Reveal.jsx';
 import SectionHead from '../components/SectionHead.jsx';
 import StateMessage from '../components/StateMessage.jsx';
 import { RiskBadge } from '../components/Badge.jsx';
@@ -53,15 +52,15 @@ function Columns({ series, label, legend }) {
   const peak = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v.value)));
   return (
     <figure className="an-fig">
-      <div className="an-cols" role="img" aria-label={label} style={{ '--n': series[0].values.length }}>
+      <div className="an-cols" role="img" aria-label={`${label}. Most in one bar: ${peak}.`} style={{ '--n': series[0].values.length }}>
         {series[0].values.map((_, i) => (
           <div key={i} className="an-col" title={series.map((s) => `${s.name}: ${s.values[i].value}`).join(' · ')}>
-            <div className="an-col-bars">{series.map((s) => <span key={s.name} className={`an-colbar an-${s.tone}${s.values[i].value ? '' : ' is-empty'}`} style={{ height: `${s.values[i].value ? Math.max(6, (s.values[i].value / peak) * 100) : 3}%` }}><i>{s.values[i].value || ''}</i></span>)}</div>
+            <div className="an-col-bars">{series.map((s) => <span key={s.name} className={`an-colbar an-${s.tone}${s.values[i].value ? '' : ' is-empty'}`} style={{ height: `${(s.values[i].value / peak) * 100}%` }}><i>{s.values[i].value || ''}</i></span>)}</div>
             <span className="an-col-label">{series[0].values[i].label}</span>
           </div>
         ))}
       </div>
-      {legend && <figcaption className="an-legend">{series.map((s) => <span key={s.name}><i className={`an-dot an-${s.tone}`} />{s.name}</span>)}</figcaption>}
+      <figcaption className="an-legend an-axis"><span>Bar heights are to scale (tallest = {peak}).</span>{legend && series.map((s) => <span key={s.name}><i className={`an-dot an-${s.tone}`} />{s.name}</span>)}</figcaption>
     </figure>
   );
 }
@@ -92,21 +91,31 @@ function CapacityChart({ days, tz }) {
 
 export default function Analytics() {
   const [params, setParams] = useSearchParams();
-  const [compare, setCompare] = useState(false);
   const [hours, setHours] = useState('');
   const month = params.get('month') && /^\d{4}-(0[1-9]|1[0-2])$/.test(params.get('month')) ? params.get('month') : undefined;
-  const { status, data, error, reload } = useAsync(() => getMonthlyAnalytics(month), [month]);
-  const goto = (m) => setParams(m ? { month: m } : {}, { replace: true });
+  const explicit = ['real', 'demo', 'all'].includes(params.get('data')) ? params.get('data') : null;
+  const [auto, setAuto] = useState('all'); // the first load asks for everything just to learn how many real and demo orders exist
+  const requested = explicit ?? auto;
+  const { status, data, error, reload } = useAsync(() => getMonthlyAnalytics(month, requested), [month, requested]);
+  useEffect(() => { if (data && !explicit && auto === 'all') setAuto(data.datasets.real > 0 ? 'real' : 'demo'); }, [data, explicit, auto]);
+  const goto = (m) => setParams((p) => { const n = new URLSearchParams(p); if (m) n.set('month', m); else n.delete('month'); return n; }, { replace: true });
+  const pick = (d) => setParams((p) => { const n = new URLSearchParams(p); n.set('data', d); return n; }, { replace: true });
 
   const shown = data?.month ?? month;
   const head = (
-    <PageHeader eyebrow="Monthly dashboard" title="Your month, in perspective." subtitle="Understand what sold, where time went, and what to improve next." demo={false}>
+    <PageHeader eyebrow="Insights" title="Your month, in perspective." demo={false}>
+      {data && (
+        <div className="an-set" role="group" aria-label="Which orders to include">
+          {[['real', 'Real orders', data.datasets.real], ['demo', 'Demo orders', data.datasets.demo], ['all', 'Both', data.datasets.real + data.datasets.demo]].map(([k, l, n]) => (
+            <button key={k} type="button" className={data.datasets.selected === k ? 'is-on' : ''} aria-pressed={data.datasets.selected === k} onClick={() => pick(k)}>{l}<b>{n}</b></button>
+          ))}
+        </div>
+      )}
       <div className="an-month" role="group" aria-label="Choose a month">
         <button type="button" className="pc-arrow" onClick={() => goto(shift(shown, -1))} disabled={!shown} aria-label="Previous month"><ChevronLeft size={18} aria-hidden="true" /></button>
         <strong aria-live="polite">{shown ? monthLabel(shown) : '…'}</strong>
         <button type="button" className="pc-arrow" onClick={() => goto(shift(shown, 1))} disabled={!shown || data?.isCurrentMonth} aria-label="Next month"><ChevronRight size={18} aria-hidden="true" /></button>
       </div>
-      <label className="an-compare"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} /> Compare with previous month</label>
     </PageHeader>
   );
 
@@ -123,44 +132,32 @@ export default function Analytics() {
   return (
     <section className={`page analytics${status === 'loading' ? ' is-loading' : ''}`}>
       {head}
-      <p className={`an-quality an-quality-${modeKey}`} role="status"><b>{modeKey === 'demo' ? 'Demo data' : modeKey === 'real' ? 'Real data' : modeKey === 'mixed' ? 'Mixed data' : 'No data'}</b> {modeText} {quality.ordersInMonth > 0 && <span>Incomplete by design: {quality.incomplete[0]}</span>}</p>
+      <p className={`an-quality an-quality-${data.datasets.selected}`} role="status">
+        <b>{data.datasets.selected === 'real' ? 'Real orders only' : data.datasets.selected === 'demo' ? 'Demo orders only' : 'Real and demo orders combined'}</b>{' '}
+        {data.datasets.selected === 'real' ? (data.datasets.real === 0 ? 'No real orders yet. Switch to Demo orders to see how this page looks with sample data.' : 'Sample orders are left out, so these figures describe your business.')
+          : data.datasets.selected === 'demo' ? 'These are the sample bakery orders. They show how Conversa works, not how your business is doing.'
+            : 'Figures mix sample and real orders, so they do not describe your business. Use Real orders for that.'}
+      </p>
 
-      <Reveal as="section" className="ws-section">
-        <SectionHead eyebrow="1 · Overview" title="The month at a glance.">Orders are counted by the month they were received. Status is each order's status today.</SectionHead>
-        <dl className="an-kpis">
-          <Kpi label="Orders received" metric={ov.received} tone="key" hint={compare ? (ov.received.change.available ? `${ov.received.change.value >= 0 ? '+' : ''}${ov.received.change.value}% vs ${monthLabel(data.previousMonth)} (${ov.received.previous})` : `vs ${monthLabel(data.previousMonth)}: ${ov.received.change.reason}`) : 'Created in this month'} />
-          <Kpi label="Completed" metric={ov.completed} hint="Marked completed; cancelled orders are never counted here" />
-          <Kpi label="Still open" metric={ov.pending} hint="Pending, confirmed or in progress" />
-          <Kpi label="Cancelled" metric={ov.cancelled} hint="Kept separate from completed" />
-          <Kpi label="Recorded revenue" metric={ov.revenue} />
-          <Kpi label="Outstanding balance" metric={ov.outstandingBalance} />
-          <Kpi label="On-time delivery" metric={ov.onTimeRate} />
-        </dl>
-        {compare && ov.received.previous > 0 && (
-          <div className="an-cmp" aria-label="Orders received, this month against the previous month">
-            <HBars label="Orders received" rows={[{ label: monthLabel(data.month), value: ov.received.value }, { label: monthLabel(data.previousMonth), value: ov.received.previous, tone: 'muted' }]} />
-          </div>
-        )}
-      </Reveal>
+      <dl className="an-kpis an-kpis-3">
+        <Kpi label="Orders received" metric={ov.received} tone="key" hint="Created this month, cancelled included" />
+        <Kpi label="Orders completed" metric={ov.completed} hint="On-time delivery can't be measured yet: completion times aren't recorded" />
+        <Kpi label="Orders at risk" metric={{ available: true, value: fu.atRisk.length }} tone={fu.atRisk.length ? 'risk' : undefined} hint="Open orders the scheduler expects to miss, or barely meet, their deadline" />
+      </dl>
 
-      <Reveal as="section" className="ws-section">
-        <SectionHead eyebrow="2 · Sales" title="What sold.">Prices aren't stored on orders, so this section shows order volume, not money.</SectionHead>
-        <div className="an-grid an-grid-2">
-          <article className="an-card"><h3>Orders received by week</h3>
-            <Columns label="Orders received per week of the month" series={[{ name: 'Orders received', tone: 'caramel', values: sales.receivedByWeek.map((w) => ({ label: `${w.label}`, value: w.orders })) }]} />
-            <p className="an-note">Weeks are days of the month. {sales.busiestWeek.available ? `Busiest: days ${sales.busiestWeek.value.label} (${sales.busiestWeek.value.orders} orders).` : sales.busiestWeek.reason}</p>
-          </article>
-          <article className="an-card"><h3>Best-selling products</h3>
-            {sales.bestSellers.available ? <><HBars label="Products by orders received" rows={sales.bestSellers.value.map((p) => ({ label: p.product, value: p.orders, note: `${p.units} ${plural(p.units, 'unit', 'units')}` }))} /><p className="an-note">{sales.bestSellers.basis} {sales.bestSellers.value[0].orders < 2 && 'Every product sold once, so there is no clear best seller yet.'}</p></> : <NA metric={sales.bestSellers} />}
-          </article>
-          <article className="an-card"><h3>Revenue by week</h3><NA metric={sales.weeklyRevenue} /><h3 className="an-sub">Average order value</h3><NA metric={sales.averageOrderValue} /></article>
-          <article className="an-card"><h3>New and returning customers</h3>
-            {sales.customers.available ? <><HBars label="New and returning customers" rows={[{ label: 'New', value: sales.customers.value.new, tone: 'blue' }, { label: 'Returning', value: sales.customers.value.returning, tone: 'caramel' }]} /><p className="an-note">{sales.customers.value.unidentified} {plural(sales.customers.value.unidentified, 'order has', 'orders have')} no customer contact, so {plural(sales.customers.value.unidentified, 'it is', 'they are')} left out.</p></> : <NA metric={sales.customers} />}
-          </article>
-        </div>
-      </Reveal>
+      <div className="an-grid an-grid-2 an-main">
+        <article className="an-card"><h3>Orders received by week</h3>
+          <Columns label="Orders received per week of the month" series={[{ name: 'Orders received', tone: 'caramel', values: sales.receivedByWeek.map((w) => ({ label: w.label, value: w.orders })) }]} />
+          <p className="an-note">Revenue can't be charted yet: orders don't store a price. Volume is shown instead.</p>
+        </article>
+        <article className="an-card"><h3>Popular products <small>by units ordered</small></h3>
+          {sales.bestSellers.available ? <HBars label="Products by orders received" rows={[...sales.bestSellers.value].sort((a, b) => b.units - a.units || b.orders - a.orders).map((p) => ({ label: p.product, value: p.units, note: `${plural(p.units, 'unit', 'units')} · ${p.orders} ${plural(p.orders, 'order', 'orders')}` }))} /> : <NA metric={sales.bestSellers} />}
+        </article>
+      </div>
 
-      <Reveal as="section" className="ws-section">
+      <details className="an-moredetail">
+        <summary>More detail: reliability, payments, customers, capacity, suggestions</summary>
+      <section className="ws-section">
         <SectionHead eyebrow="3 · Reliability" title="Are you keeping your promises?">Orders are grouped by the month their deadline falls in. A prediction is not a late delivery.</SectionHead>
         <div className="an-grid an-grid-2">
           <article className="an-card"><h3>Due versus completed</h3>
@@ -181,9 +178,9 @@ export default function Analytics() {
           )}
           <p className="an-note">{fu.carryover.value} {plural(fu.carryover.value, 'order due', 'orders due')} in {monthLabel(data.month)} {plural(fu.carryover.value, 'is', 'are')} still open{fu.carryover.monthEnded ? ' and carried over into the next month' : ''}. Delay reasons: unknown for every order.</p>
         </div>
-      </Reveal>
+      </section>
 
-      <Reveal as="section" className="ws-section">
+      <section className="ws-section">
         <SectionHead eyebrow="4 · Payments" title="Booked, collected, outstanding.">Payment status is kept separate from order status. Conversa never treats a note or a screenshot as proof of payment.</SectionHead>
         <div className="an-grid an-grid-2">
           <article className="an-card"><h3>Payment status of orders received</h3>
@@ -195,9 +192,9 @@ export default function Analytics() {
               {[['Outstanding balances', pay.outstanding], ['Advance payments', pay.advances], ['Refunds', pay.refunds], ['Estimated profit', pay.profit]].map(([l, m]) => <div key={l}><dt>{l}</dt><dd>{m.reason}</dd></div>)}
             </dl></article>
         </div>
-      </Reveal>
+      </section>
 
-      <Reveal as="section" className="ws-section">
+      <section className="ws-section">
         <SectionHead eyebrow="5 · Customers" title="Who to look after.">Customers are only recognised by a recorded contact, never by name alone.</SectionHead>
         <div className="an-grid an-grid-2">
           <article className="an-card"><h3>Repeat customers</h3>{cu.repeatCustomers.available ? <HBars label="Orders per repeat customer" rows={cu.repeatCustomers.value.map((c) => ({ label: c.customerName, value: c.orders }))} unit=" orders" /> : <NA metric={cu.repeatCustomers} />}
@@ -207,9 +204,9 @@ export default function Analytics() {
             {cu.followUps.length ? <ul className="an-follow">{cu.followUps.map((f, i) => <li key={`${f.orderId}${i}`}><strong>{f.customerName}</strong><span>{f.reason}</span><em>{f.suggestion}</em><Link to={`/orders?edit=${f.orderId}`} className="an-link">Open order <ArrowRight size={14} aria-hidden="true" /></Link></li>)}</ul> : <p className="an-note">Nothing needs a follow-up right now.</p>}
             <p className="an-note">Suggestions only. Conversa never contacts a customer on its own. Repeat-order reminders: {cu.reorderReminders.reason}</p></article>
         </div>
-      </Reveal>
+      </section>
 
-      <Reveal as="section" className="ws-section">
+      <section className="ws-section">
         <SectionHead eyebrow="6 · Capacity" title="Can you take on more?">Workload is measured in preparation minutes, not order counts: one large custom cake can outweigh several small orders. This view always covers the next two weeks.</SectionHead>
         <div className="an-card an-wide">
           <h3>Workload against capacity, next 14 days</h3>
@@ -223,9 +220,9 @@ export default function Analytics() {
           <p className="an-note" aria-live="polite">{mins ? (cap.unschedulable ? `${cap.unschedulable} open ${plural(cap.unschedulable, 'order has', 'orders have')} no preparation time or deadline, so this count may be too high. ` : '') + `At ${formatMinutes(mins)} each, roughly ${Math.floor(spare / mins)} more ${plural(Math.floor(spare / mins), 'order', 'orders')} would fit if their deadlines are far enough away (an estimate: it ignores deadlines).` : 'Enter how long a new order takes to estimate how many more you can accept. Without a duration, no number is claimed.'}</p>
           <p className="an-note">{cap.recurringDelays.reason}</p>
         </div>
-      </Reveal>
+      </section>
 
-      <Reveal as="section" className="ws-section">
+      <section className="ws-section">
         <SectionHead eyebrow="7 · Next" title="Opportunities for next month.">Only suggestions the data above supports. Nothing here claims to have raised your sales.</SectionHead>
         {opportunities.length === 0 ? <StateMessage message="Not enough data for supported suggestions yet. They appear as orders and history build up." /> : (
           <ol className="an-opps">{opportunities.map((o) => (
@@ -233,7 +230,8 @@ export default function Analytics() {
           ))}</ol>
         )}
         <p className="an-note">Rising or falling demand, repeat-order reminders and seasonal occasions need several months of history (and recorded customer contacts). Conversa holds {quality.historyMonths} {plural(quality.historyMonths, 'month', 'months')} of orders, so it doesn't suggest them yet.</p>
-      </Reveal>
+      </section>
+      </details>
     </section>
   );
 }

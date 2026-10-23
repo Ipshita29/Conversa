@@ -114,3 +114,32 @@
 .an-opps dt { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--caramel-ink); } .an-opps dd { margin: 0.15rem 0 0; font-size: 0.88rem; color: #5E4D40; }
 @media (max-width: 960px) { .an-grid-2, .an-cap-grid, .an-opps dl { grid-template-columns: 1fr; } .an-risks li { grid-template-columns: 1fr 1fr; } .an-heat { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .an-month strong { min-width: 7.5rem; } .an-risks li { grid-template-columns: 1fr; } }
+
+.an-kpis-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 1rem; }
+.an-main { margin-bottom: 1.4rem; }
+.an-moredetail { margin-top: 1.4rem; border-top: 1px solid var(--border); padding-top: 0.8rem; }
+.an-moredetail > summary { cursor: pointer; padding: 0.3rem 0; font-size: 0.95rem; font-weight: 600; color: var(--caramel-ink); }
+.an-moredetail > summary:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: 2px; }
+@media (max-width: 700px) { .an-kpis-3 { grid-template-columns: 1fr; } }
+
+/* Insights, second pass */
+.an-set { display: inline-flex; padding: 3px; background: #F3E9DC; border-radius: 999px; }
+.an-set button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 30px; padding: 0 0.85rem; border: 0; border-radius: 999px; background: transparent; font: inherit; font-size: 0.82rem; color: #5E4D40; cursor: pointer; }
+.an-set button b { font-size: 0.7rem; font-weight: 600; color: var(--muted); } .an-set button.is-on { background: var(--white); color: var(--cocoa); font-weight: 600; box-shadow: 0 1px 2px rgba(51, 39, 31, 0.1); } .an-set button:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: 2px; }
+.an-quality-real { background: var(--low-bg); border-color: #C9DCC2; } .an-quality-demo, .an-quality-all { background: var(--blue-soft); border-color: #CFE0EC; }
+.an-kpi-risk dd { color: var(--high); } .an-kpi-risk { background: var(--high-bg); border-color: #E4C3BE; }
+.an-colbar.is-empty { height: 2px !important; min-height: 2px; background: var(--border); border-radius: 1px; }
+.an-colbar { min-height: 0; }
+.an-axis { justify-content: space-between; }
+.an-axis > span:first-child { color: var(--muted); }
+.analytics .page-header { align-items: center; margin-bottom: 1.2rem; }
+.analytics .page-header h1 { font-size: clamp(1.7rem, 3.4vw, 2.3rem); }
+.an-kpi small { display: block; max-width: 24ch; line-height: 1.35; }
+.an-main { align-items: stretch; }
+.an-card h3 { font-size: 1.15rem; margin-bottom: 0.7rem; }
+@media (max-width: 760px) { .analytics .page-header-actions { width: 100%; justify-content: space-between; } .an-set { width: 100%; } .an-set button { flex: 1; justify-content: center; padding: 0 0.4rem; } }
+
+.an-card h3 small { margin-left: 0.4rem; font: 400 0.76rem var(--sans); color: var(--muted); }
+.an-month .pc-arrow { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; color: var(--cocoa); cursor: pointer; transition: background 0.15s var(--ease); }
+.an-month .pc-arrow:hover:not(:disabled) { background: var(--papaya); } .an-month .pc-arrow:disabled { opacity: 0.35; cursor: default; } .an-month .pc-arrow:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: 2px; }
+.an-bars li { grid-template-columns: minmax(5.5rem, 8rem) minmax(0, 1fr) 8.6rem; } .an-bar-fig { white-space: nowrap; }
