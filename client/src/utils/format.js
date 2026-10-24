@@ -52,3 +52,7 @@ export const isDemoOrder = (o) => typeof o?.notes === 'string' && o.notes.starts
 export const OPEN = ['pending', 'confirmed', 'in_progress'];
 export const formatLongInTz = (iso, tz) => (iso ? new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }).format(new Date(iso)) : '—');
 export const formatDayInTz = (isoDate) => new Date(`${isoDate}T00:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' });
+
+// One place for the currency. Orders store a plain number (the agreed total), so the symbol is a display choice.
+export const CURRENCY = 'INR';
+export const formatMoney = (n) => (typeof n === 'number' ? new Intl.NumberFormat(undefined, { style: 'currency', currency: CURRENCY, maximumFractionDigits: n % 1 ? 2 : 0 }).format(n) : '—');

@@ -47,6 +47,7 @@ const qs = (params = {}) => {
 };
 
 export const getDashboard = () => request('GET', '/dashboard');
+export const getInsights = (range, dataset) => request('GET', `/analytics/summary${qs({ range, dataset })}`);
 export const getMonthlyAnalytics = (month, dataset) => request('GET', `/analytics/monthly${qs({ month, dataset })}`);
 
 export const listOrders = (params) => request('GET', `/orders${qs(params)}`);

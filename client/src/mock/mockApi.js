@@ -15,7 +15,7 @@ const withRisk = () => annotateRisk(orders);
 const notFound = (id) => new ApiError(404, 'NOT_FOUND', `Order '${id}' not found.`);
 const invalid = (details) => new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed.', details);
 
-const CREATABLE = ['customerName', 'source', 'item', 'quantity', 'prepTimeMinutes', 'deadline', 'status', 'paymentStatus'];
+const CREATABLE = ['customerName', 'source', 'item', 'quantity', 'price', 'prepTimeMinutes', 'deadline', 'status', 'paymentStatus'];
 function rejectUnknown(body, allowed) {
   return Object.keys(body).filter((k) => !allowed.includes(k)).map((k) => ({ field: k, message: 'Unknown or read-only field.' }));
 }
@@ -93,6 +93,13 @@ export async function handleMockRequest(method, path, body = {}) {
   let m;
 
   if (method === 'GET' && p === '/dashboard') return buildDashboard(orders);
+
+  if (method === 'GET' && p === '/analytics/summary') {
+    const { buildSummary, RANGES } = await import('../../../server/services/insightsService.js');
+    const days = q.get('range') === null ? 7 : Number(q.get('range'));
+    if (!RANGES.includes(days)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'range', message: 'Must be 7 or 30.' }]);
+    return clone(buildSummary({ orders, settings: demoSettings(), days, now: new Date(), dataset: q.get('dataset') || 'all' }));
+  }
 
   if (method === 'GET' && p === '/analytics/monthly') {
     // Same pure function the real server uses, so demo and live numbers are produced by one implementation.

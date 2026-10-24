@@ -13,7 +13,7 @@
 | **Production plan** | A Kanban board that sorts every order into *Critical*, *Upcoming*, *Needs details* and *Completed*. |
 | **Risk, explained** | Each at-risk order says why ("finishes 3h after the deadline, behind 2 earlier orders") and what to do. |
 | **What-if** | Try a rush order, a new deadline or a shorter prep time first. Nothing is saved until you apply it. |
-| **Insights** | Monthly order volume, popular products and what needs attention. Real and demo orders are kept apart. |
+| **Insights** | Revenue, orders, top products and smart tips for the last 7 or 30 days. Real and demo orders are kept apart. |
 
 ## Try it in 1 minute (no database, no keys)
 
@@ -61,7 +61,7 @@ React + Vite · Express · MongoDB · Groq (AI drafting) · Lenis (smooth scroll
 ## Honest limits
 
 - WhatsApp and Instagram are **not connected**. Messages in the demo are stored samples. The webhook code is there, but it needs Meta credentials.
-- Orders have **no price yet**, so Conversa shows order volume and payment status, not revenue.
+- Revenue is **booked sales** from the optional price you enter on an order, not money collected. Orders without a price are left out of revenue.
 - Completion times aren't recorded, so on-time delivery rate can't be measured yet.
 
 More detail: [`docs/project-summary.md`](docs/project-summary.md) (pitch and demo script) · [`docs/api-contract.md`](docs/api-contract.md) (API)
