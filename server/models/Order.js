@@ -19,6 +19,7 @@ const orderSchema = new mongoose.Schema({
   customisation: { type: String, maxlength: 500, default: null },
   notes: { type: String, maxlength: 1000, default: null },
   prepTimeMinutes: { type: Number, default: null, min: 0 },
+  price: { type: Number, default: null, min: 0 }, // the agreed total for the whole order (not per unit); null = not priced yet
   deadline: { type: Date, default: null },
   status: { type: String, enum: ORDER_STATUSES, default: 'pending' },
   paymentStatus: { type: String, enum: PAYMENT_STATUSES, default: 'unverified' },

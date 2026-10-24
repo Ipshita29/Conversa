@@ -19,6 +19,7 @@ export function validateOrder(o, { partial = false } = {}) {
   if (has('prepTimeMinutes') && o.prepTimeMinutes !== null && !(Number.isInteger(o.prepTimeMinutes) && o.prepTimeMinutes >= 0)) {
     add('prepTimeMinutes', 'Must be a whole number of minutes (0 or more), or empty if unknown.');
   }
+  if (has('price') && o.price !== null && !(typeof o.price === 'number' && Number.isFinite(o.price) && o.price >= 0)) add('price', 'Must be 0 or more, or empty if not priced yet.');
   if (has('deadline') && o.deadline !== null && Number.isNaN(Date.parse(o.deadline))) add('deadline', 'Must be a valid date and time, or empty if unknown.');
   if (has('status') && !ORDER_STATUSES.includes(o.status)) add('status', `Must be one of: ${ORDER_STATUSES.join(', ')}.`);
   if (has('paymentStatus') && !PAYMENT_STATUSES.includes(o.paymentStatus)) add('paymentStatus', `Must be one of: ${PAYMENT_STATUSES.join(', ')}.`);

@@ -49,6 +49,7 @@ Clients must show API failures as errors. They must never silently substitute mo
 | `source` | enum | no (default `manual`) | no | `manual` \| `whatsapp` \| `instagram` |
 | `item` | string | **yes** | no | Product/service, 1–200 chars. |
 | `quantity` | number | no (default `1`) | no | Must be `> 0`. |
+| `price` | number or null | Agreed total for the whole order. Optional; used for revenue in Insights. |
 | `prepTimeMinutes` | integer \| null | no | no | `>= 0` when set. `null` = not yet estimated. |
 | `deadline` | string \| null | no | no | ISO 8601 or `null`. |
 | `status` | enum | no (default `pending`) | no | `pending` \| `confirmed` \| `in_progress` \| `completed` \| `cancelled` |
@@ -419,6 +420,19 @@ Error example (`404`):
 Rules: **read-only** — no order, task or schedule is persisted; a repeat call with the same input and unchanged data returns the same result. Hypothetical orders have no `id` in the response; they are referenced by their index in `changes` (e.g. `"orderId": "change_0"`). Applying a simulated change is a separate explicit `POST`/`PATCH /api/orders` call.
 
 ---
+
+## 7a. Insights dashboard
+
+### `GET /api/analytics/summary?range=7|30&dataset=all|real|demo`
+
+Powers the Insights page. Implemented in `server/services/insightsService.js` (pure: orders, settings, days, now). Orders belong to the period by the day they were **received** (`createdAt`, business timezone, today included); cancelled orders are excluded everywhere; each order is counted once.
+
+Returns `kpis` (`totalRevenue`, `totalOrders`, `completedOrders`, `averageOrderValue`), `trend` (one `{ date, orders, revenue }` per day), `topProducts` (top 3 by units: `product`, `units`, `orders`, `revenue`), `insights` (up to 3, each with `title`, `finding`, `action`, `link`), `datasets` and `basis`.
+
+- **Revenue** is booked sales: the sum of the optional order field `price` (the agreed total for the whole order, `number >= 0` or `null`). Unpriced orders are left out and counted separately; with no priced order, revenue and average order value are `{ available: false, reason }`.
+- **Comparison** with the previous period of the same length is returned only when that period has at least 3 orders (3 priced orders for money figures); otherwise `comparison: { available: false, reason }`.
+- **Insights** are produced only from supporting data: scheduler overload (`computePlan`), a clear busiest ordering weekday (5+ orders), a clear best seller, and unpriced orders.
+- Errors: `400 VALIDATION_ERROR` for a `range` other than 7 or 30, or an unknown `dataset`.
 
 ## 7b. Monthly analytics
 

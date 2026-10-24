@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { requireDb } from '../middleware/requireDb.js';
-import { getMonthly } from '../controllers/analyticsController.js';
+import { getMonthly, getSummary } from '../controllers/analyticsController.js';
 
 const r = Router();
 r.get('/monthly', requireDb, getMonthly);
+r.get('/summary', requireDb, getSummary);
 export default r;

@@ -4,7 +4,7 @@ export const PAYMENT_STATUSES = ['unverified', 'pending', 'verified', 'rejected'
 export const SOURCES = ['manual', 'whatsapp', 'instagram'];
 export const OPEN_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
-const WRITABLE = ['customerName', 'customerContact', 'source', 'item', 'quantity', 'customisation', 'notes', 'prepTimeMinutes', 'deadline', 'status', 'paymentStatus'];
+const WRITABLE = ['price', 'customerName', 'customerContact', 'source', 'item', 'quantity', 'customisation', 'notes', 'prepTimeMinutes', 'deadline', 'status', 'paymentStatus'];
 const READ_ONLY = ['id', '_id', 'createdAt', 'updatedAt', 'risk', 'paymentEvidence'];
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
 
@@ -54,6 +54,12 @@ export function validateOrderInput(body, { partial = false } = {}) {
     if (v === null) value.prepTimeMinutes = null;
     else if (!Number.isInteger(v) || v < 0 || v > 60 * 24 * 30) add('prepTimeMinutes', 'Must be a whole number of minutes (0 or more), or null if unknown.');
     else value.prepTimeMinutes = v;
+  }
+  if (has('price')) {
+    const v = body.price;
+    if (v === null) value.price = null;
+    else if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 10000000) add('price', 'Must be a number of 0 or more (the total for the whole order), or null if not priced yet.');
+    else value.price = Math.round(v * 100) / 100;
   }
   if (has('deadline')) {
     if (body.deadline === null) value.deadline = null;

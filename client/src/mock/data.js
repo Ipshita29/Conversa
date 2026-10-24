@@ -11,11 +11,11 @@ const o = (n, f) => ({
 // The same five-order home-bakery story as server/scripts/demo-data.js (the real seed places its deadlines from the
 // scheduler's own finish times; this offline mock can only approximate that with fixed offsets).
 export const seedOrders = () => [
-  o(1, { customerName: 'Aanya Sharma', source: 'whatsapp', item: 'Birthday cake (2 kg)', customisation: 'Name and age in blue icing', prepTimeMinutes: 240, deadline: at(20), status: 'in_progress', paymentStatus: 'verified', notes: '[DEMO] already started, finishes comfortably early' }),
-  o(2, { customerName: 'Rohan Mehta', source: 'instagram', item: 'Festive gift hampers', quantity: 3, prepTimeMinutes: 300, deadline: at(27), status: 'confirmed', paymentStatus: 'pending', notes: '[DEMO] fits, but with a thin buffer' }),
-  o(3, { customerName: 'Meera Iyer', source: 'whatsapp', item: 'Wedding favour boxes', quantity: 50, customisation: 'Gold ribbon, names on tags', prepTimeMinutes: 300, deadline: at(29), notes: '[DEMO] customer asked for a date the queue cannot meet' }),
+  o(1, { customerName: 'Aanya Sharma', price: 1800, source: 'whatsapp', item: 'Birthday cake (2 kg)', customisation: 'Name and age in blue icing', prepTimeMinutes: 240, deadline: at(20), status: 'in_progress', paymentStatus: 'verified', notes: '[DEMO] already started, finishes comfortably early' }),
+  o(2, { customerName: 'Rohan Mehta', price: 2700, source: 'instagram', item: 'Festive gift hampers', quantity: 3, prepTimeMinutes: 300, deadline: at(27), status: 'confirmed', paymentStatus: 'pending', notes: '[DEMO] fits, but with a thin buffer' }),
+  o(3, { customerName: 'Meera Iyer', price: 4500, source: 'whatsapp', item: 'Wedding favour boxes', quantity: 50, customisation: 'Gold ribbon, names on tags', prepTimeMinutes: 300, deadline: at(29), notes: '[DEMO] customer asked for a date the queue cannot meet' }),
   o(4, { customerName: 'Kabir Singh', source: 'instagram', item: 'Custom cupcake tower', customisation: 'Flavours and theme still to be confirmed', deadline: at(96), notes: '[DEMO] cannot be scheduled until the details are confirmed' }),
-  o(5, { customerName: 'Tara Bose', item: 'Brownie tray', quantity: 2, prepTimeMinutes: 90, deadline: at(-20), status: 'completed', paymentStatus: 'verified', notes: '[DEMO] delivered and paid' }),
+  o(5, { customerName: 'Tara Bose', price: 600, item: 'Brownie tray', quantity: 2, prepTimeMinutes: 90, deadline: at(-20), status: 'completed', paymentStatus: 'verified', notes: '[DEMO] delivered and paid' }),
 ];
 
 // Sample inbox for demo mode: 6 messages, 5 read + 1 unread (mirrors server/scripts/demo-data.js).

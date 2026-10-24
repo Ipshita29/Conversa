@@ -15,9 +15,9 @@ export const DEMO_MARK = '[DEMO]';
 const MIN = 60000;
 
 const QUEUE = [ // in scheduling order
-  { customerName: 'Aanya Sharma', source: 'whatsapp', item: 'Birthday cake (2 kg)', quantity: 1, customisation: 'Name and age in blue icing', prepTimeMinutes: 240, status: 'in_progress', paymentStatus: 'verified', note: 'already started, finishes comfortably early' },
-  { customerName: 'Rohan Mehta', source: 'instagram', item: 'Festive gift hampers', quantity: 3, customisation: null, prepTimeMinutes: 300, status: 'confirmed', paymentStatus: 'pending', note: 'fits, but with a thin buffer' },
-  { customerName: 'Meera Iyer', source: 'whatsapp', item: 'Wedding favour boxes', quantity: 50, customisation: 'Gold ribbon, names on tags', prepTimeMinutes: 300, status: 'pending', paymentStatus: 'unverified', note: 'customer asked for a date the queue cannot meet' },
+  { customerName: 'Aanya Sharma', source: 'whatsapp', item: 'Birthday cake (2 kg)', quantity: 1, customisation: 'Name and age in blue icing', prepTimeMinutes: 240, price: 1800, createdHoursAgo: 52, status: 'in_progress', paymentStatus: 'verified', note: 'already started, finishes comfortably early' },
+  { customerName: 'Rohan Mehta', source: 'instagram', item: 'Festive gift hampers', quantity: 3, customisation: null, prepTimeMinutes: 300, price: 2700, createdHoursAgo: 30, status: 'confirmed', paymentStatus: 'pending', note: 'fits, but with a thin buffer' },
+  { customerName: 'Meera Iyer', source: 'whatsapp', item: 'Wedding favour boxes', quantity: 50, customisation: 'Gold ribbon, names on tags', prepTimeMinutes: 300, price: 4500, createdHoursAgo: 20, status: 'pending', paymentStatus: 'unverified', note: 'customer asked for a date the queue cannot meet' },
 ];
 
 // Deadline at HH:mm on the Nth WORKING day after `now`, in the business timezone.
@@ -57,9 +57,9 @@ export function buildDemoOrders(settings, now = new Date(), others = []) {
 
   const orders = [
     ...queued,
-    { customerName: 'Kabir Singh', source: 'instagram', item: 'Custom cupcake tower', quantity: 1, customisation: 'Flavours and theme still to be confirmed', prepTimeMinutes: null, deadline: workingDayAt(4, '17:00', settings, now), status: 'pending', paymentStatus: 'unverified', note: 'cannot be scheduled until the details are confirmed' },
-    { customerName: 'Tara Bose', source: 'manual', item: 'Brownie tray', quantity: 2, customisation: null, prepTimeMinutes: 90, deadline: new Date(now.getTime() - 20 * 60 * MIN), status: 'completed', paymentStatus: 'verified', note: 'delivered and paid' },
-  ].map(({ note, ...o }) => ({ ...o, notes: `${DEMO_MARK} ${note}` }));
+    { customerName: 'Kabir Singh', source: 'instagram', item: 'Custom cupcake tower', quantity: 1, customisation: 'Flavours and theme still to be confirmed', prepTimeMinutes: null, price: null, createdHoursAgo: 6, deadline: workingDayAt(4, '17:00', settings, now), status: 'pending', paymentStatus: 'unverified', note: 'cannot be scheduled until the details are confirmed' },
+    { customerName: 'Tara Bose', source: 'manual', item: 'Brownie tray', quantity: 2, customisation: null, prepTimeMinutes: 90, price: 600, createdHoursAgo: 150, deadline: new Date(now.getTime() - 20 * 60 * MIN), status: 'completed', paymentStatus: 'verified', note: 'delivered and paid' },
+  ].map(({ note, createdHoursAgo, ...o }) => ({ ...o, createdAt: new Date(now.getTime() - createdHoursAgo * 3600000), notes: `${DEMO_MARK} ${note}` }));
 
   // Fail loudly if the story ever stops holding (judged on the demo orders only; real orders may be late themselves).
   const plan = computePlan({ orders: [...real, ...orders.map((o, i) => ({ ...o, id: `d${i}` }))], settings, now, rangeDays: 7 });

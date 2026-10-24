@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, Plus, Search, Pencil } from 'lucide-react';
 import { listOrders, createOrder, getOrder, updateOrder } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
-import { formatMinutes, formatDateTime, isDemoOrder, OPEN, STATUS_LABEL } from '../utils/format.js';
+import { formatMinutes, formatDateTime, formatMoney, isDemoOrder, OPEN, STATUS_LABEL } from '../utils/format.js';
 import { ORDER_STATUSES } from '../utils/validateOrder.js';
 import DemoBadge from '../components/DemoBadge.jsx';
 import StateMessage from '../components/StateMessage.jsx';
@@ -116,6 +116,7 @@ export default function Orders() {
                   <div className="od-detail">
                     <dl>
                       <div><dt>Preparation</dt><dd>{o.prepTimeMinutes === null ? 'Not set' : formatMinutes(o.prepTimeMinutes)}</dd></div>
+                      <div><dt>Price</dt><dd>{o.price == null ? 'Not set' : formatMoney(o.price)}</dd></div>
                       <div><dt>Payment</dt><dd><PaymentBadge status={o.paymentStatus} /></dd></div>
                       {o.customerContact && <div><dt>Contact</dt><dd>{o.customerContact}</dd></div>}
                       {o.customisation && <div><dt>Customisation</dt><dd>{o.customisation}</dd></div>}

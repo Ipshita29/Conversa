@@ -25,6 +25,7 @@ export default function OrderForm({ initial = {}, missing = [], uncertain = {}, 
     quantity: initial.quantity ?? 1,
     source: initial.source ?? 'manual',
     prepTimeMinutes: initial.prepTimeMinutes ?? '',
+    price: initial.price ?? '',
     deadline: toLocalInput(initial.deadline),
     status: initial.status ?? 'pending',
     paymentStatus: initial.paymentStatus ?? 'unverified',
@@ -42,6 +43,7 @@ export default function OrderForm({ initial = {}, missing = [], uncertain = {}, 
       quantity: v.quantity === '' ? NaN : Number(v.quantity),
       source: v.source,
       prepTimeMinutes: v.prepTimeMinutes === '' ? null : Number(v.prepTimeMinutes),
+      price: v.price === '' ? null : Number(v.price),
       deadline: fromLocalInput(v.deadline),
     };
     if (showStatus) { payload.status = v.status; payload.paymentStatus = v.paymentStatus; }
@@ -64,6 +66,9 @@ export default function OrderForm({ initial = {}, missing = [], uncertain = {}, 
         <Field {...fp("quantity")} label="Quantity"><input type="number" min="0" step="any" value={v.quantity} onChange={set('quantity')} /></Field>
         <Field {...fp("prepTimeMinutes")} label="Preparation time (minutes)" hint="Leave empty if unknown — the order will be left out of capacity planning.">
           <input type="number" min="0" step="1" value={v.prepTimeMinutes} onChange={set('prepTimeMinutes')} />
+        </Field>
+        <Field {...fp("price")} label="Price" hint="The agreed total for the whole order. Leave empty if not priced yet.">
+          <input type="number" min="0" step="any" value={v.price} onChange={set('price')} />
         </Field>
         <Field {...fp("deadline")} label="Deadline" hint="Leave empty if unknown.">
           <input type="datetime-local" value={v.deadline} onChange={set('deadline')} />
