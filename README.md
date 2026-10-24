@@ -1,154 +1,67 @@
-# Conversa — The Microbusiness Operations Copilot
+# Conversa
 
-> **Status:** Project concept and implementation plan. Features described below are planned unless explicitly marked as implemented in the repository.
+**Know before you say yes.** Conversa turns customer messages into orders, schedules them against a home baker's real working hours, and shows which deadlines are at risk and why.
 
-Conversa is a proposed AI-powered assistant for small businesses that sell through WhatsApp and Instagram. It helps sellers turn customer conversations into structured orders, keep track of payments and deadlines, schedule preparation work, and understand their business without manually copying details between chats, notes, spreadsheets, and calendars.
+> **AI reads. Rules decide. You approve.**
+> The AI only drafts an order from a message. The schedule and the risk levels come from a deterministic rule engine, so they are explainable and never made up. Nothing is saved until you confirm it.
 
-## The problem
+## What it does
 
-Small and home-based sellers often manage enquiries, order changes, payment evidence, pickup/delivery details, and follow-ups manually across social platforms. This can lead to missed orders, forgotten deadlines, delayed responses, and unclear payment status.
-
-## Proposed solution
-
-Conversa follows one simple workflow:
-
-**Customer message → AI order draft → seller review → order/payment tracking → calendar → business insights**
-
-AI should assist the seller, not silently make consequential decisions. Sellers approve order creation, changes to paid orders, payment status, and outbound messages.
-
-## What makes Conversa different?
-
-Most order-management tools help sellers record orders, track payments, and manage customer conversations. Conversa goes a step further by helping sellers understand whether they can realistically fulfil their commitments on time.
-
-Its core differentiator is **deadline-aware workload intelligence**:
-
-- **Preparation time estimation:** Estimate how long each order will take using seller-defined preparation times, product complexity, and historical data where available.
-- **Workload analysis:** Compare the total preparation time of pending orders with the seller's available working hours.
-- **Deadline conflict detection:** Identify orders that may be delayed because of limited capacity, overlapping deadlines, or task dependencies.
-- **Explainable recommendations:** Prioritise tasks and suggest corrective actions, explaining why each action matters.
-- **What-if scheduling:** Simulate changes to deadlines or task schedules and show how they affect the seller's overall workload and delivery risks.
-
-AI extracts order information and explains recommendations, while a rule-based scheduling engine calculates workload, scheduling conflicts, and deadline risks. Sellers remain in control and approve important changes.
-
-**The goal:** Move small businesses from simply tracking orders to proactively planning and fulfilling them on time.
-
-## Planned MVP
-
-- **Unified inbox:** organise supported customer conversations in one workspace.
-- **AI conversation intelligence:** identify order intent and extract details such as product, quantity, deadline, and delivery/pickup preference.
-- **Editable reply drafts:** suggest responses for the seller to review and send.
-- **Order management:** track orders through Enquiry, Order Confirmed, Payment Pending, Payment Received, Preparing, Ready, Delivered, and Follow-up.
-- **Order-change understanding:** interpret follow-up messages and help associate them with an existing order; show price/payment implications before applying changes.
-- **Payment screenshot assistance:** extract candidate details from payment evidence for seller review. OCR/AI output is **not proof of payment**.
-- **AI-assisted business calendar:** organise work using order deadlines, preparation time, priority, and delivery/pickup times.
-- **Business dashboard:** summarise sales, orders, pending payments, upcoming deadlines, and simple trends.
-- **Follow-up reminders:** suggest actions for unanswered enquiries, pending payments, pickups, feedback, and repeat customers.
-
-## Suggested technology
-
-| Layer | Proposed tools |
+| | |
 |---|---|
-| Frontend | React, Vite, React Router, plain CSS, Lucide React |
-| Backend | Node.js, Express |
-| Database | MongoDB Atlas, Mongoose |
-| AI | One LLM provider initially (for example, Gemini or OpenAI), called from the backend |
-| Messaging | Official WhatsApp Business Platform Cloud API and Instagram Messaging API, subject to account eligibility and permissions |
-| Optional live updates | Socket.IO |
-| Scheduled reminders | Rule-based date/time logic; optionally `node-cron` |
-| Deployment | Vercel (frontend), Render (backend), MongoDB Atlas (database) |
-| Collaboration | Git and GitHub |
+| **Messages → orders** | Paste or receive a customer message; AI drafts the order, you review and confirm. |
+| **Production plan** | A Kanban board that sorts every order into *Critical*, *Upcoming*, *Needs details* and *Completed*. |
+| **Risk, explained** | Each at-risk order says why ("finishes 3h after the deadline, behind 2 earlier orders") and what to do. |
+| **What-if** | Try a rush order, a new deadline or a shorter prep time first. Nothing is saved until you apply it. |
+| **Insights** | Monthly order volume, popular products and what needs attention. Real and demo orders are kept apart. |
 
-Keep the first version simple. A single backend and a focused AI service are sufficient; microservices, multi-agent orchestration, and a vector database are not required for the MVP.
+## Try it in 1 minute (no database, no keys)
 
-## High-level architecture
-
-1. A customer message arrives through an official platform webhook, or a sample message is used in demo mode.
-2. The backend normalises the message and sends relevant content to the AI extraction service.
-3. The AI returns structured candidate fields.
-4. The backend validates the result against a schema.
-5. The seller reviews and edits the proposed order or reply.
-6. Once approved, the backend creates or updates the order.
-7. Order status, payment review, calendar tasks, and dashboard summaries update.
-
-Build a complete sample-data demo first. Real messaging integration may require business-account setup, permissions, app configuration, and webhook verification.
-
-## Proposed data collections
-
-- `users`
-- `connectedAccounts`
-- `customers`
-- `conversations`
-- `messages`
-- `products`
-- `orders`
-- `payments`
-- `tasks`
-
-Never store API keys or access tokens in source control. Store integration credentials securely and keep them server-side.
-
-## Order lifecycle
-
-`Enquiry → Order Confirmed → Payment Pending → Payment Received → Preparing → Ready → Delivered → Follow-up`
-
-The lifecycle may need to support cancellation, refunds, partial payments, or changes depending on the seller’s workflow. Record important changes in an order history.
-
-## Safety, privacy, and reliability
-
-- Treat AI output as a suggestion; validate it server-side and make it editable.
-- Require explicit seller approval before sending consequential messages or applying high-impact order changes.
-- Do not mark payments as received based only on screenshot OCR.
-- Use official messaging APIs and follow their current terms, permission requirements, and messaging policies.
-- Restrict each business to its own customer and order data.
-- Protect credentials, encrypt stored integration tokens, validate webhooks, and avoid logging unnecessary private message content.
-- Make demo/sample data clearly distinguishable from real connected-account data.
-- Include clear loading, empty, error, and disconnected-account states.
-
-> **Pitch, demo script, architecture map and a walkthrough of the risk and what-if logic:** see [`docs/project-summary.md`](docs/project-summary.md).
-
-## Getting started
-
-This repository is currently a project plan. Once the frontend and backend have been scaffolded, update this section with the exact commands and environment variables used by the implementation.
-
-A suggested repository structure:
-
-```text
-conversa/
-├── client/                 # React + Vite frontend
-├── server/                 # Express API and webhook handlers
-├── docs/                   # Architecture and setup notes
-├── .env.example            # Variable names only; no real secrets
-├── .gitignore
-├── LICENSE
-└── README.md
+```bash
+cd client
+npm install
+npm run dev        # open http://localhost:5173
 ```
 
-Suggested implementation order:
+This runs in **demo mode** with five sample bakery orders (on track, tight, late, needs details, done).
 
-1. Create the React dashboard and seed realistic sample conversations/orders.
-2. Define and validate the message-to-order JSON schema.
-3. Build the seller review and order creation workflow.
-4. Add order statuses, payment review, change history, and calendar scheduling.
-5. Add dashboard summaries and follow-up reminders.
-6. Deploy and test the demo end to end.
-7. Connect official WhatsApp/Instagram APIs where eligible and available.
-8. Add automated tests, screenshots, a demo video, and deployment/setup instructions.
+## Run the full stack
 
-## CodeSprint 2026 context
+```bash
+# 1. API  (needs MongoDB; add a Groq key for AI drafting)
+cd server
+cp .env.example .env      # set MONGODB_URI and GROQ_API_KEY
+npm install
+npm run seed:demo         # optional: load the sample bakery
+npm run dev               # http://localhost:5000
 
-The project was being considered for Elite Coders CodeSprint 2026. The official Devpost listing describes an online build phase from **15 October to 15 November 2026**, followed by a final pitch in Dehradun on **22 November 2026** for shortlisted teams. The listing states teams of 2–5 students and requires a public GitHub repository with an open-source licence. Check the official event pages for the latest requirements.
+# 2. App  (point it at the API)
+cd ../client
+cp .env.example .env      # set VITE_DEMO_MODE=false
+npm install
+npm run dev
+```
 
-- Event: https://codesprint-by-elitecoders.devpost.com/
-- Rules: https://codesprint-by-elitecoders.devpost.com/rules
-- Unstop listing: https://unstop.com/hackathons/codesprint-2026-elite-coders-1761190
+Tests: `cd server && npm test`
 
-## Naming
+## How it works
 
-**Conversa** is the current working name. Earlier mockup work used **ChatterCart** as a temporary dashboard label; that was a mockup name, not a confirmed final brand.
+```
+customer message ──AI──▶ order draft ──you confirm──▶ order
+                                                       │
+working hours + prep time + deadline ──rule engine──▶ schedule + risk + what-if
+```
 
-## Project status
+The scheduler works earliest-deadline-first inside your working hours and daily capacity, then compares each order's predicted finish with its promised deadline.
 
-The product scope, architecture, UI direction, and build plan are documented here. Do not describe a feature as implemented until it exists in the repository and has been tested.
+## Built with
 
-## License
+React + Vite · Express · MongoDB · Groq (AI drafting) · Lenis (smooth scrolling) · plain CSS
 
-Choose and add an appropriate open-source licence before publishing. CodeSprint’s listed rules require a public GitHub repository with an open-source licence. Do not claim a licence until the `LICENSE` file is actually present.
+## Honest limits
+
+- WhatsApp and Instagram are **not connected**. Messages in the demo are stored samples. The webhook code is there, but it needs Meta credentials.
+- Orders have **no price yet**, so Conversa shows order volume and payment status, not revenue.
+- Completion times aren't recorded, so on-time delivery rate can't be measured yet.
+
+More detail: [`docs/project-summary.md`](docs/project-summary.md) (pitch and demo script) · [`docs/api-contract.md`](docs/api-contract.md) (API)
