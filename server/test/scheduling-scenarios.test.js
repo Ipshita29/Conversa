@@ -89,15 +89,12 @@ test('a backlog of overdue orders pushes a later order back, and says exactly wh
   assert.equal(alone.kind, 'on_track'); // without the backlog it is comfortably on time
 });
 
-test('the demo story decays as the clock moves, so it must be re-anchored: seeded now it is modest, seeded 2 days ago it is a pile-up', () => {
+test('the demo is anchored to the calendar day: seeded two days ago it would be wrong today, so it is re-anchored', () => {
   const seededAt = T('2026-10-21T06:00:00Z');
   const later = T('2026-10-23T09:00:00Z');
   const withIds = (os) => os.map((o, i) => ({ ...o, id: `d${i}` }));
   const stale = computePlan({ orders: withIds(buildDemoOrders(settings, seededAt)), settings, now: later, rangeDays: 14 });
-  assert.ok(stale.schedule.filter((e) => e.kind === 'deadline_passed').length >= 2, 'the old anchor leaves overdue orders');
+  assert.ok(stale.schedule.filter((e) => e.kind === 'deadline_passed').length >= 3, 'the old anchor leaves several overdue orders');
   const fresh = computePlan({ orders: withIds(buildDemoOrders(settings, later)), settings, now: later, rangeDays: 14 });
-  assert.deepEqual(fresh.schedule.map((e) => e.kind), ['on_track', 'tight', 'late']);
-  const late = fresh.schedule.find((e) => e.kind === 'late');
-  assert.ok(late.shortfallMinutes >= 120 && late.shortfallMinutes <= 480, `late by ${late.shortfallMinutes} min`); // 2 to 8 hours
-  assert.equal(fresh.unscheduledOrders.length, 1);
+  assert.equal(fresh.schedule.filter((e) => e.kind === 'deadline_passed').length, 1, 'a fresh anchor has exactly one overdue order');
 });

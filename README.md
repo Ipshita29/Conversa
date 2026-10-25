@@ -10,7 +10,7 @@
 | | |
 |---|---|
 | **Messages → orders** | Paste or receive a customer message; AI drafts the order, you review and confirm. |
-| **Production plan** | A Kanban board that sorts every order into *Critical*, *Upcoming*, *Needs details* and *Completed*. |
+| **Production plan** | A board that sorts every open order into *Overdue*, *On track* and *Upcoming* by itself, each with a one-line reason. |
 | **Risk, explained** | Each at-risk order says why ("finishes 3h after the deadline, behind 2 earlier orders") and what to do. |
 | **What-if** | Try a rush order, a new deadline or a shorter prep time first. Nothing is saved until you apply it. |
 | **Insights** | Revenue, orders, top products and smart tips for the last 7 or 30 days. Real and demo orders are kept apart. |
@@ -23,7 +23,7 @@ npm install
 npm run dev        # open http://localhost:5173
 ```
 
-This runs in **demo mode** with five sample bakery orders (on track, tight, late, needs details, done).
+This runs in **demo mode** with five sample bakery orders (1 overdue, 2 on track, 2 upcoming).
 
 ## Run the full stack
 

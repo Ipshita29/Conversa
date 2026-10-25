@@ -35,25 +35,27 @@ cd ../client && npm run dev         # terminal 2  (http://localhost:5173)
 
 ### The five demo orders (a small home bakery)
 
-| # | Customer | Order | Channel | State the demo shows |
-|---|---|---|---|---|
-| 1 | **Aanya Sharma** | Birthday cake (2 kg), name in blue icing, 4 h | WhatsApp | **On track**: in progress, ~6 h of buffer, payment verified |
-| 2 | **Rohan Mehta** | Festive gift hampers × 3, 5 h | Instagram | **Tight (medium risk)**: fits with only 2 h of buffer, payment pending |
-| 3 | **Meera Iyer** | Wedding favour boxes × 50, 5 h | WhatsApp | **Late (high risk)**: predicted 1 h 40 m after her deadline, payment unverified |
-| 4 | **Kabir Singh** | Custom cupcake tower, flavours still to be confirmed | Instagram | **Needs details**: no prep time, so it cannot be scheduled |
-| 5 | **Tara Bose** | Brownie tray × 2 | Phone (manual) | **Done**: delivered and paid |
+These are the only demo orders. Their deadlines roll with the calendar (shown here for Sunday 25 Oct 2026); the board derives each label, nothing is stored per order.
 
-Six inbox messages go with them (5 read, 1 unread). The unread one is a *new* rush enquiry from Nikhil Rao ("30 cake pops by tomorrow noon?") that has no order yet: it is the natural "turn a message into an order" and "can I say yes?" moment.
+| # | Customer | Order | Channel | Board section |
+|---|---|---|---|---|
+| 1 | **Meera Iyer** | Wedding favour boxes × 50, 30 min left to finish, due Sat 24 Oct 12:00 | WhatsApp | **Overdue**: 1 day past the promised deadline |
+| 2 | **Neha Sharma** | Chocolate birthday cake (2 kg), 30 min finishing, due Mon 26 Oct 10:00 | WhatsApp | **Upcoming**: due tomorrow morning, no time to spare |
+| 3 | **Aanya Sharma** | Birthday cake (2 kg), 2 h 30 min, due Mon 26 Oct 17:00 | WhatsApp | **Upcoming**: due tomorrow |
+| 4 | **Rohan Mehta** | Festive gift hampers × 3, 2 h, due Tue 27 Oct 12:00 | Instagram | **On track**: comfortable buffer |
+| 5 | **Kabir Singh** | Custom cupcake tower, 3 h, due Thu 29 Oct 17:00 | Instagram | **On track**: plenty of time |
+
+Five inbox messages go with them, one per order (4 read, 1 unread: Neha's request to have her cake ready first thing). Real and demo orders are scheduled separately, and `npm run seed:demo` / `npm run seed:clear` only ever touch demo records.
 
 ### Walkthrough
 
 | Step | Where | What to say / do |
 |---|---|---|
 | 1 | **Hero → Today** | "Here is the seller's morning." Scroll: the hero lingers and fades into *Your day, at a glance*: orders due today, in progress, completed, needing attention. |
-| 2 | **Your next moves** | "Not a list of orders, a list of *actions*, ranked by the scheduler." #1 decide about Meera's late order; #2 protect Rohan's buffer; #3 message Kabir to unblock his order; #4 keep going on Aanya's cake. Open one *Why #n* and its *Recovery*. |
-| 3 | **Orders at risk** | Meera is **1 h 40 m late**, Rohan has **2 h to spare**; Kabir sits apart under *Needs details*. Expand Meera: promised deadline → expected finish, why, the orders scheduled ahead of her, the timeline, a suggested new deadline. |
+| 2 | **Production board** | "Not a list of orders, a list of *urgency*, sorted by the scheduler." Overdue, Upcoming, On track, each card with its reason. |
+| 3 | **Orders at risk** | Meera is **1 day overdue**; Neha has **no time to spare**; Rohan and Kabir are comfortable. Expand Meera: promised deadline → expected finish, why, the orders scheduled ahead of her, the timeline, a suggested new deadline. |
 | 4 | **What-if** | Click **Run this experiment** ("Ask Meera for one more day"). Show the before/after table (high-risk 1 → 0), the plain-language summary, whether a free hour appears, and whether another order would fit. **Discard** or **Apply this schedule…** (it asks for confirmation and reminds you the customer must agree). |
-| 5 | **Inbox** | Open Nikhil's unread rush message → **Draft order with AI**: quantity, deadline in your timezone, a prep estimate marked *estimate*. "Nothing is saved until you confirm." |
+| 5 | **Inbox** | Open Neha's unread message → **Draft order with AI** (or paste any customer message): quantity, deadline in your timezone, a prep estimate marked *estimate*. "Nothing is saved until you confirm." |
 | 6 | **Orders / Plan / Insights** | Menu (⋮): all orders with search and filters; the day-by-day production plan with risks; a lightweight monthly view. |
 | 7 | **Integrations** | Honest status: WhatsApp and Instagram are **unavailable** until Meta credentials are configured. |
 
@@ -107,17 +109,17 @@ Done in `server/services/workloadEngine.js`. No AI is involved; the same inputs 
 
 For a high-risk order the engine also reports how late it would be (`shortfallMinutes`) and a **suggested new deadline** (estimated finish + the safety buffer).
 
-### Worked example (the 5 demo orders, Tue 20 Oct 09:30)
+### Worked example (the 5 demo orders, Sun 25 Oct 14:00; Sunday is a day off, Mon-Sat 09:00-18:00, 6 productive hours a day)
 
-| Order | Prep | Deadline | Scheduled | Buffer | Risk |
+| Order | Prep | Deadline | Scheduled | Buffer | Section |
 |---|---|---|---|---|---|
-| Aanya: birthday cake | 4 h | Tue 19:30 | Tue 09:30 → 13:30 | **6 h** | **Low** (≥ 4 h) |
-| Rohan: gift hampers | 5 h | Wed 14:00 | Tue 13:30 → 15:30 (2 h) + Wed 09:00 → 12:00 (3 h) | **2 h** | **Medium** (< 4 h) |
-| Meera: wedding favours | 5 h | Thu 09:20 | Wed 12:00 → 15:00 (3 h) + Thu 09:00 → 11:00 (2 h) | **−1 h 40 m** | **High** (finishes after the deadline) |
-| Kabir: cupcake tower | none | Sat 17:00 | not scheduled | — | **Needs details** |
-| Tara: brownie tray | 1.5 h | past | completed | — | ignored |
+| Meera: wedding favours | 30 min | Sat 24 Oct 12:00 | Mon 09:00 → 09:30 | deadline passed | **Overdue** |
+| Neha: chocolate cake | 30 min | Mon 10:00 | Mon 09:30 → 10:00 | **0** | **Upcoming** (due soon, thin buffer) |
+| Aanya: birthday cake | 2 h 30 | Mon 17:00 | Mon 10:00 → 12:30 | **4 h 30** | **Upcoming** (due next working day) |
+| Rohan: gift hampers | 2 h | Tue 12:00 | Mon 12:30 → 14:30 | **21 h 30** | **On track** |
+| Kabir: cupcake tower | 3 h | Thu 17:00 | Mon 14:30 → Tue 11:30 | **53 h 30** | **On track** |
 
-Day load: Tue 360/360 min, Wed 360/360, Thu 120/360. Meera's order is the classic case: nothing is wrong with any single order, but the queue ahead of her (Aanya, then Rohan) leaves no room before her deadline. The seed places each deadline relative to the scheduler's *own* finish time (+6 h, +2 h, −1 h 40 m), which is why this story holds whatever the time of day.
+The overdue order is scheduled first (earliest deadline first), which is why Neha has no spare time on Monday morning. The board explains this on each card.
 
 Dashboard and Planner use the same function, so their totals always match.
 
@@ -144,7 +146,7 @@ Result, from the real engine (Tue 09:30):
 
 **Freeing time needs less work.** When the next two working days have *almost* an hour spare, the engine instead suggests *"What if this order took N minutes less?"*, framed as an assumption (batching, pre-making components). The simulation then reports what that really does. The engine never claims batching saves time on its own.
 
-**The unread rush message** (Nikhil, 30 cake pops by tomorrow noon) is the second what-if: add it as a rush order and the table shows who it pushes later.
+**A rush order** is the second what-if: add one and the table shows who it pushes later.
 
 So the seller learns, in seconds and *before replying to the customer*, what a request costs and what to offer instead.
 

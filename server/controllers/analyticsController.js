@@ -2,6 +2,7 @@ import Order from '../models/Order.js';
 import { asyncHandler, badQuery } from '../utils/errors.js';
 import { getSettings } from '../services/settingsService.js';
 import { buildMonthly, isMonth, DATASETS } from '../services/analyticsService.js';
+import { buildBoard } from '../services/boardService.js';
 import { buildSummary, RANGES } from '../services/insightsService.js';
 import { zonedParts } from '../utils/timezone.js';
 
@@ -26,4 +27,13 @@ export const getSummary = asyncHandler(async (req, res) => {
   const settings = await getSettings();
   const orders = await Order.find().limit(5000).lean();
   res.json(buildSummary({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, days, now: new Date(), dataset }));
+});
+
+// GET /api/board?dataset=all|real|demo : the Production board (overdue / on track / upcoming).
+export const getBoard = asyncHandler(async (req, res) => {
+  const dataset = req.query.dataset ?? 'all';
+  if (!DATASETS.includes(dataset)) throw badQuery([{ field: 'dataset', message: 'Must be real, demo or all.' }]);
+  const settings = await getSettings();
+  const orders = await Order.find().limit(5000).lean();
+  res.json(buildBoard({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, now: new Date(), dataset }));
 });

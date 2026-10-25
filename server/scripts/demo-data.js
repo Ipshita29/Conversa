@@ -1,83 +1,57 @@
-// The demo story: a small home bakery with five orders that show every state Conversa can describe.
+// The demo story: a small home bakery with five open orders that show how Conversa sorts work by urgency:
+//   1 overdue (Meera), 2 on track (Rohan, Kabir), 2 upcoming (Neha, Aanya).
 // Pure functions (no database), so the data can be tested at any time of day.
 //
-// The deadlines are not guessed. They are placed relative to the scheduler's OWN finish times, so the story holds
-// whenever you seed it (morning, evening, Sunday...):
-//   1. Aanya's birthday cake  - in progress, finishes comfortably early               -> ON TRACK
-//   2. Rohan's gift hampers   - fits, but with only half the safety buffer             -> TIGHT (medium risk)
-//   3. Meera's wedding favours - asked for a date the queue cannot meet               -> LATE (high risk)
-//   4. Kabir's cupcake tower  - flavours and design not confirmed, so no prep time     -> NEEDS DETAILS
-//   5. Tara's brownie tray    - delivered and paid                                     -> DONE
-import { computePlan } from '../services/workloadEngine.js';
+// Deadlines are placed on WORKING days relative to "now", at fixed clock times, so the picture is the same whenever it is seeded
+// (on Sunday 25 Oct 2026 they are Sat 24 12:00, Mon 26 10:00, Mon 26 17:00, Tue 27 12:00 and Thu 29 17:00). The labels are NOT
+// stored: the board derives them from these deadlines, the preparation times and the scheduler (see services/boardService.js).
+//   Meera  - promised for the previous working day and still not delivered   -> OVERDUE
+//   Neha   - due first thing on the next working day                         -> UPCOMING (prepare before less urgent orders)
+//   Aanya  - due the next working day, late afternoon                        -> UPCOMING
+//   Rohan  - due in two working days, with room to spare                     -> ON TRACK
+//   Kabir  - due in four working days                                        -> ON TRACK
+// Preparation times are what is LEFT to do: the cake bases and boxes are already made, so these are the finishing and packing times
+// the scheduler has to fit in before each deadline.
 import { zonedParts, zonedTimeToUtc, addDays, weekdayOf, parseHm } from '../utils/timezone.js';
 
 export const DEMO_MARK = '[DEMO]';
-const MIN = 60000;
 
-const QUEUE = [ // in scheduling order
-  { customerName: 'Aanya Sharma', source: 'whatsapp', item: 'Birthday cake (2 kg)', quantity: 1, customisation: 'Name and age in blue icing', prepTimeMinutes: 240, price: 1800, createdHoursAgo: 52, status: 'in_progress', paymentStatus: 'verified', note: 'already started, finishes comfortably early' },
-  { customerName: 'Rohan Mehta', source: 'instagram', item: 'Festive gift hampers', quantity: 3, customisation: null, prepTimeMinutes: 300, price: 2700, createdHoursAgo: 30, status: 'confirmed', paymentStatus: 'pending', note: 'fits, but with a thin buffer' },
-  { customerName: 'Meera Iyer', source: 'whatsapp', item: 'Wedding favour boxes', quantity: 50, customisation: 'Gold ribbon, names on tags', prepTimeMinutes: 300, price: 4500, createdHoursAgo: 20, status: 'pending', paymentStatus: 'unverified', note: 'customer asked for a date the queue cannot meet' },
+// `back` > 0 counts working days backwards from today, `ahead` forwards (a non-working "today" is skipped, as the scheduler does).
+const ORDERS = [
+  { customerName: 'Meera Iyer', source: 'whatsapp', item: 'Wedding favour boxes', quantity: 50, customisation: 'Gold ribbon, names on tags', prepTimeMinutes: 30, price: 4500, createdHoursAgo: 120, due: { days: -1, at: '12:00' }, status: 'in_progress', paymentStatus: 'pending', note: 'promised yesterday, still being finished' },
+  { customerName: 'Rohan Mehta', source: 'instagram', item: 'Festive gift hampers', quantity: 3, customisation: null, prepTimeMinutes: 120, price: 2700, createdHoursAgo: 70, due: { days: 2, at: '12:00' }, status: 'confirmed', paymentStatus: 'verified', note: 'plenty of time' },
+  { customerName: 'Kabir Singh', source: 'instagram', item: 'Custom cupcake tower', quantity: 1, customisation: 'Pistachio and rose, gold topper', prepTimeMinutes: 180, price: 3200, createdHoursAgo: 40, due: { days: 4, at: '17:00' }, status: 'confirmed', paymentStatus: 'pending', note: 'well ahead of the deadline' },
+  { customerName: 'Aanya Sharma', source: 'whatsapp', item: 'Birthday cake (2 kg)', quantity: 1, customisation: 'Name and age in blue icing', prepTimeMinutes: 150, price: 1800, createdHoursAgo: 26, due: { days: 1, at: '17:00' }, status: 'confirmed', paymentStatus: 'verified', note: 'due the next working day' },
+  { customerName: 'Neha Sharma', source: 'whatsapp', item: 'Chocolate birthday cake (2 kg)', quantity: 1, customisation: 'Dark chocolate ganache, no nuts', prepTimeMinutes: 30, price: 2200, createdHoursAgo: 8, due: { days: 1, at: '10:00' }, status: 'in_progress', paymentStatus: 'unverified', note: 'due first thing next working day' },
 ];
 
-// Deadline at HH:mm on the Nth WORKING day after `now`, in the business timezone.
-function workingDayAt(n, hm, settings, now) {
+// The Nth working day from today (n < 0: before today). Weekdays outside settings.workingDays are skipped.
+function workingDay(n, settings, now) {
   const t = zonedParts(now, settings.timezone);
   let day = { year: t.year, month: t.month, day: t.day };
-  for (let left = n; left > 0;) {
-    day = addDays(day, 1);
+  const step = n < 0 ? -1 : 1;
+  for (let left = Math.abs(n); left > 0;) {
+    day = addDays(day, step);
     if (settings.workingDays.includes(weekdayOf(day))) left--;
   }
-  return zonedTimeToUtc({ ...day, ...parseHm(hm) }, settings.timezone);
+  return day;
 }
 
-const roundTo5 = (ms) => Math.round(ms / (5 * MIN)) * 5 * MIN;
-
-// `others` are the open orders already in the database (real ones). They are scheduled too, so the demo story still holds
-// when a real order is in the queue ahead of it.
-export function buildDemoOrders(settings, now = new Date(), others = []) {
-  const buf = settings.riskBufferMinutes;
-  const real = others.map((o, i) => ({ customerName: o.customerName, item: o.item, status: o.status, paymentStatus: o.paymentStatus, prepTimeMinutes: o.prepTimeMinutes ?? null, deadline: o.deadline ?? null, id: `x${i}` }));
-
-  // Place the three queued deadlines relative to the scheduler's OWN finish times: comfortable (+buffer+2h), tight (half the
-  // buffer), 3 hours short. Real orders can sit in front of or behind these, which changes the finish times, so repeat
-  // until the deadlines and the schedule they produce agree (a fixed point; it settles in a pass or two).
-  const offsets = [buf + 120, Math.round(buf / 2), -180]; // comfortable, tight, and a modest 3-hour slip
-  let deadlines = QUEUE.map((_, i) => new Date(now.getTime() + (30 + i) * 86400000)); // far, ascending: a first guess
-  for (let pass = 0; pass < 8; pass++) {
-    const trial = QUEUE.map((o, i) => ({ ...o, id: `q${i}`, deadline: deadlines[i] }));
-    const plan = computePlan({ orders: [...real, ...trial], settings, now, rangeDays: 7 });
-    const finish = Object.fromEntries(plan.schedule.map((e) => [e.orderId, Date.parse(e.scheduledEnd)]));
-    const next = QUEUE.map((_, i) => new Date(roundTo5(finish[`q${i}`] + offsets[i] * MIN)));
-    const settled = next.every((d, i) => Math.abs(d - deadlines[i]) <= 5 * MIN);
-    deadlines = next;
-    if (settled) break;
-  }
-  const queued = QUEUE.map((o, i) => ({ ...o, deadline: deadlines[i] }));
-
-  const orders = [
-    ...queued,
-    { customerName: 'Kabir Singh', source: 'instagram', item: 'Custom cupcake tower', quantity: 1, customisation: 'Flavours and theme still to be confirmed', prepTimeMinutes: null, price: null, createdHoursAgo: 6, deadline: workingDayAt(4, '17:00', settings, now), status: 'pending', paymentStatus: 'unverified', note: 'cannot be scheduled until the details are confirmed' },
-    { customerName: 'Tara Bose', source: 'manual', item: 'Brownie tray', quantity: 2, customisation: null, prepTimeMinutes: 90, price: 600, createdHoursAgo: 150, deadline: new Date(now.getTime() - 20 * 60 * MIN), status: 'completed', paymentStatus: 'verified', note: 'delivered and paid' },
-  ].map(({ note, createdHoursAgo, ...o }) => ({ ...o, createdAt: new Date(now.getTime() - createdHoursAgo * 3600000), notes: `${DEMO_MARK} ${note}` }));
-
-  // Fail loudly if the story ever stops holding (judged on the demo orders only; real orders may be late themselves).
-  const plan = computePlan({ orders: [...real, ...orders.map((o, i) => ({ ...o, id: `d${i}` }))], settings, now, rangeDays: 7 });
-  const demoKinds = plan.schedule.filter((e) => e.orderId.startsWith('d')).map((e) => e.kind).join(',');
-  const demoBlocked = plan.unscheduledOrders.filter((u) => u.id.startsWith('d')).length;
-  if (demoKinds !== 'on_track,tight,late' || demoBlocked !== 1) {
-    throw new Error(`Demo data would not tell its story (got "${demoKinds}", ${demoBlocked} needing details). A real open order may have a deadline that falls between the demo deadlines; mark it completed or cancelled first.`);
-  }
-  return orders;
+export function buildDemoOrders(settings, now = new Date()) {
+  return ORDERS.map(({ due, note, createdHoursAgo, ...o }) => ({
+    ...o,
+    deadline: zonedTimeToUtc({ ...workingDay(due.days, settings, now), ...parseHm(due.at) }, settings.timezone),
+    createdAt: new Date(now.getTime() - createdHoursAgo * 3600000),
+    notes: `${DEMO_MARK} ${note}`,
+  }));
 }
 
-// One inbound message per demo conversation; `order` links to the demo order of the same customer.
-// The last one (a new rush request with no order yet) is the single unread message.
+// One inbound message per demo order, and nothing else: five conversations, each linked to the demo order of the same customer.
+// The newest one (Neha asking for her cake first thing) is the single unread message.
 export const DEMO_MESSAGES = [
-  { customer: 'Aanya Sharma', channel: 'whatsapp', order: 'Aanya Sharma', hoursAgo: 26, read: true, text: 'Hi! Is the cake still on track? Please write "Happy 30th, Ria" on it in blue icing.' },
+  { customer: 'Meera Iyer', channel: 'whatsapp', order: 'Meera Iyer', hoursAgo: 30, read: true, text: 'Hi! Are the 50 wedding favour boxes ready? The sangeet is today.' },
   { customer: 'Rohan Mehta', channel: 'instagram', order: 'Rohan Mehta', hoursAgo: 9, read: true, text: 'Can you add one more hamper to my order? Same delivery day please.' },
-  { customer: 'Meera Iyer', channel: 'whatsapp', order: 'Meera Iyer', hoursAgo: 5, read: true, text: 'Could the 50 wedding favour boxes be ready by tomorrow evening? It is for the sangeet.' },
-  { customer: 'Kabir Singh', channel: 'instagram', order: 'Kabir Singh', hoursAgo: 3, read: true, text: 'I would love a cupcake tower for Saturday. Not sure about flavours yet, what do you suggest?' },
-  { customer: 'Tara Bose', channel: 'instagram', order: 'Tara Bose', hoursAgo: 1.5, read: true, text: 'The brownies were a hit at the party, thank you so much!' },
-  { customer: 'Nikhil Rao', channel: 'whatsapp', order: null, hoursAgo: 0.3, read: false, text: 'Hi! Any chance of 30 cake pops by tomorrow noon? Happy to pay extra for a rush.' },
+  { customer: 'Kabir Singh', channel: 'instagram', order: 'Kabir Singh', hoursAgo: 5, read: true, text: 'Thank you for confirming the cupcake tower! Could the topper be gold?' },
+  { customer: 'Aanya Sharma', channel: 'whatsapp', order: 'Aanya Sharma', hoursAgo: 3, read: true, text: 'Hi! Please write "Happy 30th, Ria" on the cake in blue icing.' },
+  { customer: 'Neha Sharma', channel: 'whatsapp', order: 'Neha Sharma', hoursAgo: 0.5, read: false, text: 'Could the chocolate cake be ready by 10am tomorrow? We are leaving early for the party.' },
 ];
