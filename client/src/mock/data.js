@@ -3,34 +3,22 @@ const HOUR = 60 * 60 * 1000;
 const at = (hours) => new Date(Date.now() + hours * HOUR).toISOString();
 const created = (hoursAgo) => at(-hoursAgo);
 
-const o = (n, f) => ({
-  id: `ord_${1000 + n}`, source: 'manual', quantity: 1, customisation: null, prepTimeMinutes: null, deadline: null,
-  status: 'pending', paymentStatus: 'unverified', createdAt: created(72 - n * 4), updatedAt: created(24 - n), ...f,
-});
+// The offline demo uses the SAME five-order bakery story as the server seed (server/scripts/demo-data.js), so the board, plan and
+// insights read identically with or without a backend.
+import { buildDemoOrders, DEMO_MESSAGES } from '../../../server/scripts/demo-data.js';
 
-// The same five-order home-bakery story as server/scripts/demo-data.js (the real seed places its deadlines from the
-// scheduler's own finish times; this offline mock can only approximate that with fixed offsets).
-export const seedOrders = () => [
-  o(1, { customerName: 'Aanya Sharma', price: 1800, source: 'whatsapp', item: 'Birthday cake (2 kg)', customisation: 'Name and age in blue icing', prepTimeMinutes: 240, deadline: at(20), status: 'in_progress', paymentStatus: 'verified', notes: '[DEMO] already started, finishes comfortably early' }),
-  o(2, { customerName: 'Rohan Mehta', price: 2700, source: 'instagram', item: 'Festive gift hampers', quantity: 3, prepTimeMinutes: 300, deadline: at(27), status: 'confirmed', paymentStatus: 'pending', notes: '[DEMO] fits, but with a thin buffer' }),
-  o(3, { customerName: 'Meera Iyer', price: 4500, source: 'whatsapp', item: 'Wedding favour boxes', quantity: 50, customisation: 'Gold ribbon, names on tags', prepTimeMinutes: 300, deadline: at(29), notes: '[DEMO] customer asked for a date the queue cannot meet' }),
-  o(4, { customerName: 'Kabir Singh', source: 'instagram', item: 'Custom cupcake tower', customisation: 'Flavours and theme still to be confirmed', deadline: at(96), notes: '[DEMO] cannot be scheduled until the details are confirmed' }),
-  o(5, { customerName: 'Tara Bose', price: 600, item: 'Brownie tray', quantity: 2, prepTimeMinutes: 90, deadline: at(-20), status: 'completed', paymentStatus: 'verified', notes: '[DEMO] delivered and paid' }),
-];
+export const demoSettings = () => ({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workingDays: [1, 2, 3, 4, 5, 6], workStart: '09:00', workEnd: '18:00', dailyCapacityMinutes: 360, riskBufferMinutes: 240, customisationMinutes: 30, prepRules: [] });
 
-// Sample inbox for demo mode: 6 messages, 5 read + 1 unread (mirrors server/scripts/demo-data.js).
-const conv = (n, channel, customerName, orderId, hoursAgo, text, read = true) => ({
-  id: `conv_${n}`, channel, customerName, orderId, isDemo: true, unread: read ? 0 : 1,
-  messages: [{ id: `m${n}`, from: 'customer', text, at: at(-hoursAgo), read }],
+const iso = (d) => new Date(d).toISOString();
+export const seedOrders = () => buildDemoOrders(demoSettings(), new Date()).map((o, i) => ({
+  quantity: 1, customisation: null, ...o, id: `ord_${1001 + i}`, deadline: iso(o.deadline), createdAt: iso(o.createdAt), updatedAt: iso(o.createdAt),
+}));
+
+// Sample inbox for demo mode: 6 messages, 5 read + 1 unread (the same messages as the server seed).
+export const seedConversations = () => DEMO_MESSAGES.map((m, i) => {
+  const order = seedOrders().find((o) => o.customerName === m.order);
+  return { id: `conv_${i + 1}`, channel: m.channel, customerName: m.customer, orderId: order?.id ?? null, isDemo: true, unread: m.read ? 0 : 1, messages: [{ id: `m${i + 1}`, from: 'customer', text: m.text, at: at(-m.hoursAgo), read: m.read }] };
 });
-export const seedConversations = () => [
-  conv(1, 'whatsapp', 'Aanya Sharma', 'ord_1001', 26, 'Hi! Is the cake still on track? Please write "Happy 30th, Ria" on it in blue icing.'),
-  conv(2, 'instagram', 'Rohan Mehta', 'ord_1002', 9, 'Can you add one more hamper to my order? Same delivery day please.'),
-  conv(3, 'whatsapp', 'Meera Iyer', 'ord_1003', 5, 'Could the 50 wedding favour boxes be ready by tomorrow evening? It is for the sangeet.'),
-  conv(4, 'instagram', 'Kabir Singh', 'ord_1004', 3, 'I would love a cupcake tower for Saturday. Not sure about flavours yet, what do you suggest?'),
-  conv(5, 'instagram', 'Tara Bose', 'ord_1005', 1.5, 'The brownies were a hit at the party, thank you so much!'),
-  conv(6, 'whatsapp', 'Nikhil Rao', null, 0.3, 'Hi! Any chance of 30 cake pops by tomorrow noon? Happy to pay extra for a rush.', false),
-];
 
 export const seedIntegrations = () => [
   { channel: 'whatsapp', status: 'demo', statusReason: 'Demo mode: sample data only. No WhatsApp account is linked.', accountLabel: null, lastSyncAt: null },

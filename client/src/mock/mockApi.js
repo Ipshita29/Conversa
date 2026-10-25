@@ -2,8 +2,10 @@
 // State resets on page reload. Nothing here talks to a real server.
 import { ApiError } from '../services/api.js';
 import { validateOrder } from '../utils/validateOrder.js';
-import { seedOrders, seedConversations, seedIntegrations } from './data.js';
-import { annotateRisk, buildDashboard, buildPlanner } from './engine.js';
+import { seedOrders, seedConversations, seedIntegrations, demoSettings } from './data.js';
+// The offline demo runs the SAME scheduler as the server, in the browser, so every page agrees with every other page.
+import { computePlan, publicPlan, suggestScenario } from '../../../server/services/workloadEngine.js';
+import { buildDashboard as serverDashboard } from '../../../server/services/dashboardService.js';
 
 let orders = seedOrders();
 const conversations = seedConversations();
@@ -11,7 +13,10 @@ const integrations = seedIntegrations();
 
 const wait = (ms = 350) => new Promise((r) => setTimeout(r, ms));
 const clone = (x) => JSON.parse(JSON.stringify(x));
-const withRisk = () => annotateRisk(orders);
+const withRisk = () => {
+  const plan = computePlan({ orders, settings: demoSettings(), now: new Date(), rangeDays: 1 });
+  return orders.map((o) => ({ ...o, risk: plan.results[o.id]?.risk ?? null }));
+};
 const notFound = (id) => new ApiError(404, 'NOT_FOUND', `Order '${id}' not found.`);
 const invalid = (details) => new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed.', details);
 
@@ -76,7 +81,6 @@ function extract(body) {
   return { draft, missingFields, uncertainties, isDraft: true };
 }
 
-const demoSettings = () => ({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, workingDays: [1, 2, 3, 4, 5, 6], workStart: '09:00', workEnd: '18:00', dailyCapacityMinutes: 360, riskBufferMinutes: 240, customisationMinutes: 30, prepRules: [] });
 
 // The what-if runs on the same scheduler the real server uses, so the demo explains itself exactly like the live app.
 async function simulateWithRealEngine(body) {
@@ -92,7 +96,13 @@ export async function handleMockRequest(method, path, body = {}) {
   const q = url.searchParams;
   let m;
 
-  if (method === 'GET' && p === '/dashboard') return buildDashboard(orders);
+  if (method === 'GET' && p === '/dashboard') return clone(serverDashboard(orders, demoSettings()));
+
+  if (method === 'GET' && p === '/board') {
+    const { buildBoard } = await import('../../../server/services/boardService.js');
+    const dataset = q.get('dataset') || 'all';
+    return clone(buildBoard({ orders, settings: demoSettings(), now: new Date(), dataset }));
+  }
 
   if (method === 'GET' && p === '/analytics/summary') {
     const { buildSummary, RANGES } = await import('../../../server/services/insightsService.js');
@@ -163,7 +173,8 @@ export async function handleMockRequest(method, path, body = {}) {
   if (method === 'GET' && p === '/planner') {
     const days = Number(q.get('days') || 7);
     if (!Number.isInteger(days) || days < 1 || days > 30) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'days', message: 'Must be between 1 and 30.' }]);
-    return buildPlanner(orders, new Date(), days);
+    const now = new Date();
+    return clone({ ...publicPlan(computePlan({ orders, settings: demoSettings(), now, rangeDays: days })), suggestedScenario: suggestScenario({ orders, settings: demoSettings(), now, rangeDays: days }) });
   }
   if (method === 'POST' && p === '/planner/simulate') return simulateWithRealEngine(body);
 
