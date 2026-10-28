@@ -12,7 +12,7 @@
 .in-kpi { display: flex; flex-direction: column; gap: 0.2rem; min-height: 8.2rem; padding: 1.1rem 1.2rem; background: var(--white); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 1px 2px rgba(51, 39, 31, 0.05), 0 6px 18px rgba(51, 39, 31, 0.04); }
 .in-kpi:first-child { background: linear-gradient(120deg, var(--papaya), var(--papaya-soft)); border-color: #E6C9A8; }
 .in-kpi dt { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--caramel-ink); }
-.in-kpi dd { margin: 0.2rem 0 0; font-family: var(--serif); font-size: 2.1rem; line-height: 1.1; color: var(--cocoa); } .in-kpi dd.is-na { color: #B8A898; }
+.in-kpi dd { margin: 0.2rem 0 0; font-family: var(--display); font-size: 2.1rem; line-height: 1.1; color: var(--cocoa); } .in-kpi dd.is-na { color: #B8A898; }
 .in-kpi small { margin-top: auto; font-size: 0.78rem; line-height: 1.35; color: #5E4D40; }
 .in-sub { display: inline-flex; align-items: center; gap: 0.15rem; font-size: 0.8rem; font-weight: 600; } .in-sub.is-up { color: var(--low); } .in-sub.is-down { color: var(--high); } .in-sub.in-muted { color: var(--muted); font-weight: 400; }
 

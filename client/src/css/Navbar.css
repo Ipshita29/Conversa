@@ -1,12 +1,12 @@
 /* A small floating control instead of a sidebar: nothing reserves layout space. */
-.navbar { position: fixed; top: 16px; left: 16px; z-index: 80; }
+.navbar { font-family: var(--display); position: fixed; top: 16px; left: 16px; z-index: 80; }
 .navbar-pill { display: flex; align-items: center; gap: 0.7rem; padding: 5px 16px 5px 5px; background: rgba(255, 255, 255, 0.94); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow); }
 .menu-trigger { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--cocoa); color: var(--ivory); cursor: pointer; transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
 .menu-trigger:hover { background: var(--caramel-ink); }
 .menu-trigger:active { transform: scale(0.94); }
 .menu-trigger[aria-expanded='true'] { background: var(--caramel-ink); }
 .menu-trigger:focus-visible { outline-offset: 3px; }
-.wordmark { font-family: var(--serif); font-size: 1.5rem; line-height: 1; color: var(--cocoa); text-decoration: none; letter-spacing: -0.01em; }
+.wordmark { font-family: var(--brand); font-weight: 600; font-size: 1.7rem; line-height: 1; color: var(--cocoa); text-decoration: none; letter-spacing: 0.015em; }
 .wordmark span { color: var(--caramel); }
 .you-are-here { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding-left: 0.8rem; border-left: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
 .you-are-here i { width: 6px; height: 6px; border-radius: 50%; background: var(--caramel); }
@@ -26,7 +26,7 @@
 .menu-foot { margin: 0.9rem 0.7rem 0; padding-top: 0.8rem; border-top: 1px solid var(--border); }
 .menu-small { font-size: 0.84rem; color: var(--muted); }
 .menu-small:hover { color: var(--caramel-ink); }
-.navbar-tagline { margin: 0.7rem 0 0; font-family: var(--serif); font-style: italic; font-size: 0.92rem; color: var(--muted); }
+.navbar-tagline { margin: 0.7rem 0 0; font-family: var(--brand); font-weight: 500; font-style: italic; font-size: 0.92rem; color: var(--muted); }
 .navbar-demo { margin: 0.5rem 0 0; font-size: 0.72rem; color: var(--blue-ink); }
 
 @media (max-width: 860px) {
