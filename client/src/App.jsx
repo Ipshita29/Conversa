@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import Navbar from './components/Navbar.jsx';
+import { Navbar } from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Orders from './pages/Orders.jsx';
 import Plan from './pages/Plan.jsx';

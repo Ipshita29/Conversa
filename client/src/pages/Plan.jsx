@@ -3,8 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import useAsync from '../hooks/useAsync.js';
 import { getBoard } from '../services/api.js';
-import StateMessage from '../components/StateMessage.jsx';
-import DemoBadge from '../components/DemoBadge.jsx';
+import { DemoBadge, StateMessage } from '../components/UI.jsx';
 import { formatMinutes, isDemoOrder } from '../utils/format.js';
 import '../css/Plan.css';
 

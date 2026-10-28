@@ -3,8 +3,10 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { MoreVertical, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag } from 'lucide-react';
 import { scrollToTop } from '../utils/scroll.js';
 import { DEMO_MODE } from '../services/api.js';
+import { DemoBadge } from './UI.jsx';
 import '../css/Navbar.css';
 
+// ---------- Navbar ----------
 // Five places in the menu; messages sit in a small secondary group.
 const WORKSPACE = [
   { key: 'overview', to: '/', label: 'Home', hint: 'Your day, organised', icon: House },
@@ -20,7 +22,7 @@ const TITLES = { '/': 'Home', '/plan': 'Plan', '/whatif': 'What-if', '/inbox': '
 // Sections the pill follows while you scroll a page.
 const SPY = {};
 
-export default function Navbar() {
+export function Navbar() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const spy = SPY[pathname];
@@ -132,5 +134,36 @@ export default function Navbar() {
         </div>
       </div>
     </nav>
+  );
+}
+
+// ---------- PageHeader ----------
+export function PageHeader({ eyebrow, title, subtitle, children, demo = true }) {
+  return (
+    <header className="page-header">
+      <div>
+        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+        <h1>{title}</h1>
+        {subtitle && <p className="muted">{subtitle}</p>}
+      </div>
+      <div className="page-header-actions">
+        {demo && <DemoBadge />}
+        {children}
+      </div>
+    </header>
+  );
+}
+
+// ---------- SectionHead ----------
+export function SectionHead({ eyebrow, title, action, children }) {
+  return (
+    <header className="section-head">
+      {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+      <div className="section-title-row">
+        <h2 data-parallax="0.05">{title}</h2>
+        {action}
+      </div>
+      {children && <p>{children}</p>}
+    </header>
   );
 }

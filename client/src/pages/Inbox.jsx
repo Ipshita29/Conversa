@@ -4,10 +4,8 @@ import { ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Pa
 import { getConversations, getIntegrations, listOrders, updateConversation, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { CHANNEL_LABEL, STATUS_LABEL } from '../utils/format.js';
-import StateMessage from '../components/StateMessage.jsx';
-import Drawer from '../components/Drawer.jsx';
-import DraftOrder from '../components/DraftOrder.jsx';
-import { StatusBadge } from '../components/Badge.jsx';
+import { Drawer, StateMessage, StatusBadge } from '../components/UI.jsx';
+import { DraftOrder } from '../components/Orders.jsx';
 import '../css/Inbox.css';
 
 const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp'], ['instagram', 'Instagram']];

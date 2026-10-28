@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import 'lenis/dist/lenis.css';
 import App from './App.jsx';
-import SmoothScroll from './components/SmoothScroll.jsx';
+import { SmoothScroll } from './components/Effects.jsx';
 import './css/global.css';
 
 // A refresh always starts at the top: no browser scroll restoration, and a stale #section hash is dropped on reload.

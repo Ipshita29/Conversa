@@ -1,11 +1,8 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import useWorkspace from '../hooks/useWorkspace.js';
-import Reveal from '../components/Reveal.jsx';
-import StateMessage from '../components/StateMessage.jsx';
-import HeroSection from '../components/HeroSection.jsx';
-import DayWorkspace from '../components/DayWorkspace.jsx';
-import ConnectSection from '../components/ConnectSection.jsx';
-import ScrollR from '../components/ScrollR.jsx';
+import { HeroSection, Reveal, ScrollR } from '../components/Effects.jsx';
+import { StateMessage } from '../components/UI.jsx';
+import { ConnectSection, DayWorkspace } from '../components/Insights.jsx';
 import { summarise } from '../utils/homeSummary.js';
 import useHashScroll from '../hooks/useHashScroll.js';
 import '../css/Dashboard.css';

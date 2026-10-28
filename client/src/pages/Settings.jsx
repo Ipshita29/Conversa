@@ -3,8 +3,8 @@ import { MessageCircle, Camera } from 'lucide-react';
 import { getIntegrations, connectIntegration } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { formatDateTime, CHANNEL_LABEL } from '../utils/format.js';
-import PageHeader from '../components/PageHeader.jsx';
-import StateMessage from '../components/StateMessage.jsx';
+import { PageHeader } from '../components/Layout.jsx';
+import { StateMessage } from '../components/UI.jsx';
 import '../css/Settings.css';
 
 const STATUS_TEXT = { connected: 'Connected', disconnected: 'Not connected', unavailable: 'Unavailable', demo: 'Demo' };
