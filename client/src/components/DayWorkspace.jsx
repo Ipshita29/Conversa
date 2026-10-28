@@ -66,28 +66,44 @@ export default function DayWorkspace({ planner, orders }) {
       </dl>
 
       <div className="dw-cols">
-        <section className="dw-sec" aria-labelledby="dw-attn">
-          <div className="dw-sec-head"><h3 id="dw-attn">Needs your attention</h3>{attention > MAX_ISSUES && <Link to={attentionTo} className="dw-all">View all {attention} <ArrowRight size={14} aria-hidden="true" /></Link>}</div>
-          {issueRows.length === 0 ? (
-            <p className="dw-clear"><Check size={16} aria-hidden="true" /> You're all caught up. No order is overdue, at risk or missing details.</p>
-          ) : (
-            <ul className="dw-issues">
-              {issueRows.map(({ m, o, missing, reason, tone }) => (
-                <li key={m.orderId} className={`dw-issue is-${tone}`}>
-                  <span className="dw-bar" aria-hidden="true" />
-                  <div className="dw-issue-main">
-                    <p><strong>{o.customerName}</strong>{isDemoOrder(o) && <span className="demo-tag">Demo</span>}<span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></p>
-                    <p className="dw-reason">{reason}{!missing && o.deadline && m.kind !== 'deadline_passed' && <> Due {formatInTz(o.deadline, tz)}.</>}</p>
-                  </div>
-                  <Link to={`/orders?edit=${o.id}`} className="dw-act">{missing ? 'Add details' : 'Review order'} <ArrowRight size={14} aria-hidden="true" /></Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <div className="dw-left">
+          <section className="dw-sec" aria-labelledby="dw-attn">
+            <div className="dw-sec-head"><span className="dw-step">1 · Now</span><h3 id="dw-attn">Needs your attention</h3>{attention > MAX_ISSUES && <Link to={attentionTo} className="dw-all">View all {attention} <ArrowRight size={14} aria-hidden="true" /></Link>}</div>
+            {issueRows.length === 0 ? (
+              <p className="dw-clear"><Check size={16} aria-hidden="true" /> You're all caught up. No order is overdue, at risk or missing details.</p>
+            ) : (
+              <ul className="dw-issues">
+                {issueRows.map(({ m, o, missing, reason, tone }) => (
+                  <li key={m.orderId} className={`dw-issue is-${tone}`}>
+                    <span className="dw-bar" aria-hidden="true" />
+                    <div className="dw-issue-main">
+                      <p><strong>{o.customerName}</strong>{isDemoOrder(o) && <span className="demo-tag">Demo</span>}<span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></p>
+                      <p className="dw-reason">{reason}{!missing && o.deadline && m.kind !== 'deadline_passed' && <> Due {formatInTz(o.deadline, tz)}.</>}</p>
+                    </div>
+                    <Link to={`/orders?edit=${o.id}`} className="dw-act">{missing ? 'Add details' : 'Review order'} <ArrowRight size={14} aria-hidden="true" /></Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="dw-sec dw-upcoming" aria-labelledby="dw-up">
+            <div className="dw-sec-head"><span className="dw-step">2 · Next</span><h3 id="dw-up">Coming up</h3><Link to="/plan" className="dw-all">Full schedule <ArrowRight size={14} aria-hidden="true" /></Link></div>
+            {upcoming.length === 0 ? <p className="dw-empty">Nothing is scheduled yet.</p> : (
+              <ol className="dw-up">
+                {upcoming.map((r) => { const o = byId[r.id]; const e = entry[r.id]; return (
+                  <li key={r.id}>
+                    <time dateTime={r.start}><b>{formatTimeInTz(r.start, tz)}</b><span>{r.date === today ? 'Today' : formatDayInTz(r.date)}</span></time>
+                    <div><strong>{o.customerName}</strong><span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></div>
+                    <span className={`dw-status${e?.risk === 'high' ? ' is-late' : e?.risk === 'medium' ? ' is-warn' : ''}`}>{e?.risk === 'high' ? 'At risk' : e?.risk === 'medium' ? 'Tight' : STATUS_LABEL[o.status]}</span>
+                  </li>); })}
+              </ol>
+            )}
+          </section>
+        </div>
 
         <section className="dw-sec dw-next" aria-labelledby="dw-next">
-          <div className="dw-sec-head"><h3 id="dw-next">Recommended next step</h3></div>
+          <div className="dw-sec-head"><span className="dw-step">3 · Do this</span><h3 id="dw-next">Recommended next step</h3></div>
           {nextStep ? (
             <>
               <p className="dw-next-action">{nextStep.top.action}</p>
@@ -97,20 +113,6 @@ export default function DayWorkspace({ planner, orders }) {
           ) : <p className="dw-clear">Nothing is waiting on you right now.</p>}
         </section>
       </div>
-
-      <section className="dw-sec dw-upcoming" aria-labelledby="dw-up">
-        <div className="dw-sec-head"><h3 id="dw-up">Coming up</h3><Link to="/plan" className="dw-all">Full schedule <ArrowRight size={14} aria-hidden="true" /></Link></div>
-        {upcoming.length === 0 ? <p className="dw-empty">Nothing is scheduled yet.</p> : (
-          <ol className="dw-up">
-            {upcoming.map((r) => { const o = byId[r.id]; const e = entry[r.id]; return (
-              <li key={r.id}>
-                <time dateTime={r.start}><b>{formatTimeInTz(r.start, tz)}</b><span>{r.date === today ? 'Today' : formatDayInTz(r.date)}</span></time>
-                <div><strong>{o.customerName}</strong><span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></div>
-                <span className={`dw-status${e?.risk === 'high' ? ' is-late' : e?.risk === 'medium' ? ' is-warn' : ''}`}>{e?.risk === 'high' ? 'At risk' : e?.risk === 'medium' ? 'Tight' : STATUS_LABEL[o.status]}</span>
-              </li>); })}
-          </ol>
-        )}
-      </section>
     </div>
   );
 }

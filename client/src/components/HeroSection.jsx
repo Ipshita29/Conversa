@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import { greeting } from '../utils/format.js';
+import { DEMO_MODE } from '../services/api.js';
 import DemoBadge from './DemoBadge.jsx';
+
+
 
 const REVEAL_RADIUS = 260; // px radius of the vivid spotlight (capped at a fraction of the viewport); the feathered edge is --f in Dashboard.css
 const FOLLOW = 0.22;       // 0..1, how quickly the reveal catches up with the pointer
@@ -70,27 +72,27 @@ function useHoverReveal(sectionRef, bgRef) {
   }, [sectionRef, bgRef]);
 }
 
+// The first screen: the message and one clear action over the photograph. The photo is muted and cream-washed; the vivid original shows
+// through a soft circle that follows the pointer.
 export default function HeroSection({ stats, attention }) {
+  const needs = attention ?? stats?.atRisk;
   const rootRef = useRef(null);
   const bgRef = useRef(null);
   useHoverReveal(rootRef, bgRef);
-  const now = new Date();
-  const open = stats ? stats.pending + stats.inProgress : null;
   return (
     <div className="hero" ref={rootRef}>
       <div className="hero-copy">
-      <div className="hero-meta">
-        <p className="eyebrow">Business operations, made clear</p>
-        <DemoBadge />
-      </div>
-      <p className="hero-greeting">{greeting(now)} · {now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-      <h1><span className="hero-line">Your business,</span> <span className="hero-line">in better rhythm.</span></h1>
-      <p className="hero-lede">Every order, every deadline, every conversation — thoughtfully brought together in one place.</p>
-      <div className="hero-actions">
-        <Link to="/plan" className="btn btn-primary">Review today's orders <ArrowRight size={16} aria-hidden="true" /></Link>
-        {stats && <p className="hero-summary">{stats.total} {stats.total === 1 ? 'order' : 'orders'} · {open} open · {attention ?? stats.atRisk} {(attention ?? stats.atRisk) === 1 ? 'needs' : 'need'} attention</p>}
-      </div>
-      <p className="hero-statement"><span>The AI reads.</span> <span>Rules decide.</span> <span>You approve.</span></p>
+        <div className="hero-meta">
+          <p className="eyebrow">Less chaos. More clarity.</p>
+          <DemoBadge />
+        </div>
+        <h1><span className="hero-line">Every order,</span> <span className="hero-line">under control.</span></h1>
+        <p className="hero-lede">From the first customer message to the final delivery, keep every order and deadline in one place.</p>
+        <div className="hero-actions">
+          <Link to="/orders" className="btn btn-primary">Explore your orders <ArrowRight size={16} aria-hidden="true" /></Link>
+          {stats && <p className="hero-summary">{stats.total} {DEMO_MODE ? 'demo ' : ''}{stats.total === 1 ? 'order' : 'orders'} · {needs} {needs === 1 ? 'needs' : 'need'} attention</p>}
+        </div>
+        <p className="hero-trust">AI helps organise. You stay in control.</p>
       </div>
       <div className="hero-bg" ref={bgRef} aria-hidden="true">
         <img className="hero-bg-muted" src="/hero.png" alt="" decoding="async" fetchpriority="high" />
