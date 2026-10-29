@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { ArrowUpRight } from 'lucide-react';
 import { DEMO_MODE } from '../services/api.js';
 import { ReactLenis, useLenis } from 'lenis/react';
 import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion.js';
@@ -9,89 +9,133 @@ import { updateParallax, clearParallax } from '../utils/parallax.js';
 import { DemoBadge } from './UI.jsx';
 
 // ---------- HeroSection ----------
-const RADIUS = 320;   // px: the reveal's full reach. Its edge falls off gradually (see the mask in Dashboard.css), so no boundary is visible.
-const FOLLOW = 0.075; // 0..1 per frame, how quickly the reveal drifts after the pointer: small = slow and fluid
-const FADE = 0.06;    // 0..1 per frame, how quickly it fades in on entry and back out on exit
+// Three pieces (eyebrow, headline, aside) spring in with blur and tilt, then drift up, shrink and fade away as the page scrolls.
+// Ported from the Framer hero (same spring, delays, speeds and fade distances). Values are written straight to inline styles on
+// requestAnimationFrame, so React never re-renders on scroll. Reduced motion leaves the hero completely still.
+const PIECES = {
+  eyebrow: { delay: 0.05, speed: 1.5, shrink: 0.1, blur: 10, tilt: 18, fadeEnd: 0.45 },
+  headline: { delay: 0.18, speed: 1.0, shrink: 0.14, blur: 14, tilt: 14, fadeEnd: 0.7 },
+  aside: { delay: 0.34, speed: 0.6, shrink: 0.06, blur: 8, tilt: 10, fadeEnd: 0.55 },
+};
+const SPRING = { k: 70, c: 16 }; // stiffness / damping (mass 1)
 
-// Cursor-following reveal. The hero shows a muted, cream-washed photo; the full-colour original is uncovered around the pointer through
-// a wide, feathered radial mask. Position and strength are eased towards their targets on requestAnimationFrame (running only while
-// something is still moving) and written straight to CSS variables, so React never re-renders on pointer movement. Coordinates are relative
-// to the hero. Touch screens and reduced motion get a still, faint reveal and no tracking.
-function useHoverReveal(sectionRef, bgRef) {
-  useEffect(() => {
-    const section = sectionRef.current?.closest('#overview') ?? sectionRef.current;
-    const bg = bgRef.current;
-    if (!section || !bg) return undefined;
-    const set = (x, y, o) => { bg.style.setProperty('--mx', `${x.toFixed(1)}px`); bg.style.setProperty('--my', `${y.toFixed(1)}px`); bg.style.setProperty('--o', o.toFixed(3)); };
-    const radius = () => Math.min(RADIUS, window.innerWidth * 0.42);
-    const applyRadius = () => bg.style.setProperty('--r', `${radius()}px`);
-    applyRadius();
-
-    const still = window.matchMedia('(hover: none), (prefers-reduced-motion: reduce)');
-    if (still.matches) {
-      const rest = () => { const b = bg.getBoundingClientRect(); set(b.width * 0.72, b.height * 0.5, 0.45); applyRadius(); };
-      rest(); window.addEventListener('resize', rest);
-      return () => window.removeEventListener('resize', rest);
-    }
-
-    const b0 = bg.getBoundingClientRect();
-    const st = { x: b0.width * 0.72, y: b0.height * 0.5, tx: b0.width * 0.72, ty: b0.height * 0.5, o: 0, to: 0, cx: null, cy: null, raf: 0 };
-    const target = () => { const b = bg.getBoundingClientRect(); st.tx = st.cx - b.left; st.ty = st.cy - b.top; }; // re-read each frame so scrolling keeps it under the pointer
-    const frame = () => {
-      st.raf = 0;
-      if (st.cx !== null) target();
-      st.x += (st.tx - st.x) * FOLLOW; st.y += (st.ty - st.y) * FOLLOW; st.o += (st.to - st.o) * FADE;
-      set(st.x, st.y, st.o);
-      if (Math.abs(st.tx - st.x) > 0.3 || Math.abs(st.ty - st.y) > 0.3 || Math.abs(st.to - st.o) > 0.004) st.raf = requestAnimationFrame(frame);
+function useHeroPieces(rootRef) {
+  const reduced = usePrefersReducedMotion();
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || reduced) return undefined;
+    const pieces = [...root.querySelectorAll('[data-piece]')].map((el) => ({ el, cfg: PIECES[el.dataset.piece], e: 0, v: 0, start: null }));
+    const t0 = performance.now();
+    const render = () => {
+      const vh = window.innerHeight || 800;
+      const p = Math.min(1, Math.max(0, window.scrollY / vh));
+      for (const { el, cfg, e } of pieces) {
+        const y = (1 - e) * 46 - p * vh * 0.35 * cfg.speed;
+        const opacity = Math.min(1, Math.max(0, e)) * (1 - Math.min(1, p / cfg.fadeEnd));
+        const scale = 0.92 + 0.08 * Math.min(1, Math.max(0, e)) - p * cfg.shrink;
+        const rx = (1 - e) * cfg.tilt + p * cfg.tilt * 1.4;
+        const blur = Math.max(0, (1 - e) * 16 + p * cfg.blur);
+        el.style.opacity = opacity.toFixed(3);
+        el.style.transform = `perspective(1000px) translateY(${y.toFixed(1)}px) scale(${scale.toFixed(4)}) rotateX(${rx.toFixed(2)}deg)`;
+        el.style.filter = blur > 0.05 ? `blur(${blur.toFixed(2)}px)` : 'none';
+      }
     };
-    const kick = () => { if (!st.raf) st.raf = requestAnimationFrame(frame); };
-    const onMove = (e) => {
-      if (e.pointerType !== 'mouse' && e.pointerType !== 'pen') return;
-      if (st.cx === null || st.to === 0) { st.cx = e.clientX; st.cy = e.clientY; target(); st.x = st.tx; st.y = st.ty; } // first entry: appear under the pointer, don't fly in
-      st.cx = e.clientX; st.cy = e.clientY; st.to = 1; kick();
+    let raf = 0;
+    let last = t0;
+    const step = (now) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      let moving = false;
+      for (const s of pieces) {
+        if ((now - t0) / 1000 < s.cfg.delay) { moving = true; continue; }
+        const acc = -SPRING.k * (s.e - 1) - SPRING.c * s.v;
+        s.v += acc * dt;
+        s.e += s.v * dt;
+        if (Math.abs(s.e - 1) > 0.001 || Math.abs(s.v) > 0.001) moving = true; else { s.e = 1; s.v = 0; }
+      }
+      render();
+      raf = moving ? requestAnimationFrame(step) : 0;
     };
-    const onLeave = () => { st.to = 0; st.cx = null; kick(); }; // fades out in place
-    const onScroll = () => { if (st.cx !== null) kick(); };
-    section.addEventListener('pointermove', onMove, { passive: true });
-    section.addEventListener('pointerleave', onLeave);
+    render(); // first paint is already in the "before" pose: no flash of the finished hero
+    raf = requestAnimationFrame(step);
+    const onScroll = () => render();
     window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', applyRadius);
-    set(st.x, st.y, 0);
+    window.addEventListener('resize', onScroll);
     return () => {
-      cancelAnimationFrame(st.raf);
-      section.removeEventListener('pointermove', onMove); section.removeEventListener('pointerleave', onLeave);
-      window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', applyRadius);
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      for (const { el } of pieces) { el.style.opacity = ''; el.style.transform = ''; el.style.filter = ''; }
     };
-  }, [sectionRef, bgRef]);
+  }, [rootRef, reduced]);
 }
 
 export function HeroSection({ stats, attention }) {
   const needs = attention ?? stats?.atRisk;
   const rootRef = useRef(null);
-  const bgRef = useRef(null);
-  useHoverReveal(rootRef, bgRef);
+  useHeroPieces(rootRef);
+  const go = (id) => (e) => { e.preventDefault(); scrollToSection(id); };
   return (
     <div className="hero" ref={rootRef}>
-      <div className="hero-copy">
-        <div className="hero-meta">
-          <p className="eyebrow">Less chaos. More clarity.</p>
-          <DemoBadge />
-        </div>
-        <h1><span className="hero-line">Every order,</span> <span className="hero-line">under control.</span></h1>
-        <p className="hero-lede">From the first customer message to the final delivery, keep every order and deadline in one place.</p>
-        <div className="hero-actions">
-          <Link to="/orders" className="btn btn-primary">Explore your orders <ArrowRight size={16} aria-hidden="true" /></Link>
-          {stats && <p className="hero-summary">{stats.total} {DEMO_MODE ? 'demo ' : ''}{stats.total === 1 ? 'order' : 'orders'} · {needs} {needs === 1 ? 'needs' : 'need'} attention</p>}
-        </div>
-        <p className="hero-trust">AI helps organise. You stay in control.</p>
+      <div className="hero-piece" data-piece="eyebrow">
+        <p className="chip"><i aria-hidden="true" />Order management for chat-first businesses</p>
       </div>
-      <div className="hero-bg" ref={bgRef} aria-hidden="true">
-        <img className="hero-bg-muted" src="/hero.png" alt="" decoding="async" fetchpriority="high" />
-        <span className="hero-bg-scrim" />
-        <img className="hero-bg-vivid" src="/hero.png" alt="" decoding="async" />
+      <h1 className="hero-piece hero-title" data-piece="headline">
+        <span className="hero-sans">Every order feels</span>
+        <em className="hero-serif">effortless.</em>
+      </h1>
+      <div className="hero-piece hero-aside" data-piece="aside">
+        <p className="hero-lede">Know what you can promise. Plan what comes next. Deliver with confidence.</p>
+        <div className="hero-actions">
+          <a href="#product" className="btn btn-primary btn-lg" onClick={go('product')}>Explore Conversa <ArrowUpRight size={16} aria-hidden="true" /></a>
+          <a href="#planning" className="btn btn-lg" onClick={go('planning')}>See how it works <ArrowUpRight size={16} aria-hidden="true" /></a>
+        </div>
+        {(stats || DEMO_MODE) && (
+          <p className="hero-summary">
+            {stats && <>{stats.total} {DEMO_MODE ? 'demo ' : ''}{stats.total === 1 ? 'order' : 'orders'} · {needs} {needs === 1 ? 'needs' : 'need'} attention</>}
+            <DemoBadge />
+          </p>
+        )}
       </div>
     </div>
   );
+}
+
+// ---------- CardGlow ----------
+// A soft light follows the cursor inside every .fx-card (the card's .fx-glow layer paints it; it only ever changes a background).
+export function useCardGlow(rootRef) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !window.matchMedia('(hover: hover) and (prefers-reduced-motion: no-preference)').matches) return undefined;
+    const cleanups = [...root.querySelectorAll('.fx-card')].map((card) => {
+      const glow = card.querySelector('.fx-glow');
+      if (!glow) return () => {};
+      let raf = 0;
+      const fade = (to) => {
+        cancelAnimationFrame(raf);
+        const from = parseFloat(glow.style.getPropertyValue('--ga') || '0');
+        const t0 = performance.now();
+        const step = (now) => {
+          const t = Math.min(1, (now - t0) / 320);
+          glow.style.setProperty('--ga', (from + (to - from) * (1 - (1 - t) ** 3)).toFixed(3));
+          if (t < 1) raf = requestAnimationFrame(step);
+        };
+        raf = requestAnimationFrame(step);
+      };
+      const enter = () => fade(1);
+      const leave = () => fade(0);
+      const move = (e) => {
+        const r = card.getBoundingClientRect();
+        glow.style.setProperty('--gx', `${(e.clientX - r.left).toFixed(0)}px`);
+        glow.style.setProperty('--gy', `${(e.clientY - r.top).toFixed(0)}px`);
+      };
+      card.addEventListener('pointerenter', enter);
+      card.addEventListener('pointermove', move);
+      card.addEventListener('pointerleave', leave);
+      return () => { cancelAnimationFrame(raf); card.removeEventListener('pointerenter', enter); card.removeEventListener('pointermove', move); card.removeEventListener('pointerleave', leave); };
+    });
+    return () => cleanups.forEach((c) => c());
+  }, [rootRef]);
 }
 
 // ---------- Reveal ----------
