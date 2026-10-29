@@ -23,7 +23,7 @@ const MAX_UPCOMING = 3;
 // the API already returns (see utils/homeSummary.js); the scheduler's own ranking decides what comes first.
 export function DayWorkspace({ planner, orders }) {
   const conv = useAsync(getConversations); // optional: only to link an order to its chat
-  const { tz, today, byId, open, todayIds, issues, missingIds, riskIds, attention, nextDeadline, top } = summarise({ planner, orders });
+  const { tz, today, byId, open, todayIds, issues, riskIds, attention, nextDeadline, top } = summarise({ planner, orders });
   const entry = Object.fromEntries(planner.schedule.map((e) => [e.orderId, e]));
   const chatOf = Object.fromEntries((conv.data?.items ?? []).filter((c) => c.orderId).map((c) => [c.orderId, c.id]));
   const unscheduledReason = Object.fromEntries(planner.unscheduledOrders.map((u) => [u.id, u.reason]));
@@ -32,26 +32,32 @@ export function DayWorkspace({ planner, orders }) {
 
   const attentionTo = riskIds.size > 0 ? '/plan?focus=risk' : '/plan?focus=missing';
   const metrics = [
-    { key: 'today', label: 'Orders today', value: todayIds.size, note: 'due or scheduled today', to: '/plan' },
-    { key: 'attn', label: 'Need attention', value: attention, note: attention ? `${riskIds.size} at risk · ${missingIds.size} missing details` : 'nothing urgent', to: attention ? attentionTo : '/plan', tone: attention ? 'risk' : null },
-    { key: 'next', label: 'Next deadline', value: nextDeadline ? formatInTz(nextDeadline.deadline, tz) : 'None upcoming', note: nextDeadline ? `${nextDeadline.customerName} · ${nextDeadline.item}` : 'no open order has a future deadline', to: nextDeadline ? `/orders?edit=${nextDeadline.id}` : '/orders', small: true },
+    { key: 'today', label: 'Orders', value: todayIds.size, to: '/plan' },
+    { key: 'attn', label: 'At risk', value: riskIds.size, to: attention ? attentionTo : '/plan', tone: riskIds.size ? 'risk' : null },
+    { key: 'next', label: 'Next deadline', value: nextDeadline ? formatInTz(nextDeadline.deadline, tz) : 'None upcoming', note: nextDeadline ? `${nextDeadline.customerName} · ${nextDeadline.item}` : null, to: nextDeadline ? `/orders?edit=${nextDeadline.id}` : '/orders', small: true },
   ];
 
+  // One short line per order: what is wrong, with the exact deadline kept beside it.
   const issueRows = issues.slice(0, MAX_ISSUES).map((m) => {
     const o = byId[m.orderId]; const e = entry[m.orderId];
     const missing = m.kind === 'needs_details';
-    const reason = missing ? `Missing ${MISSING[unscheduledReason[m.orderId]] ?? 'details'}, so it can't be scheduled.`
-      : m.kind === 'deadline_passed' ? `Deadline passed${o.deadline ? ` ${formatInTz(o.deadline, tz)}` : ''}.`
-        : m.kind === 'tight' ? `Only ${formatMinutes(e?.bufferMinutes)} to spare before the deadline.`
-          : m.kind === 'late' ? `Predicted to finish ${formatMinutes(e?.shortfallMinutes)} after the deadline.`
-            : 'Cannot be scheduled in the planning window.';
-    return { m, o, missing, reason, tone: missing ? 'info' : m.kind === 'tight' ? 'warn' : 'late' };
+    const state = missing ? `Missing ${MISSING[unscheduledReason[m.orderId]] ?? 'details'}`
+      : m.kind === 'deadline_passed' ? 'Overdue' : m.kind === 'tight' ? `Tight, ${formatMinutes(e?.bufferMinutes)} to spare` : m.kind === 'late' ? `Late by ${formatMinutes(e?.shortfallMinutes)}` : 'Cannot be scheduled';
+    return { m, o, missing, state, tone: missing ? 'info' : m.kind === 'tight' ? 'warn' : 'late' };
   });
+  const attnTitle = issueRows.length && issueRows.every((r) => r.m.kind === 'deadline_passed') ? 'Overdue' : issueRows.length && issueRows.every((r) => !r.missing && r.m.kind !== 'deadline_passed') ? 'At risk' : 'Needs review';
 
+  const REASON = { deadline_passed: 'Deadline missed', late: 'Running late', tight: 'Tight deadline', needs_details: 'Missing details' };
   const nextStep = top ? (() => {
     const o = byId[top.orderId];
     const contact = (top.kind === 'deadline_passed' || top.kind === 'late') && chatOf[top.orderId];
-    return { top, o, to: contact ? `/inbox?conversation=${chatOf[top.orderId]}` : `/orders?edit=${top.orderId}`, label: contact ? 'Open conversation' : top.kind === 'needs_details' ? 'Add details' : 'Review order' };
+    const who = o.customerName.split(' ')[0];
+    return {
+      top, o, to: contact ? `/inbox?conversation=${chatOf[top.orderId]}` : `/orders?edit=${top.orderId}`,
+      label: contact ? 'Open conversation' : top.kind === 'needs_details' ? 'Add details' : 'Review order',
+      title: contact ? `Contact ${who}` : top.kind === 'needs_details' ? `Complete ${who}'s order` : `Review ${who}'s order`,
+      detail: `${o.item}${o.quantity > 1 ? ` × ${o.quantity}` : ''} · ${REASON[top.kind] ?? 'Needs attention'}`,
+    };
   })() : null;
 
   const first = new Map();
@@ -60,13 +66,13 @@ export function DayWorkspace({ planner, orders }) {
 
   return (
     <div className="dw">
-      <SectionHead eyebrow="Today" title="Your day at a glance." />
+      <SectionHead eyebrow="Today" title="Your day, at a glance." />
       <dl className="dw-metrics">
         {metrics.map((x) => (
           <Link key={x.key} to={x.to} className={`dw-metric${x.tone ? ` is-${x.tone}` : ''}`}>
             <dt>{x.label}</dt>
             <dd className={x.small ? 'is-small' : ''}>{x.value}</dd>
-            <small>{x.note}</small>
+            {x.note && <small>{x.note}</small>}
           </Link>
         ))}
       </dl>
@@ -74,19 +80,19 @@ export function DayWorkspace({ planner, orders }) {
       <div className="dw-cols">
         <div className="dw-left">
           <section className="dw-sec" aria-labelledby="dw-attn">
-            <div className="dw-sec-head"><span className="dw-step">1 · Now</span><h3 id="dw-attn">Needs your attention</h3>{attention > MAX_ISSUES && <Link to={attentionTo} className="dw-all">View all {attention} <ArrowRight size={14} aria-hidden="true" /></Link>}</div>
+            <div className="dw-sec-head"><h3 id="dw-attn">{attnTitle}</h3>{attention > MAX_ISSUES && <Link to={attentionTo} className="dw-all">View all {attention} <ArrowRight size={14} aria-hidden="true" /></Link>}</div>
             {issueRows.length === 0 ? (
-              <p className="dw-clear"><Check size={16} aria-hidden="true" /> You're all caught up. No order is overdue, at risk or missing details.</p>
+              <p className="dw-clear"><Check size={16} aria-hidden="true" /> All caught up.</p>
             ) : (
               <ul className="dw-issues">
-                {issueRows.map(({ m, o, missing, reason, tone }) => (
+                {issueRows.map(({ m, o, missing, state, tone }) => (
                   <li key={m.orderId} className={`dw-issue is-${tone}`}>
                     <span className="dw-bar" aria-hidden="true" />
                     <div className="dw-issue-main">
                       <p><strong>{o.customerName}</strong>{isDemoOrder(o) && <span className="demo-tag">Demo</span>}<span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></p>
-                      <p className="dw-reason">{reason}{!missing && o.deadline && m.kind !== 'deadline_passed' && <> Due {formatInTz(o.deadline, tz)}.</>}</p>
+                      <p className="dw-reason">{state}{o.deadline && !missing && <> · <time dateTime={o.deadline}>{formatInTz(o.deadline, tz)}</time></>}</p>
                     </div>
-                    <Link to={`/orders?edit=${o.id}`} className="dw-act">{missing ? 'Add details' : 'Review order'} <ArrowRight size={14} aria-hidden="true" /></Link>
+                    <Link to={`/orders?edit=${o.id}`} className="dw-act">{missing ? 'Add details' : 'Review'} <ArrowRight size={14} aria-hidden="true" /></Link>
                   </li>
                 ))}
               </ul>
@@ -94,7 +100,7 @@ export function DayWorkspace({ planner, orders }) {
           </section>
 
           <section className="dw-sec dw-upcoming" aria-labelledby="dw-up">
-            <div className="dw-sec-head"><span className="dw-step">2 · Next</span><h3 id="dw-up">Coming up</h3><Link to="/plan" className="dw-all">Full schedule <ArrowRight size={14} aria-hidden="true" /></Link></div>
+            <div className="dw-sec-head"><h3 id="dw-up">Coming up</h3><Link to="/plan" className="dw-all">Full schedule <ArrowRight size={14} aria-hidden="true" /></Link></div>
             {upcoming.length === 0 ? <p className="dw-empty">Nothing is scheduled yet.</p> : (
               <ol className="dw-up">
                 {upcoming.map((r) => { const o = byId[r.id]; const e = entry[r.id]; return (
@@ -108,16 +114,16 @@ export function DayWorkspace({ planner, orders }) {
           </section>
         </div>
 
-        <section className="dw-sec dw-next" aria-labelledby="dw-next">
-          <div className="dw-sec-head"><span className="dw-step">3 · Do this</span><h3 id="dw-next">Recommended next step</h3></div>
+        <aside className="dw-next" aria-labelledby="dw-next">
           {nextStep ? (
             <>
-              <p className="dw-next-action">{nextStep.top.action}</p>
-              <p className="dw-next-why">{nextStep.top.why}</p>
+              <p className="dw-label" id="dw-next">Suggested action</p>
+              <p className="dw-next-action">{nextStep.title}</p>
+              <p className="dw-next-why">{nextStep.detail}</p>
               <Link to={nextStep.to} className="btn btn-primary">{nextStep.label} <ArrowRight size={16} aria-hidden="true" /></Link>
             </>
-          ) : <p className="dw-clear">Nothing is waiting on you right now.</p>}
-        </section>
+          ) : <p className="dw-clear" id="dw-next">Nothing is waiting on you.</p>}
+        </aside>
       </div>
     </div>
   );
