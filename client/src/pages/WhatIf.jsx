@@ -9,7 +9,7 @@ import '../css/WhatIfPage.css';
 export default function WhatIf() {
   const { status, data, error, reload } = useWorkspace();
   const { state } = useLocation();
-  const head = <header className="wf-head"><div><p className="eyebrow">What-if</p><h1>What happens if things change?</h1><p className="wf-sub">Test a decision. See its impact across every order before you commit.</p></div></header>;
+  const head = <header className="wf-head"><div><p className="eyebrow">What-if simulator</p><h1>Change the plan.</h1><p className="wf-sub">See the impact before you commit.</p></div></header>;
   if (status === 'loading' && !data) return <section className="page whatif">{head}<StateMessage kind="loading" message="Loading the schedule…" /></section>;
   if (status === 'error') return <section className="page whatif">{head}<StateMessage kind="error" message={`Couldn't load the schedule. ${error.message}`} onRetry={reload} /></section>;
   const { planner, orders } = data;

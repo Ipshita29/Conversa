@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, Check, ChevronDown, FlaskConical, Pencil, Info, PenLine } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, FlaskConical, Pencil, Info, PenLine, CalendarClock, Timer, Zap } from 'lucide-react';
 import useAsync from '../hooks/useAsync.js';
 import { getConversations, simulatePlanner, createOrder, updateOrder } from '../services/api.js';
 import { summarise } from '../utils/homeSummary.js';
@@ -454,9 +454,9 @@ export function InstagramLogo({ size = 40 }) {
 
 // ---------- WhatIfWorkspace ----------
 const SCENARIOS = [
-  { key: 'deadline', n: 1, title: 'Fix an overdue order', exp: 'deadline' },
-  { key: 'prep', n: 2, title: 'Adjust preparation time', exp: 'prep' },
-  { key: 'rush', n: 3, title: 'Add a 1-hour rush order', exp: 'rush' },
+  { key: 'deadline', title: 'Fix a deadline', exp: 'deadline', Icon: CalendarClock },
+  { key: 'prep', title: 'Reduce prep time', exp: 'prep', Icon: Timer },
+  { key: 'rush', title: 'Add a rush order', exp: 'rush', Icon: Zap },
 ];
 const EMPTY = { deadline: { orderId: '', deadline: '' }, prep: { orderId: '', prep: '' }, rush: { customerName: 'New customer', item: 'Rush order', prep: '60', deadline: '' } };
 
@@ -546,64 +546,70 @@ export function WhatIfWorkspace({ planner, orders, onApplied, prefill }) {
   const stale = Boolean(sim && sim.key !== key);
   const showSim = Boolean(cmp) && view === 'sim';
 
-  // Compact summary of the original schedule, from the scheduler's own entries.
-  const sched = planner.schedule ?? [];
-  const overdue = sched.filter((e) => e.kind === 'deadline_passed').length;
-  const late = sched.filter((e) => e.risk === 'high' && e.kind !== 'deadline_passed').length;
-  const tight = sched.filter((e) => e.risk === 'medium').length;
-  const w = planner.workload;
-
   const rows = showSim ? cmp.rows : orders.map((o) => ({ id: o.id, name: o.customerName, item: o.item, quantity: o.quantity, orig: { deadline: o.deadline, prep: o.prepTimeMinutes, finish: planner.schedule?.find((e) => e.orderId === o.id)?.scheduledEnd ?? null, status: cmpStatus(o, planner) }, sim: null }));
   const exp = exps?.[SCENARIOS.find((s) => s.key === scen).exp];
   const cur = byId[d.orderId];
   const s = cmp?.summary;
 
+  const subOf = (sc) => {
+    const x = exps?.[sc.exp];
+    if (!exps) return 'Checking…';
+    if (sc.key === 'rush') return x?.change ? '1-hour job' : 'No free hour';
+    const o = x?.change?.orderId ? byId[x.change.orderId] : null;
+    if (!o) return 'No safe option';
+    return sc.key === 'deadline' ? `${o.customerName} · ${cmpStatus(o, planner).label}` : o.customerName;
+  };
+  const unavailable = exp?.unavailable;
+  const prepText = (v) => (v == null ? 'Not set' : formatMinutes(v));
+  const metric = (before, after) => (after < before ? 'better' : after > before ? 'worse' : 'same');
+  const metrics = cmp && [
+    { label: 'Orders changed', value: `${s.changed} of ${s.total}`, tone: s.changed ? 'info' : 'same', word: s.changed ? 'Changed' : 'Unchanged' },
+    { label: 'Deadlines at risk', value: `${s.beforeRisk} → ${s.afterRisk}`, tone: metric(s.beforeRisk, s.afterRisk), word: { better: 'Improved', worse: 'Worse', same: 'Unchanged' }[metric(s.beforeRisk, s.afterRisk)] },
+    { label: 'Schedule feasibility', value: !s.passes ? 'Not feasible' : s.afterHigh === 0 ? 'Feasible' : `${s.afterHigh} still late`, tone: !s.passes ? 'worse' : s.afterHigh < s.beforeHigh ? 'better' : s.afterHigh > s.beforeHigh ? 'worse' : 'same', word: !s.passes ? 'Worse' : s.afterHigh < s.beforeHigh ? 'Improved' : s.afterHigh > s.beforeHigh ? 'Worse' : 'Unchanged' },
+  ];
+
   return (
     <>
       <header className="wf-head">
-        <div><p className="eyebrow">What-if</p><h1>What happens if things change?</h1><p className="wf-sub">Test a decision. See its impact across every order before you commit.</p></div>
+        <div><p className="eyebrow">What-if simulator</p><h1>Change the plan.</h1><p className="wf-sub">See the impact before you commit.</p></div>
         <DemoBadge />
       </header>
 
-      <section className="wf-setup" aria-label="Choose a scenario">
+      <section className="wf-setup" aria-label="Scenario">
         <div className="wf-pick" role="radiogroup" aria-label="Scenario">
-          {SCENARIOS.map((sc) => {
-            const x = exps?.[sc.exp];
-            const o = x?.change?.orderId ? byId[x.change.orderId] : null;
-            const sub = !exps ? 'Pre-checking…' : sc.key === 'rush' ? (x?.change ? 'A proposed new order' : 'No free hour to test') : o ? `${o.customerName}'s ${o.item}` : 'No valid scenario found';
-            return (
-              <button key={sc.key} type="button" role="radio" aria-checked={scen === sc.key} className={`wf-opt${scen === sc.key ? ' is-on' : ''}`} onClick={() => { setScen(sc.key); setSim(null); setError(null); setConfirming(false); setView('orig'); }}>
-                <span className="wf-n">{sc.n}</span><span><strong>{sc.title}</strong><small>{sub}</small></span>
-              </button>
-            );
-          })}
+          {SCENARIOS.map(({ key: k, title, Icon, ...sc }) => (
+            <button key={k} type="button" role="radio" aria-checked={scen === k} className={`wf-opt${scen === k ? ' is-on' : ''}`} onClick={() => { setScen(k); setSim(null); setError(null); setConfirming(false); setView('orig'); }}>
+              <Icon size={18} aria-hidden="true" /><span><strong>{title}</strong><small>{subOf({ key: k, title, ...sc })}</small></span>
+            </button>
+          ))}
         </div>
 
-        <div className="wf-detail">
-          {exp && <p className="wf-why">{exp.unavailable ? `The scheduler found no safe suggestion here: ${exp.reason} You can still test your own values.` : `${exp.summary} ${exp.precheck ? `Scheduler pre-check: ${exp.precheck.title.toLowerCase()}.` : ''}`}</p>}
+        <div className="wf-editor">
+          {unavailable && <p className="wf-hint">No safe suggestion found. Enter your own values.</p>}
           <div className="wf-fields">
             {scen !== 'rush' ? (
-              <label className="field"><span className="field-label">Order</span>
-                <select value={d.orderId} onChange={pickOrder}><option value="">Select an order…</option>{openOrders.map((o) => <option key={o.id} value={o.id}>{o.customerName}: {o.item}</option>)}</select>
+              <label className="field wf-order"><span className="field-label">Order</span>
+                <select value={d.orderId} onChange={pickOrder}><option value="">Select an order…</option>{openOrders.map((o) => <option key={o.id} value={o.id}>{o.customerName} · {o.item}</option>)}</select>
               </label>
             ) : (
               <>
                 <label className="field"><span className="field-label">Customer</span><input value={d.customerName} onChange={setField('customerName')} /></label>
                 <label className="field"><span className="field-label">Item</span><input value={d.item} onChange={setField('item')} /></label>
+                <label className="field"><span className="field-label">Prep (minutes)</span><input type="number" min="5" step="5" value={d.prep} onChange={setField('prep')} /></label>
+                <label className="field"><span className="field-label">Deadline</span><input type="datetime-local" value={d.deadline} onChange={setField('deadline')} /></label>
               </>
             )}
-            {scen === 'prep' ? (
-              <label className="field"><span className="field-label">New preparation time (minutes)</span><input type="number" min="0" step="5" value={d.prep} onChange={setField('prep')} /><span className="field-hint">{cur ? `Currently ${cur.prepTimeMinutes == null ? 'not set' : formatMinutes(cur.prepTimeMinutes)}. ` : ''}An assumption to test, not a fact.</span></label>
-            ) : (
-              <label className="field"><span className="field-label">{scen === 'rush' ? 'Requested deadline' : 'New deadline'}</span><input type="datetime-local" value={d.deadline} onChange={setField('deadline')} />{scen === 'deadline' && cur && <span className="field-hint">Currently {T(cur.deadline)}.</span>}</label>
-            )}
-            {scen === 'rush' && <label className="field"><span className="field-label">Preparation time (minutes)</span><input type="number" min="5" step="5" value={d.prep} onChange={setField('prep')} /></label>}
           </div>
-        </div>
-
-        <div className="wf-strip">
-          <p><b>Original schedule</b> · {sched.length} open {sched.length === 1 ? 'order' : 'orders'} · {overdue} overdue{late ? ` · ${late} late` : ''} · {tight} tight{w ? ` · ${w.pendingHours}h of preparation against ${w.availableHours}h available` : ''}</p>
-          <button type="button" className="btn btn-primary" disabled={!valid || busy || !exps} onClick={run}><FlaskConical size={15} aria-hidden="true" />{busy ? 'Simulating…' : sim ? 'Run again' : 'Run simulation'}</button>
+          {scen !== 'rush' && (
+            <div className="wf-pair">
+              <div className="wf-from"><span className="field-label">Current</span><b className="wf-mono">{!cur ? '—' : scen === 'deadline' ? T(cur.deadline) : prepText(cur.prepTimeMinutes)}</b></div>
+              <span className="wf-to" aria-hidden="true">→</span>
+              {scen === 'deadline'
+                ? <label className="field wf-into"><span className="field-label">Proposed</span><input type="datetime-local" value={d.deadline} onChange={setField('deadline')} /></label>
+                : <label className="field wf-into"><span className="field-label">Proposed (minutes)</span><input type="number" min="0" step="5" value={d.prep} onChange={setField('prep')} /></label>}
+            </div>
+          )}
+          <button type="button" className="btn btn-primary wf-run" disabled={!valid || busy || !exps} onClick={run}><FlaskConical size={15} aria-hidden="true" />{busy ? 'Simulating…' : 'Run simulation'}</button>
         </div>
       </section>
 
@@ -611,42 +617,34 @@ export function WhatIfWorkspace({ planner, orders, onApplied, prefill }) {
       {done && <div className="notice ok" role="status">{done}</div>}
 
       {cmp && (
-        <section className="wf-impact" aria-live="polite" aria-label="Impact of this change">
-          {stale && <div className="notice sim-warn" role="status">You changed the inputs after this run. Run the simulation again to update it; until then it can't be confirmed.</div>}
-          <div className={`wf-verdict is-${cmp.story.headline.tone}`}><strong>{cmp.story.headline.title}</strong><span>{cmp.story.headline.text}</span></div>
-          <ul className="wf-facts">
-            <li><b>{s.changed} of {s.total}</b> {s.total === 1 ? 'order changes' : 'orders change'}.</li>
-            <li>{s.passes ? <><Check size={14} aria-hidden="true" /> Passes the scheduler's feasibility checks.</> : "Does not pass the scheduler's feasibility checks."}</li>
-            {s.resolved.length > 0 && <li className="is-good"><b>Feasible now:</b> {s.resolved.map((r) => r.name).join(', ')}.</li>}
-            {s.stillBad.length > 0 && <li className="is-bad"><b>Still late or overdue:</b> {s.stillBad.map((r) => r.name).join(', ')}.</li>}
-            <li>{s.worse.length ? <><b>Existing commitments affected:</b> {s.worse.map((r) => r.name).join(', ')} {s.worse.length === 1 ? 'is' : 'are'} now riskier.</> : <><b>No other commitment gets riskier.</b>{s.moved.length ? ` ${s.moved.length} ${s.moved.length === 1 ? 'order finishes' : 'orders finish'} at a different time.` : ' Every other order keeps its timing.'}</>}</li>
-          </ul>
-        </section>
+        <dl className="wf-metrics" aria-live="polite" aria-label="Impact">
+          {metrics.map((m) => <div key={m.label} className={`is-${m.tone}`}><dt>{m.label}</dt><dd>{m.value}</dd><span className="wf-ind"><i aria-hidden="true" />{m.word}</span></div>)}
+        </dl>
       )}
+      {stale && <p className="wf-stale" role="status">Inputs changed. Run the simulation again to update.</p>}
 
       <section className="wf-table" aria-label="Order schedule">
-        <div className="wf-tabs" role="tablist" aria-label="Which schedule to show">
+        <div className="wf-tabs" role="tablist" aria-label="Schedule">
           <button type="button" role="tab" aria-selected={!showSim} className={!showSim ? 'is-on' : ''} onClick={() => setView('orig')}>Original schedule</button>
           <button type="button" role="tab" aria-selected={showSim} className={showSim ? 'is-on' : ''} disabled={!cmp} onClick={() => setView('sim')}>Simulated schedule</button>
-          {cmp && <span className="wf-nosave">Simulation only, nothing has been saved</span>}
+          {cmp && <span className="wf-nosave">Not saved</span>}
         </div>
         <ul className="wf-rows">
-          <li className="wf-cols" aria-hidden="true"><span>Order</span><span>Deadline</span><span>Preparation</span><span>Predicted finish</span><span>Status</span></li>
+          <li className="wf-cols" aria-hidden="true"><span>Order</span><span>Deadline</span><span>Prep</span><span>Predicted finish</span><span>Status</span></li>
           {rows.map((r) => <ScheduleRow key={r.id} r={r} sim={showSim} T={T} />)}
         </ul>
-        <p className="wf-count">{rows.length} {rows.length === 1 ? 'order' : 'orders'}{showSim && cmp.isNew ? ', including the proposed one' : ''}</p>
       </section>
 
       {cmp && (
         <div className="wf-actions">
           <button type="button" className="btn" onClick={discard} disabled={busy}>Discard simulation</button>
           {!confirming
-            ? <button type="button" className="btn btn-primary" disabled={stale || busy || cmp.story.headline.tone === 'details'} onClick={() => setConfirming(true)}>Confirm changes…</button>
+            ? <button type="button" className="btn btn-primary" disabled={stale || busy || cmp.story.headline.tone === 'details'} onClick={() => setConfirming(true)}>Confirm changes</button>
             : (<><button type="button" className="btn" onClick={() => setConfirming(false)} disabled={busy}>Not yet</button>
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={apply}>{busy ? 'Saving…' : cmp.isNew ? 'Yes, save it as a real order' : sim.change.order.prepTimeMinutes !== undefined ? 'Yes, save the new preparation time' : 'Yes, save the new deadline'}</button></>)}
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={apply}>{busy ? 'Saving…' : cmp.isNew ? 'Save as a real order' : sim.change.order.prepTimeMinutes !== undefined ? 'Save new prep time' : 'Save new deadline'}</button></>)}
         </div>
       )}
-      {confirming && sim && <p className="notice sim-warn" role="status">{cmp.isNew ? 'This creates a real order.' : sim.change.order.prepTimeMinutes !== undefined ? `This changes the preparation time stored on ${byId[sim.change.orderId]?.customerName}'s order. Apply it only if you really expect to prepare it that fast.` : `This changes the promised deadline stored on ${byId[sim.change.orderId]?.customerName}'s order. Apply it only once the customer has agreed.`} It uses the normal order API and affects only this one order.</p>}
+      {confirming && sim && <p className="wf-stale" role="status">{cmp.isNew ? 'This creates a real order.' : sim.change.order.prepTimeMinutes !== undefined ? `This changes the saved prep time on ${byId[sim.change.orderId]?.customerName}'s order.` : `This changes the saved deadline on ${byId[sim.change.orderId]?.customerName}'s order. Apply it once the customer agrees.`}</p>}
     </>
   );
 }
@@ -670,14 +668,14 @@ function Val({ a, b, show, mono = true }) {
 function ScheduleRow({ r, sim, T }) {
   const o = r.orig; const n = r.sim ?? r.orig;
   const status = sim ? n.status : o.status;
-  const cls = ['wf-row', sim && r.isNew ? 'is-new' : '', sim && r.target ? 'is-target' : '', sim && !r.target && r.changed ? 'is-moved' : '', status.tone === 'late' ? 'is-late' : '', status.tone === 'resolved' ? 'is-resolved' : ''].filter(Boolean).join(' ');
+  const cls = ['wf-row', sim && r.isNew ? 'is-new' : '', sim && r.target ? 'is-target' : '', status.tone === 'late' ? 'is-late' : '', status.tone === 'resolved' ? 'is-resolved' : ''].filter(Boolean).join(' ');
   const prepText = (v) => (v == null ? 'Not set' : formatMinutes(v));
+  const flag = sim && r.isNew ? 'New' : sim && r.changed ? 'Changed' : null;
   return (
     <li className={cls}>
-      <span className="wf-who"><strong>{r.name}{r.isNew && <em className="wf-tag">New order</em>}{sim && r.target && !r.isNew && <em className="wf-tag">Changed</em>}</strong><span>{r.item}{r.quantity > 1 ? ` × ${r.quantity}` : ''}</span>
-        {sim && <span className="wf-note">{r.changed ? (r.note ?? '') : 'Unchanged'}</span>}</span>
+      <span className="wf-who"><strong>{r.name}{flag && <em className="wf-tag">{flag}</em>}</strong><span>{r.item}{r.quantity > 1 ? ` × ${r.quantity}` : ''}</span></span>
       <span className="wf-cell" data-label="Deadline"><Val a={T(o.deadline)} b={T(n.deadline)} show={sim && !r.isNew} /></span>
-      <span className="wf-cell" data-label="Preparation"><Val a={prepText(o.prep)} b={prepText(n.prep)} show={sim && !r.isNew} /></span>
+      <span className="wf-cell" data-label="Prep"><Val a={prepText(o.prep)} b={prepText(n.prep)} show={sim && !r.isNew} /></span>
       <span className="wf-cell" data-label="Predicted finish"><Val a={T(o.finish)} b={T(n.finish)} show={sim && !r.isNew} /></span>
       <span className="wf-cell" data-label="Status"><span className={`wf-st st-${status.tone}`}><i aria-hidden="true" />{sim && r.statusChanged && !r.isNew ? <><s className="wf-old">{o.status.label}</s> → {n.status.label}</> : status.label}</span></span>
     </li>

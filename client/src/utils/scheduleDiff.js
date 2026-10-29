@@ -54,13 +54,15 @@ export function buildComparison({ orders, baseline, after, change, byId, tz }) {
   const target = rows.find((r) => r.target);
   const beforeHigh = baseline.schedule.filter((e) => e.risk === 'high').length;
   const afterHigh = after.schedule.filter((e) => e.risk === 'high').length;
+  const beforeRisk = baseline.schedule.filter((e) => e.risk !== 'low').length;
+  const afterRisk = after.schedule.filter((e) => e.risk !== 'low').length;
   const worse = others.filter((r) => r.dir === 'worse');
   const resolved = live.filter((r) => r.b?.risk === 'high' && r.a && r.a.risk !== 'high');
   const stillBad = live.filter((r) => r.b?.risk === 'high' && r.a?.risk === 'high');
   const moved = others.filter((r) => r.shift !== 0 && r.dir !== 'worse');
   const targetFeasible = target?.a ? target.a.risk !== 'high' : false;
   const passes = worse.length === 0 && afterHigh <= beforeHigh && (!isNew || targetFeasible) && Boolean(target?.a);
-  return { rows, story, isNew, summary: { changed: rows.filter((r) => r.changed).length, total: rows.length, worse, resolved, stillBad, moved, beforeHigh, afterHigh, targetFeasible, passes } };
+  return { rows, story, isNew, summary: { changed: rows.filter((r) => r.changed).length, total: rows.length, worse, resolved, stillBad, moved, beforeHigh, afterHigh, beforeRisk, afterRisk, targetFeasible, passes } };
 }
 
 export const isOpenOrder = (o) => OPEN.includes(o.status);
