@@ -1,36 +1,68 @@
-/* A small floating control instead of a sidebar: nothing reserves layout space. */
-.navbar { font-family: var(--display); position: fixed; top: 16px; left: 16px; z-index: 80; }
-.navbar-pill { display: flex; align-items: center; gap: 0.7rem; padding: 5px 16px 5px 5px; background: rgba(255, 255, 255, 0.94); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow); }
-.menu-trigger { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--cocoa); color: var(--ivory); cursor: pointer; transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
-.menu-trigger:hover { background: var(--caramel-ink); }
+/* The floating pill (centred, glass), the popover menu, the shared "chip", and the closing footer panel. Values follow the Conversa Framer design. */
+.navbar { font-family: var(--display); position: fixed; top: 14px; left: 0; right: 0; z-index: 80; display: flex; justify-content: center; padding: 0 16px; pointer-events: none; }
+.navbar-inner { position: relative; width: min(940px, 100%); pointer-events: auto; }
+.navbar-pill { display: flex; align-items: center; justify-content: space-between; gap: 1rem; height: 60px; padding: 6px 6px 6px 20px; background: rgba(255, 255, 255, 0.9); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); border: 1px solid var(--edge); border-radius: 32px; box-shadow: var(--card); }
+.wordmark { display: inline-flex; align-items: center; gap: 8px; font-family: var(--brand); font-style: italic; font-weight: 400; font-size: 1.6rem; line-height: 1; letter-spacing: -0.01em; color: var(--cocoa); text-decoration: none; }
+.wordmark svg { color: var(--primary); flex-shrink: 0; }
+.nav-links { display: flex; align-items: center; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.nav-link { display: block; padding: 9px 14px; border-radius: 999px; font-size: 0.875rem; font-weight: 500; letter-spacing: -0.005em; color: var(--muted); text-decoration: none; white-space: nowrap; transition: color 0.18s var(--ease), background 0.18s var(--ease); }
+.nav-link:hover { color: var(--cocoa); background: rgba(41, 41, 35, 0.05); }
+.nav-link.active { color: var(--cocoa); background: rgba(41, 41, 35, 0.07); }
+.nav-link:focus-visible { outline-offset: -2px; border-radius: 999px; }
+.nav-actions { display: flex; align-items: center; gap: 8px; }
+.nav-cta { min-height: 46px; padding: 0 1.1rem 0 1.25rem; font-size: 0.875rem; white-space: nowrap; }
+.menu-trigger { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 46px; height: 46px; border: 1px solid var(--edge); border-radius: 50%; background: var(--white); color: var(--cocoa); cursor: pointer; transition: background 0.2s var(--ease), transform 0.2s var(--ease); }
+.menu-trigger:hover, .menu-trigger[aria-expanded='true'] { background: var(--blue-soft); }
 .menu-trigger:active { transform: scale(0.94); }
-.menu-trigger[aria-expanded='true'] { background: var(--caramel-ink); }
 .menu-trigger:focus-visible { outline-offset: 3px; }
-.wordmark { font-family: var(--brand); font-weight: 600; font-size: 1.7rem; line-height: 1; color: var(--cocoa); text-decoration: none; letter-spacing: 0.015em; }
-.wordmark span { color: var(--caramel); }
-.you-are-here { display: flex; align-items: center; gap: 0.45rem; margin: 0; padding-left: 0.8rem; border-left: 1px solid var(--border); font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
-.you-are-here i { width: 6px; height: 6px; border-radius: 50%; background: var(--caramel); }
 
 /* The menu is a popover under the pill. */
-.menu { position: absolute; top: calc(100% + 10px); left: 0; width: 310px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 0.35rem 0.5rem 0.9rem; background: var(--white); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 18px 50px rgba(51, 39, 31, 0.16); opacity: 0; visibility: hidden; transform: translateY(-8px) scale(0.98); transform-origin: 20px 0; pointer-events: none; transition: opacity 0.22s var(--ease), transform 0.28s var(--ease), visibility 0s linear 0.28s; }
+.menu { position: absolute; top: calc(100% + 10px); right: 0; width: 310px; max-height: calc(100vh - 100px); overflow-y: auto; padding: 0.35rem 0.5rem 0.9rem; background: var(--white); border: 1px solid var(--edge); border-radius: 24px; box-shadow: var(--card); opacity: 0; visibility: hidden; transform: translateY(-8px) scale(0.98); transform-origin: calc(100% - 24px) 0; pointer-events: none; transition: opacity 0.22s var(--ease), transform 0.28s var(--ease), visibility 0s linear 0.28s; }
 .menu.is-open { opacity: 1; visibility: visible; transform: none; pointer-events: auto; transition-delay: 0s; }
 .menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
 .menu-link { display: flex; align-items: center; gap: 0.75rem; width: 100%; padding: 0.5rem 0.7rem; border: 0; border-left: 2px solid transparent; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: none; color: var(--muted); font: inherit; font-size: 0.94rem; text-align: left; text-decoration: none; cursor: pointer; transition: color 0.18s var(--ease), background 0.18s var(--ease); }
-.menu-link small { display: block; font-size: 0.74rem; line-height: 1.3; color: var(--muted); opacity: 0.85; }
+.menu-link small { display: block; font-size: 0.74rem; line-height: 1.3; color: var(--faint); }
 .menu-link svg { flex-shrink: 0; }
-.menu-link:focus-visible { outline: 2px solid var(--blue-ink); outline-offset: -2px; border-radius: var(--radius-sm); }
-.menu-link:hover { color: var(--cocoa); background: var(--papaya-soft); }
-.menu-link.active { color: var(--cocoa); font-weight: 600; border-left-color: var(--caramel); background: var(--papaya-soft); }
-.menu-link.active svg { color: var(--caramel-ink); }
-.menu-group { margin: 0.7rem 0 0.15rem 0.7rem; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.menu-link:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: var(--radius-sm); }
+.menu-link:hover { color: var(--cocoa); background: var(--blue-soft); }
+.menu-link.active { color: var(--cocoa); font-weight: 500; border-left-color: var(--primary); background: var(--blue-soft); }
+.menu-link.active svg { color: var(--primary); }
+.menu-group { margin: 0.7rem 0 0.15rem 0.7rem; font-size: 0.68rem; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
 .menu-foot { margin: 0.9rem 0.7rem 0; padding-top: 0.8rem; border-top: 1px solid var(--border); }
 .menu-small { font-size: 0.84rem; color: var(--muted); }
-.menu-small:hover { color: var(--caramel-ink); }
-.navbar-tagline { margin: 0.7rem 0 0; font-family: var(--brand); font-weight: 500; font-style: italic; font-size: 0.92rem; color: var(--muted); }
+.menu-small:hover { color: var(--primary); }
+.navbar-tagline { margin: 0.7rem 0 0; font-family: var(--brand); font-style: italic; font-size: 1.05rem; color: var(--muted); }
 .navbar-demo { margin: 0.5rem 0 0; font-size: 0.72rem; color: var(--blue-ink); }
 
-@media (max-width: 860px) {
-  .navbar { top: 10px; left: 10px; }
-  .menu { width: min(310px, calc(100vw - 20px)); }
+@media (max-width: 900px) {
+  .navbar { top: 10px; padding: 0 10px; }
+  .navbar .nav-links, .navbar .nav-cta { display: none; } /* the popover menu is the whole navigation here */
+  .navbar-pill { height: 58px; padding-left: 16px; border-radius: 30px; }
 }
-@media (max-width: 360px) { .you-are-here { display: none; } .navbar-pill { padding-right: 14px; } } /* only the very smallest phones drop the page label */
+
+/* A small pill with a coloured dot: the eyebrow on the hero, the section tags and the footer. */
+.chip { display: inline-flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px 8px 14px; border: 1px solid var(--edge); border-radius: 999px; background: rgba(255, 255, 255, 0.9); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.95), inset -1px -1px 0 rgba(41, 41, 35, 0.06), 0 8px 24px -10px rgba(41, 41, 35, 0.2); font-size: 0.8125rem; font-weight: 500; line-height: 1.2; letter-spacing: -0.005em; color: var(--cocoa); }
+.chip i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--primary); }
+.chip--caramel i { background: var(--caramel); }
+
+/* ---------- Footer ---------- */
+.site-footer { position: relative; z-index: 2; padding: 0 16px 16px; }
+.sf-panel { max-width: 1560px; margin: 0 auto; padding: 72px 56px 28px; border: 1px solid var(--edge); border-radius: 40px; background: rgba(255, 255, 255, 0.92); -webkit-backdrop-filter: blur(26px); backdrop-filter: blur(26px); box-shadow: var(--card); }
+.sf-top { display: flex; gap: 56px; align-items: flex-start; }
+.sf-cta { flex: 1.3 1 0; display: flex; flex-direction: column; align-items: flex-start; gap: 28px; min-width: 0; }
+.sf-title { font-size: clamp(2.5rem, 6vw, 4.5rem); line-height: 1; letter-spacing: -0.045em; }
+.sf-title span { display: block; }
+.sf-title em { display: block; font-family: var(--brand); font-style: italic; font-weight: 400; font-size: 1.11em; line-height: 0.95; letter-spacing: -0.015em; color: var(--primary); }
+.sf-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.sf-cols { flex: 1 1 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; padding-top: 12px; }
+.sf-cols ul { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.sf-cols a { font-size: 0.9375rem; color: var(--muted); text-decoration: none; transition: color 0.18s var(--ease); }
+.sf-cols a:hover { color: var(--primary); }
+.sf-bottom { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); }
+.sf-legal { margin: 0; font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+@media (max-width: 860px) {
+  .sf-panel { padding: 44px 24px 24px; border-radius: 32px; }
+  .sf-top { flex-direction: column; gap: 36px; }
+  .sf-cols { width: 100%; }
+}
+@media (max-width: 520px) { .site-footer { padding: 0 8px 8px; } .sf-actions .btn { width: 100%; } }

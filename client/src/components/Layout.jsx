@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { MoreVertical, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag } from 'lucide-react';
+import { Menu, Hexagon, ArrowUpRight, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag } from 'lucide-react';
 import { scrollToTop } from '../utils/scroll.js';
 import { DEMO_MODE } from '../services/api.js';
 import { DemoBadge } from './UI.jsx';
 import '../css/Navbar.css';
 
 // ---------- Navbar ----------
-// Five places in the menu; messages sit in a small secondary group.
+// A centred floating pill, as in the Conversa design: wordmark, the places you go most, and one blue call to action.
+// The same places (plus Integrations and the demo note) live in the popover menu, which is also the whole navigation on small screens.
 const WORKSPACE = [
   { key: 'overview', to: '/', label: 'Home', hint: 'Your day, organised', icon: House },
   { key: 'orders', to: '/orders', label: 'Orders', hint: 'Every order, every channel', icon: ShoppingBag },
@@ -18,23 +19,18 @@ const WORKSPACE = [
 const PAGES = [
   { key: 'inbox', to: '/inbox', label: 'Messages', hint: 'Chats from every channel', icon: Inbox },
 ];
-const TITLES = { '/': 'Home', '/plan': 'Plan', '/whatif': 'What-if', '/inbox': 'Messages', '/orders': 'Orders', '/insights': 'Insights', '/settings': 'Integrations' };
-// Sections the pill follows while you scroll a page.
-const SPY = {};
+const PILL_LINKS = [...WORKSPACE.filter((i) => i.key !== 'overview'), ...PAGES];
 
 export function Navbar() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
-  const spy = SPY[pathname];
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(null);
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
   const rootRef = useRef(null);
-  const lockUntil = useRef(0); // while a click-initiated scroll runs, the pill keeps the chosen label instead of flickering
 
   const close = useCallback((refocus = false) => { setOpen(false); if (refocus) triggerRef.current?.focus(); }, []);
-  useEffect(() => { setOpen(false); setActive(null); }, [pathname, hash]);
+  useEffect(() => { setOpen(false); }, [pathname, hash]);
 
   // Close on outside click.
   useEffect(() => {
@@ -44,30 +40,14 @@ export function Navbar() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  // On pages with named sections, follow the one in view (drives the pill label and the highlighted What-if item).
-  useEffect(() => {
-    if (!spy || typeof IntersectionObserver === 'undefined') return undefined;
-    const io = new IntersectionObserver((entries) => {
-      if (Date.now() < lockUntil.current) return;
-      const hit = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (hit) setActive(hit.target.id);
-    }, { rootMargin: '-25% 0px -60% 0px', threshold: [0, 0.1, 0.5] });
-    const watch = () => Object.keys(spy).forEach((id) => { const el = document.getElementById(id); if (el) io.observe(el); });
-    watch();
-    const retry = setTimeout(watch, 800); // sections mount after data loads
-    return () => { clearTimeout(retry); io.disconnect(); };
-  }, [spy]);
-
   // Same page + no hash: scroll to the top. Otherwise let the router navigate (pages scroll to #hash themselves).
   function onItem(e, to) {
     close();
-    lockUntil.current = Date.now() + 1500;
     const [path, h] = to.split('#');
-    if (h) setActive(h);
     if (path === pathname) {
       e.preventDefault();
       navigate(to); // also drops a stale #hash from the URL
-      if (!h) { setActive(null); scrollToTop(); }
+      if (!h) scrollToTop();
     }
   }
 
@@ -90,50 +70,94 @@ export function Navbar() {
   // Tabbing away from the menu closes it (only when focus really lands somewhere else).
   const onBlur = (e) => { if (open && e.relatedTarget && !rootRef.current?.contains(e.relatedTarget)) setOpen(false); };
 
-  const current = (spy && active && spy[active]) || TITLES[pathname] || '';
-
   return (
     <nav className="navbar" aria-label="Main" ref={rootRef} onBlur={onBlur}>
-      <div className="navbar-pill">
-        <button type="button" ref={triggerRef} className="menu-trigger" aria-expanded={open} aria-controls="main-menu" aria-label={open ? 'Close menu' : 'Open menu'}
-          onClick={() => setOpen(!open)} onKeyDown={onTriggerKey}>
-          <MoreVertical size={20} aria-hidden="true" />
-        </button>
-        <Link to="/" className="wordmark" onClick={(e) => onItem(e, '/')}>Conversa<span aria-hidden="true">.</span></Link>
-        <p className="you-are-here" aria-live="polite"><i aria-hidden="true" />{current}</p>
-      </div>
-
-      <div id="main-menu" ref={menuRef} className={`menu${open ? ' is-open' : ''}`} role="group" aria-label="Navigation menu" data-lenis-prevent onKeyDown={onMenuKey} inert={open ? undefined : ''}>
-        <p className="menu-group" id="menu-workspace">Workspace</p>
-        <ul className="menu-list" aria-labelledby="menu-workspace">
-          {WORKSPACE.map((item) => {
-            const on = isOn(item); const Icon = item.icon;
-            return (
+      <div className="navbar-inner">
+        <div className="navbar-pill">
+          <Link to="/" className="wordmark" onClick={(e) => onItem(e, '/')}><Hexagon size={18} aria-hidden="true" /><span>conversa</span></Link>
+          <ul className="nav-links">
+            {PILL_LINKS.map((item) => (
               <li key={item.key}>
-                <Link to={item.to} className={`menu-link${on ? ' active' : ''}`} aria-current={on ? (item.key === 'simulation' ? 'location' : 'page') : undefined} onClick={(e) => onItem(e, item.to)}>
-                  <Icon size={17} aria-hidden="true" /><span>{item.label}<small>{item.hint}</small></span>
-                </Link>
+                <Link to={item.to} className={`nav-link${isOn(item) ? ' active' : ''}`} aria-current={isOn(item) ? 'page' : undefined} onClick={(e) => onItem(e, item.to)}>{item.label}</Link>
               </li>
-            );
-          })}
-        </ul>
+            ))}
+          </ul>
+          <div className="nav-actions">
+            <Link to="/#product" className="btn btn-primary nav-cta" onClick={(e) => onItem(e, '/#product')}>Explore Conversa <ArrowUpRight size={15} aria-hidden="true" /></Link>
+            <button type="button" ref={triggerRef} className="menu-trigger" aria-expanded={open} aria-controls="main-menu" aria-label={open ? 'Close menu' : 'Open menu'}
+              onClick={() => setOpen(!open)} onKeyDown={onTriggerKey}>
+              <Menu size={19} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
 
-        <p className="menu-group" id="menu-pages">More</p>
-        <ul className="menu-list" aria-labelledby="menu-pages">
-          {PAGES.map(({ to, label, hint, icon: Icon }) => (
-            <li key={to}>
-              <NavLink to={to} onClick={() => close()} className="menu-link"><Icon size={17} aria-hidden="true" /><span>{label}<small>{hint}</small></span></NavLink>
-            </li>
-          ))}
-        </ul>
+        <div id="main-menu" ref={menuRef} className={`menu${open ? ' is-open' : ''}`} role="group" aria-label="Navigation menu" data-lenis-prevent onKeyDown={onMenuKey} inert={open ? undefined : ''}>
+          <p className="menu-group" id="menu-workspace">Workspace</p>
+          <ul className="menu-list" aria-labelledby="menu-workspace">
+            {WORKSPACE.map((item) => {
+              const on = isOn(item); const Icon = item.icon;
+              return (
+                <li key={item.key}>
+                  <Link to={item.to} className={`menu-link${on ? ' active' : ''}`} aria-current={on ? 'page' : undefined} onClick={(e) => onItem(e, item.to)}>
+                    <Icon size={17} aria-hidden="true" /><span>{item.label}<small>{item.hint}</small></span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
 
-        <div className="menu-foot">
-          <NavLink to="/settings" className="menu-small" onClick={() => close()}>Integrations</NavLink>
-          <p className="navbar-tagline">The AI reads. Rules decide. You approve.</p>
-          {DEMO_MODE && <p className="navbar-demo">Demo mode · simulated data</p>}
+          <p className="menu-group" id="menu-pages">More</p>
+          <ul className="menu-list" aria-labelledby="menu-pages">
+            {PAGES.map(({ to, label, hint, icon: Icon }) => (
+              <li key={to}>
+                <NavLink to={to} onClick={() => close()} className="menu-link"><Icon size={17} aria-hidden="true" /><span>{label}<small>{hint}</small></span></NavLink>
+              </li>
+            ))}
+          </ul>
+
+          <div className="menu-foot">
+            <NavLink to="/settings" className="menu-small" onClick={() => close()}>Integrations</NavLink>
+            <p className="navbar-tagline">The AI reads. Rules decide. You approve.</p>
+            {DEMO_MODE && <p className="navbar-demo">Demo mode · simulated data</p>}
+          </div>
         </div>
       </div>
     </nav>
+  );
+}
+
+// ---------- Footer ----------
+// The closing glass panel from the design: a call to action, two short link columns, and the wordmark with the copyright line.
+export function Footer() {
+  return (
+    <footer className="site-footer">
+      <div className="sf-panel">
+        <div className="sf-top">
+          <div className="sf-cta">
+            <p className="chip"><i aria-hidden="true" />Order management for chat-first businesses</p>
+            <h2 className="sf-title"><span>Make every order</span> <em>effortless.</em></h2>
+            <div className="sf-actions">
+              <Link to="/orders" className="btn btn-primary">Open your orders <ArrowUpRight size={15} aria-hidden="true" /></Link>
+              <Link to="/whatif" className="btn">Try a what-if <ArrowUpRight size={15} aria-hidden="true" /></Link>
+            </div>
+          </div>
+          <div className="sf-cols">
+            <nav aria-label="Product">
+              <p className="eyebrow">Product</p>
+              <ul><li><Link to="/orders">Orders</Link></li><li><Link to="/plan">Plan</Link></li><li><Link to="/insights">Insights</Link></li><li><Link to="/whatif">What-if</Link></li></ul>
+            </nav>
+            <nav aria-label="Explore">
+              <p className="eyebrow">Explore</p>
+              <ul><li><Link to="/">Home</Link></li><li><Link to="/inbox">Messages</Link></li><li><Link to="/settings">Integrations</Link></li></ul>
+            </nav>
+          </div>
+        </div>
+        <div className="sf-bottom">
+          <Link to="/" className="wordmark"><Hexagon size={18} aria-hidden="true" /><span>conversa</span></Link>
+          <p className="sf-legal">© {new Date().getFullYear()} Conversa · Orders, planned realistically.</p>
+        </div>
+      </div>
+    </footer>
   );
 }
 
