@@ -48,7 +48,8 @@ const qs = (params = {}) => {
 
 export const getDashboard = () => request('GET', '/dashboard');
 export const getBoard = (dataset) => request('GET', `/board${qs({ dataset })}`);
-export const getInsights = (range, dataset) => request('GET', `/analytics/summary${qs({ range, dataset })}`);
+// range: 7 | 30 | 90, or { from, to } (YYYY-MM-DD) for a custom period.
+export const getInsights = (range, dataset) => request('GET', `/analytics/summary${qs(typeof range === 'object' && range ? { from: range.from, to: range.to, dataset } : { range, dataset })}`);
 export const getMonthlyAnalytics = (month, dataset) => request('GET', `/analytics/monthly${qs({ month, dataset })}`);
 
 export const listOrders = (params) => request('GET', `/orders${qs(params)}`);

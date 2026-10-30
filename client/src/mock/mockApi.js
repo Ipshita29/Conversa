@@ -108,10 +108,20 @@ export async function handleMockRequest(method, path, body = {}) {
   }
 
   if (method === 'GET' && p === '/analytics/summary') {
-    const { buildSummary, RANGES } = await import('../../../server/services/insightsService.js');
+    const { buildSummary, checkCustomRange, RANGES } = await import('../../../server/services/insightsService.js');
+    const { zonedParts } = await import('../../../server/utils/timezone.js');
+    const settings = demoSettings(); const now = new Date();
+    const dataset = q.get('dataset') || 'all';
+    if (!['all', 'real', 'demo'].includes(dataset)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'dataset', message: 'Must be real, demo or all.' }]);
+    const from = q.get('from'); const to = q.get('to');
+    if (from !== null || to !== null) {
+      const { details } = checkCustomRange(from, to, zonedParts(now, settings.timezone));
+      if (details.length) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', details);
+      return clone(buildSummary({ orders, settings, from, to, now, dataset }));
+    }
     const days = q.get('range') === null ? 7 : Number(q.get('range'));
-    if (!RANGES.includes(days)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'range', message: 'Must be 7 or 30.' }]);
-    return clone(buildSummary({ orders, settings: demoSettings(), days, now: new Date(), dataset: q.get('dataset') || 'all' }));
+    if (!RANGES.includes(days)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'range', message: `Must be one of ${RANGES.join(', ')}.` }]);
+    return clone(buildSummary({ orders, settings, days, now, dataset }));
   }
 
   if (method === 'GET' && p === '/analytics/monthly') {
@@ -166,7 +176,8 @@ export async function handleMockRequest(method, path, body = {}) {
       if (['completed', 'cancelled'].includes(orders[idx].status) && body.status && body.status !== orders[idx].status) {
         throw new ApiError(409, 'CONFLICT', `Cannot change a ${orders[idx].status} order to '${body.status}'.`);
       }
-      orders[idx] = { ...orders[idx], ...body, updatedAt: new Date().toISOString() };
+      const completing = body.status === 'completed' && orders[idx].status !== 'completed';
+      orders[idx] = { ...orders[idx], ...body, ...(completing ? { completedAt: new Date().toISOString() } : {}), updatedAt: new Date().toISOString() }; // like the server: completion time is recorded by the system
       return clone(withRisk()[idx]);
     }
   }
