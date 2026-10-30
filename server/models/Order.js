@@ -21,6 +21,7 @@ const orderSchema = new mongoose.Schema({
   prepTimeMinutes: { type: Number, default: null, min: 0 },
   price: { type: Number, default: null, min: 0 }, // the agreed total for the whole order (not per unit); null = not priced yet
   deadline: { type: Date, default: null },
+  completedAt: { type: Date, default: null }, // when the order was moved to Completed (set by the server; null = unknown, e.g. completed before this was recorded)
   status: { type: String, enum: ORDER_STATUSES, default: 'pending' },
   paymentStatus: { type: String, enum: PAYMENT_STATUSES, default: 'unverified' },
   paymentEvidence: { type: [evidenceSchema], default: [] },

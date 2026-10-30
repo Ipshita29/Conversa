@@ -270,3 +270,22 @@ test('planner returns next moves and a suggested scenario; simulate validates pr
   await call('GET', '/planner?days=7');
   assert.equal(JSON.stringify((await call('GET', '/orders?pageSize=100')).json), before);
 });
+
+test('completedAt is recorded by the server when an order moves to Completed, and clients cannot write it', { skip }, async () => {
+  const c = await call('POST', '/orders', { customerName: 'Done Test', item: 'Cake', deadline: future(48), status: 'in_progress' });
+  assert.equal(c.status, 201); assert.equal(c.json.completedAt ?? null, null);
+  const bad = await call('PATCH', `/orders/${c.json.id}`, { completedAt: new Date().toISOString() });
+  assert.equal(bad.status, 422); assert.equal(bad.json.error.details[0].field, 'completedAt');
+  assert.equal((await call('POST', '/orders', { customerName: 'X', item: 'Y', completedAt: new Date().toISOString() })).status, 422);
+  const done = await call('PATCH', `/orders/${c.json.id}`, { status: 'completed' });
+  assert.equal(done.status, 200); assert.ok(Math.abs(Date.now() - Date.parse(done.json.completedAt)) < 10000);
+  const again = await call('PATCH', `/orders/${c.json.id}`, { notes: 'after delivery' });
+  assert.equal(again.json.completedAt, done.json.completedAt); // later edits never move it
+  const r = await call('GET', '/analytics/summary?range=90');
+  assert.equal(r.status, 200); assert.equal(r.json.trend.length, 90); assert.ok(r.json.status && r.json.timing);
+  assert.equal((await call('GET', '/analytics/summary?range=14')).status, 400);
+  const custom = await call('GET', `/analytics/summary?from=2026-01-01&to=2026-01-31`);
+  assert.equal(custom.status, 200); assert.equal(custom.json.range.days, 31);
+  assert.equal((await call('GET', '/analytics/summary?from=2026-02-01&to=2026-01-01')).status, 400);
+  assert.equal((await call('GET', '/analytics/summary?from=2026-01-01')).status, 400);
+});

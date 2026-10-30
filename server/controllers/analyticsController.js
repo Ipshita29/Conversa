@@ -3,7 +3,7 @@ import { asyncHandler, badQuery } from '../utils/errors.js';
 import { getSettings } from '../services/settingsService.js';
 import { buildMonthly, isMonth, DATASETS } from '../services/analyticsService.js';
 import { buildBoard } from '../services/boardService.js';
-import { buildSummary, RANGES } from '../services/insightsService.js';
+import { buildSummary, checkCustomRange, RANGES } from '../services/insightsService.js';
 import { zonedParts } from '../utils/timezone.js';
 
 export const getMonthly = asyncHandler(async (req, res) => {
@@ -18,15 +18,21 @@ export const getMonthly = asyncHandler(async (req, res) => {
   res.json(buildMonthly({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, month, now, dataset }));
 });
 
-// GET /api/analytics/summary?range=7|30&dataset=all|real|demo : the Insights dashboard.
+// GET /api/analytics/summary?range=7|30|90&dataset=all|real|demo, or ?from=YYYY-MM-DD&to=YYYY-MM-DD for a custom period: the Insights dashboard.
 export const getSummary = asyncHandler(async (req, res) => {
-  const days = req.query.range === undefined ? 7 : Number(req.query.range);
-  if (!RANGES.includes(days)) throw badQuery([{ field: 'range', message: 'Must be 7 or 30.' }]);
+  const settings = await getSettings();
+  const now = new Date();
   const dataset = req.query.dataset ?? 'all';
   if (!DATASETS.includes(dataset)) throw badQuery([{ field: 'dataset', message: 'Must be real, demo or all.' }]);
-  const settings = await getSettings();
+  let days = req.query.range === undefined ? 7 : Number(req.query.range);
+  let custom;
+  if (req.query.from !== undefined || req.query.to !== undefined) {
+    const r = checkCustomRange(req.query.from, req.query.to, zonedParts(now, settings.timezone));
+    if (r.details.length) throw badQuery(r.details);
+    custom = { from: req.query.from, to: req.query.to };
+  } else if (!RANGES.includes(days)) throw badQuery([{ field: 'range', message: `Must be one of ${RANGES.join(', ')}.` }]);
   const orders = await Order.find().limit(5000).lean();
-  res.json(buildSummary({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, days, now: new Date(), dataset }));
+  res.json(buildSummary({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, days, ...custom, now, dataset }));
 });
 
 // GET /api/board?dataset=all|real|demo : the Production board (overdue / on track / upcoming).

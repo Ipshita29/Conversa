@@ -70,6 +70,7 @@ export const update = asyncHandler(async (req, res) => {
   if (TERMINAL.includes(order.status) && value.status && value.status !== order.status) {
     throw new ApiError(409, 'CONFLICT', `Cannot change a ${order.status} order to '${value.status}'.`);
   }
+  if (value.status === 'completed' && order.status !== 'completed') order.completedAt = new Date(); // the moment it was delivered: what on-time delivery is measured from
   order.set(value);
   await order.save();
   res.json(withRisk(order, await riskMap(await getSettings())));
