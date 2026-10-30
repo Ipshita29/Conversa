@@ -20,7 +20,8 @@ const withRisk = () => {
 const notFound = (id) => new ApiError(404, 'NOT_FOUND', `Order '${id}' not found.`);
 const invalid = (details) => new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed.', details);
 
-const CREATABLE = ['customerName', 'source', 'item', 'quantity', 'price', 'prepTimeMinutes', 'deadline', 'status', 'paymentStatus'];
+const PATCHABLE = ['customerName', 'source', 'item', 'quantity', 'price', 'prepTimeMinutes', 'deadline', 'status', 'paymentStatus'];
+const CREATABLE = [...PATCHABLE, 'createdAt']; // the placed date/time can be set once, on create
 function rejectUnknown(body, allowed) {
   return Object.keys(body).filter((k) => !allowed.includes(k)).map((k) => ({ field: k, message: 'Unknown or read-only field.' }));
 }
@@ -146,7 +147,7 @@ export async function handleMockRequest(method, path, body = {}) {
     const now = new Date().toISOString();
     const order = {
       source: 'manual', quantity: 1, prepTimeMinutes: null, deadline: null, status: 'pending', paymentStatus: 'unverified',
-      ...body, id: `ord_${1000 + orders.length + 1 + Math.floor(Math.random() * 900)}`, createdAt: now, updatedAt: now,
+      ...body, id: `ord_${1000 + orders.length + 1 + Math.floor(Math.random() * 900)}`, createdAt: body.createdAt ?? now, updatedAt: now,
     };
     orders.push(order);
     return clone(withRisk().find((o) => o.id === order.id));
@@ -158,7 +159,7 @@ export async function handleMockRequest(method, path, body = {}) {
     if (idx < 0) throw notFound(id);
     if (method === 'GET') return clone(withRisk()[idx]);
     if (method === 'PATCH') {
-      const details = [...rejectUnknown(body, CREATABLE), ...validateOrder(body, { partial: true })];
+      const details = [...rejectUnknown(body, PATCHABLE), ...validateOrder(body, { partial: true })];
       if (details.length) throw invalid(details);
       if (['completed', 'cancelled'].includes(orders[idx].status) && body.status && body.status !== orders[idx].status) {
         throw new ApiError(409, 'CONFLICT', `Cannot change a ${orders[idx].status} order to '${body.status}'.`);
