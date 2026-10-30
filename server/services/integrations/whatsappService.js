@@ -51,11 +51,29 @@ export function parseWebhook(body) {
         if (!m?.id || !m?.from) continue;
         out.push({
           channel: CHANNEL, externalId: String(m.id), contactId: String(m.from), contactName: names[m.from] ?? null,
-          messageType: m.type ?? 'unknown', text: m.type === 'text' ? m.text?.body ?? null : null,
+          messageType: m.type ?? 'unknown', text: m.type === 'text' ? m.text?.body ?? null : m.type === 'image' ? m.image?.caption ?? null : null,
+          ...(m.type === 'image' && m.image?.id ? { mediaId: String(m.image.id) } : {}),
           receivedAt: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(),
         });
       }
     }
   }
   return out;
+}
+
+// Downloads an image a customer sent (WhatsApp Cloud API: media id -> short-lived URL -> bytes). Needs WHATSAPP_ACCESS_TOKEN. Returns
+// a Buffer, or null on any problem: the message is still kept, just without its picture. The token is only ever sent to Meta.
+export async function downloadMedia(mediaId, { fetchImpl = fetch, timeoutMs = 10000, maxBytes = 5 * 1024 * 1024 } = {}, cfg = config) {
+  const token = cfg.meta.whatsapp.accessToken;
+  if (!token || !/^[A-Za-z0-9_-]{4,64}$/.test(mediaId)) return null;
+  const meta = await graphGet(`${graphBase()}/${encodeURIComponent(mediaId)}`, token, { fetchImpl, timeoutMs });
+  const url = meta.ok ? meta.body?.url : null;
+  if (typeof url !== 'string' || !/^https:\/\/[a-z0-9.-]*(facebook|fbcdn|fbsbx|whatsapp)\.(com|net)\//i.test(url)) return null; // only ever fetch from Meta's own hosts
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length > 0 && buf.length <= maxBytes ? buf : null;
+  } catch { return null; } finally { clearTimeout(timer); }
 }

@@ -9,6 +9,9 @@ const messageSchema = new mongoose.Schema({
   text: { type: String, default: null },
   messageType: { type: String, default: 'text' },
   receivedAt: { type: Date, default: Date.now },
+  // An image the customer sent (e.g. a payment screenshot), kept on disk like payment proofs. paymentId = the record filed from it.
+  attachment: { type: { file: String, contentType: String, size: Number, sha256: String }, default: null, _id: false },
+  paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
   readAt: { type: Date, default: null }, // null = unread
   isDemo: { type: Boolean, default: false },
 }, { timestamps: true });
