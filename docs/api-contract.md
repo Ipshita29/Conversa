@@ -53,8 +53,8 @@ Clients must show API failures as errors. They must never silently substitute mo
 | `prepTimeMinutes` | integer \| null | no | no | `>= 0` when set. `null` = not yet estimated. |
 | `deadline` | string \| null | no | no | ISO 8601 or `null`. |
 | `status` | enum | no (default `pending`) | no | `pending` \| `confirmed` \| `in_progress` \| `completed` \| `cancelled` |
-| `paymentStatus` | enum | no (default `unverified`) | no | `unverified` \| `pending` \| `verified` \| `rejected` |
-| `createdAt` | string | no | **yes** | ISO 8601. |
+| `paymentStatus` | enum | no (default `unverified`) | no | `unverified` \| `pending` \| `partial` \| `verified` \| `rejected` |
+| `createdAt` | string | no | **yes** (after create) | ISO 8601 with timezone. May be sent on create to record when the order was placed (not in the future); rejected on update. |
 | `updatedAt` | string | no | **yes** | ISO 8601. |
 | `risk` | enum \| null | no | **yes (computed)** | `low` \| `medium` \| `high`; `null` if it cannot be computed (e.g. no deadline or prep time). Read-only; ignored if sent. |
 
@@ -423,16 +423,19 @@ Rules: **read-only** — no order, task or schedule is persisted; a repeat call 
 
 ## 7a. Insights dashboard
 
-### `GET /api/analytics/summary?range=7|30&dataset=all|real|demo`
+### `GET /api/analytics/summary?range=7|30|90&dataset=all|real|demo` (or `?from=YYYY-MM-DD&to=YYYY-MM-DD`)
 
 Powers the Insights page. Implemented in `server/services/insightsService.js` (pure: orders, settings, days, now). Orders belong to the period by the day they were **received** (`createdAt`, business timezone, today included); cancelled orders are excluded everywhere; each order is counted once.
 
-Returns `kpis` (`totalRevenue`, `totalOrders`, `completedOrders`, `averageOrderValue`), `trend` (one `{ date, orders, revenue }` per day), `topProducts` (top 3 by units: `product`, `units`, `orders`, `revenue`), `insights` (up to 3, each with `title`, `finding`, `action`, `link`), `datasets` and `basis`.
+Returns `kpis` (`totalRevenue`, `totalOrders`, `completedOrders`, `averageOrderValue`, `onTimeRate`), `trend` (one `{ date, orders, revenue, completed, delivered, onTime }` per day), `products` (top 8, each `product`, `units`, `orders`, `revenue`; `revenue` is `null` when no order of that product has a price), `topProducts` (top 3 by units), `status` (`{ total, completed, pending, cancelled, atRisk }`: mutually exclusive, cancelled included, sums to `total`), `timing` (`{ delivered, onTime, delayed }`), `insights` (up to 3, each with `title`, `finding`, `action`, `link`), `datasets` and `basis`.
 
 - **Revenue** is booked sales: the sum of the optional order field `price` (the agreed total for the whole order, `number >= 0` or `null`). Unpriced orders are left out and counted separately; with no priced order, revenue and average order value are `{ available: false, reason }`.
 - **Comparison** with the previous period of the same length is returned only when that period has at least 3 orders (3 priced orders for money figures); otherwise `comparison: { available: false, reason }`.
 - **Insights** are produced only from supporting data: scheduler overload (`computePlan`), a clear busiest ordering weekday (5+ orders), a clear best seller, and unpriced orders.
-- Errors: `400 VALIDATION_ERROR` for a `range` other than 7 or 30, or an unknown `dataset`.
+- **On-time delivery** is measured only from orders really delivered: status `completed`, with `completedAt` (set by the server when an order is moved to Completed; read-only; `null` for orders completed before it existed) and a `deadline`, placed in the period by completion day. Open orders are never late deliveries. `kpis.onTimeRate` is the real share of those delivered orders that were on time, available from the first one; with none it is `{ available: false, delivered: 0 }`, and the dashboard then hides the on-time KPI and the Order timing card entirely. Its comparison needs at least 3 delivered orders in the previous period.
+- **At risk** = an open order the scheduler (`computePlan`) rates medium or high risk; **Pending** = the other open orders.
+- A custom period (`from`, `to`, business-timezone dates, not in the future, at most 366 days) replaces `range`; the previous period for comparisons is always the same length just before it.
+- Errors: `400 VALIDATION_ERROR` for a `range` other than 7, 30 or 90, an invalid or one-sided custom period, or an unknown `dataset`.
 
 ## 7b. Monthly analytics
 
@@ -551,3 +554,34 @@ Open questions:
 - Additive, optional response fields are preferred over breaking changes. Breaking changes must be announced before they are merged.
 - When a draft section is implemented and tested, change its label from **Draft** to the verified state and note what was tested.
 - Frontend mock data in `client/src/mock/` must mirror the schemas here.
+
+## Payments (added)
+
+Payment records live in their own collection (`Payment`), many per order. Only **confirmed** records count as money received; a chat message, a screenshot or a COD promise is a *claim* (`pending`) until the owner confirms it. Confirmation is manual: nothing is verified with a bank or UPI provider. Recording or confirming a payment updates `Order.paymentStatus` (derived from the records) and never touches `Order.status`. There is no authentication in this app yet, so these routes are as open as `/api/orders`.
+
+**Record.** `id`, `orderId`, `kind` (`payment` \| `refund`), `refundOf`, `amount`, `method` (`upi` \| `bank_transfer` \| `cash` \| `cod` \| `other`), `status` (`pending` \| `confirmed` \| `rejected`), `transactionId`, `paidAt`, `source` (`manual` \| `chat_text` \| `chat_screenshot`), `notes`, `conversationId`, `proof` (`{url, contentType, size}`), `extraction` (`{method, confidence, needsReview, issues[], recipient}`), `review` (`{by, at, note, confirmedAmount, mode}`), `history[]`, `isDemo`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/payments` | Ledger: `{ kpis, rows[] }`, one row per order with `total, paid, balance, pending, codDue, refunded, status` (`paid` \| `partial` \| `due` \| `cod` \| `verification_pending`) and its `payments[]`. KPIs are computed from the records. |
+| POST | `/payments` | Record a payment. Starts `pending`; `confirmed: true` + `reviewer` records money the owner already checked. `409 DUPLICATE_TRANSACTION` if the transaction ID exists on a non-rejected record; `422 EXCEEDS_BALANCE` if a confirmed amount is above the balance. |
+| GET | `/payments/:id` | One payment, its order and the order's summary. |
+| POST | `/payments/:id/confirm` | `{ reviewer, acknowledged: true, amount?, transactionId?, noReference? }`. Stores reviewer and time. |
+| POST | `/payments/:id/reject` | `{ mode: reject \| needs_review, reviewer, note }`. `reject` frees the transaction ID. |
+| POST | `/payments/:id/refund` | `{ amount, reviewer, reason }` on a confirmed payment. Adds a separate confirmed `refund` record; the original is never edited. |
+| POST / GET | `/payments/:id/proof` | Upload (raw body, `image/png` \| `jpeg` \| `webp`, max 5 MB, type checked from the bytes) / view the stored screenshot. Served only here, with a fixed content type and `nosniff`. |
+| POST | `/payments/extract` | `{ message, orderId \| conversationId, messageId? }`. Reads a chat message (rules, no model) and files a `pending` record, or returns `{ payment: null, reason }`. |
+| POST | `/payments/read-image` | Raw image body. THE shared reading service (Inbox, the Payments modal and the browser demo all use it). Returns `{ extraction: { amount, transactionId, paymentDate, paymentMethod, recipientDetails, extractionConfidence, warnings, model }, proofHash, duplicate }`; `duplicate` is the pending/confirmed payment already filed from this exact image, if any. Saves and stores nothing. `422 EXTRACTION_FAILED` for an unclear or non-payment image (the client then offers manual entry). |
+| POST | `/payments/extract-image?orderId=&conversationId=` | Raw image body. Read by a Groq vision model (`GROQ_VISION_MODEL`), stored, filed as `pending` with confidence capped at 0.9. `503 AI_UNAVAILABLE` without `GROQ_API_KEY`; `422 EXTRACTION_FAILED` if no amount can be read (nothing is saved or stored). |
+
+`POST /payments` also accepts an optional `extraction` object (`{ extractionConfidence, warnings, recipientDetails, model, edited }`) for a payment typed in after the owner reviewed a screenshot reading. It is trimmed (confidence capped at 0.9, always `needsReview`), saved with `source: screenshot_upload`, and can never change a status or amount. Attaching or filing the same image twice, from any entry point, is `409 DUPLICATE_SCREENSHOT` (images are compared by SHA-256; a rejected record frees its image).
+
+**Pictures in a conversation.** A message may carry an `attachment` (`{url, contentType}`) and the `payment` filed from it (`{id, status, amount}`).
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/conversations/:id/attachments` | Raw image body: the owner saves a screenshot the customer sent into the chat (an inbound image message). WhatsApp images are downloaded from Meta automatically when `WHATSAPP_ACCESS_TOKEN` is set. |
+| GET | `/conversations/:id/messages/:mid/attachment` | The picture, with a fixed content type and `nosniff`. |
+| POST | `/conversations/:id/messages/:mid/extract-payment` | Reads the picture (same service as `read-image`) and files a `pending` payment on the chat's order. Asking again returns the existing payment (`200`, `existing: true`), never a second record. `409` if the chat has no linked order. |
+
+Payment-looking text arriving by webhook in a chat already linked to an order is filed as a `pending` record automatically.
