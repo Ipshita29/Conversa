@@ -18,10 +18,10 @@ const MOVED = { inbox: '/inbox', deadlines: '/plan', next: '/plan', simulation: 
 
 // What the Smart Promise Engine looks at before a deadline is accepted. Each card opens the part of the app where it lives.
 const CHECKS = [
-  { label: 'Prep time', value: 'Counted', caption: 'The time the work really takes', to: '/orders' },
-  { label: 'Capacity', value: 'Checked', caption: 'What is already on the plan', to: '/plan' },
-  { label: 'Payment', value: 'Considered', caption: 'Confirmation and payment status', to: '/orders' },
-  { label: 'Deadline', value: 'Realistic', caption: 'The earliest date you can keep', to: '/whatif' },
+  { label: 'Order intake', value: 'Captured', caption: 'Customer messages become structured orders.', to: '/orders' },
+  { label: 'Production', value: 'Scheduled', caption: 'Prep time and available capacity are checked.', to: '/plan' },
+  { label: 'Payments', value: 'Tracked', caption: 'Payments and pending balances stay organized.', to: '/orders' },
+  { label: 'Deadlines', value: 'Protected', caption: 'At-risk orders are flagged before deadlines are missed.', to: '/whatif' },
 ];
 
 const plural = (n, one, many) => (n === 1 ? one : many);
@@ -46,7 +46,8 @@ export default function Dashboard() {
   if (moved) return <Navigate to={moved} replace />;
 
   const sum = data ? summarise({ planner: data.planner, orders: data.orders }) : null;
-  const live = sum ? `${sum.open.length} open ${plural(sum.open.length, 'order', 'orders')} · ${sum.attention} ${plural(sum.attention, 'needs', 'need')} attention` : 'Checked before you commit';
+  const demoCount = data ? data.orders.filter(isDemoOrder).length : 0; // sample orders are called what they are; real ones are just open orders
+  const live = sum ? `${demoCount > 0 ? `${demoCount} demo` : `${sum.open.length} open`} ${plural(demoCount > 0 ? demoCount : sum.open.length, 'order', 'orders')} · ${sum.attention} ${plural(sum.attention, 'needs', 'need')} attention` : 'Checked before you commit';
 
   return (
     <section className="page home" ref={pageRef}>
@@ -59,9 +60,9 @@ export default function Dashboard() {
         <div className="fx-bento">
           <article className="fx-card fx-feature" style={{ '--i': 0 }}>
             <Glow />
-            <p className="chip chip--flat"><i aria-hidden="true" />01 · Smart Promise Engine</p>
-            <h2 className="fx-h"><span className="fx-sans">Promise what</span><em className="fx-serif is-caramel">you can keep.</em></h2>
-            <p className="fx-lead">Before you accept an order, Conversa calculates a realistic delivery commitment from preparation time, capacity and payment status.</p>
+            <p className="chip chip--flat"><i aria-hidden="true" />01 · THE CONVERSA SYSTEM</p>
+            <h2 className="fx-h"><span className="fx-sans">From customer messages to</span><em className="fx-serif is-caramel">orders in control.</em></h2>
+            <p className="fx-lead">Conversa turns WhatsApp and Instagram orders into organized work — helping small businesses plan production, track payments and stay ahead of deadlines.</p>
             <span className="fx-spacer" />
             <p className="fx-micro">{live}</p>
           </article>
