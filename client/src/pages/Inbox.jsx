@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check } from 'lucide-react';
-import { getConversations, getIntegrations, listOrders, updateConversation, DEMO_MODE } from '../services/api.js';
+import { attachmentSrc, extractMessagePayment, extractPaymentText, getConversations, getIntegrations, getPayments, listOrders, updateConversation, uploadConversationImage, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { CHANNEL_LABEL, STATUS_LABEL } from '../utils/format.js';
-import { Drawer, StateMessage, StatusBadge } from '../components/UI.jsx';
+import { Drawer, Modal, StateMessage, StatusBadge } from '../components/UI.jsx';
+import { STATUS as PAY_STATUS, StatusPill } from '../components/Payments.jsx';
 import { DraftOrder } from '../components/Orders.jsx';
+import { parsePaymentText } from '../../../server/services/paymentExtraction.js';
+import { formatMoney } from '../utils/format.js';
 import '../css/Inbox.css';
 
 const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp'], ['instagram', 'Instagram']];
@@ -50,6 +53,8 @@ export default function Inbox() {
   const conv = useAsync(getConversations);
   const integrations = useAsync(getIntegrations);
   const ordersQ = useAsync(() => listOrders({ pageSize: 100 }));
+  const paymentsQ = useAsync(getPayments); // the linked order's payment status, shown in the chat
+  const [viewer, setViewer] = useState(null); // a picture opened full size
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [params] = useSearchParams();
@@ -59,6 +64,9 @@ export default function Inbox() {
   const [createdFor, setCreatedFor] = useState(null);
   const [paste, setPaste] = useState(false);
   const [markError, setMarkError] = useState(null);
+  const [payNote, setPayNote] = useState(null); // result of reading a message or screenshot as a payment: { convId, ok, text }
+  const [payBusy, setPayBusy] = useState(null);
+  const shotRef = useRef(null);
   const scrollRef = useRef(null);
   const stick = useRef(true); // true while the reader is at (or near) the bottom, so new messages may scroll into view
 
@@ -73,7 +81,37 @@ export default function Inbox() {
   const linked = selected?.orderId ? orderOf(selected.orderId) : null;
   const channelInfo = (integrations.data?.items ?? []).find((i) => i.channel === selected?.channel);
 
-  useEffect(() => { setDrafting(false); }, [selected?.id]);
+  useEffect(() => { setDrafting(false); setPayNote(null); }, [selected?.id]);
+
+  // A customer's payment message or screenshot is filed as "Verification pending" on the linked order. It is a claim, never proof.
+  async function readAsPayment(m) {
+    setPayBusy(m.id); setPayNote(null);
+    try {
+      const r = await extractPaymentText({ message: m.text, orderId: selected.orderId, conversationId: selected.id, messageId: m.id });
+      setPayNote(r.payment ? { convId: selected.id, ok: true, text: `Added to Payments as Verification pending: ${formatMoney(r.payment.amount)}. It is not counted as received until you confirm it.`, orderId: selected.orderId }
+        : { convId: selected.id, ok: false, text: r.reason, orderId: selected.orderId, fallback: true });
+    } catch (e) { setPayNote({ convId: selected.id, ok: false, text: e.message, orderId: selected.orderId, fallback: e.status !== 409 }); } finally { setPayBusy(null); }
+  }
+  // 1. Save the screenshot the customer sent into this chat, so it can be seen alongside their messages.
+  async function addScreenshot(e) {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file || !selected) return;
+    setPayBusy('shot'); setPayNote(null);
+    try {
+      await uploadConversationImage(selected.id, file);
+      conv.reload();
+      setPayNote({ convId: selected.id, ok: true, text: 'Screenshot added to the chat. Use “Extract payment details” under it to read it. Nothing is saved as a payment until you do.', orderId: selected.orderId, plain: true });
+    } catch (er) { setPayNote({ convId: selected.id, ok: false, text: er.message, orderId: selected.orderId }); } finally { setPayBusy(null); }
+  }
+  // 2. Read it (server-side Groq vision) and file it as Verification pending on the chat's order. Asking twice returns the same record.
+  async function readPicture(m) {
+    setPayBusy(m.id); setPayNote(null);
+    try {
+      const r = await extractMessagePayment(selected.id, m);
+      conv.reload(); paymentsQ.reload();
+      setPayNote({ convId: selected.id, ok: true, text: r.existing ? 'This screenshot was already read. Its payment is below.' : `Read from the screenshot: ${formatMoney(r.payment.amount)}${r.payment.transactionId ? `, reference ${r.payment.transactionId}` : ''}. Filed as Verification pending. It is not counted as received until you confirm it.`, orderId: selected.orderId });
+    } catch (er) { setPayNote({ convId: selected.id, ok: false, text: er.message, orderId: selected.orderId, fallback: er.status !== 409 }); } finally { setPayBusy(null); }
+  }
 
   // Opening a conversation jumps to its latest message. Afterwards, only follow new messages if the reader is already at the bottom.
   useLayoutEffect(() => { const el = scrollRef.current; if (el) { el.scrollTop = el.scrollHeight; stick.current = true; } }, [selected?.id]);
@@ -157,6 +195,10 @@ export default function Inbox() {
                 <div className="im-chat-actions">
                   {linked ? <Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}><ExternalLink size={14} aria-hidden="true" /> Open order</Link>
                     : !selected.orderId && <button type="button" className="btn btn-sm btn-primary" onClick={() => setDrafting(true)} disabled={drafting}><Sparkles size={14} aria-hidden="true" /> Extract order</button>}
+                  {selected && <>
+                    <input ref={shotRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={addScreenshot} />
+                    <button type="button" className="btn btn-sm" onClick={() => shotRef.current?.click()} disabled={payBusy === 'shot'} title="Save a screenshot the customer sent into this chat"><Camera size={14} aria-hidden="true" /> {payBusy === 'shot' ? 'Adding…' : 'Add screenshot'}</button>
+                  </>}
                 </div>
               </header>
 
@@ -169,17 +211,29 @@ export default function Inbox() {
                       const mine = m.from && m.from !== 'customer';
                       return (
                         <div key={m.id} className={`im-msg ${mine ? 'is-mine' : 'is-theirs'}`}>
-                          <div className="im-bubble"><p>{m.text}</p><span className="im-time"><time dateTime={m.at}>{timeOf(m.at)}</time></span></div>
-                          <CopyButton text={m.text ?? ''} />
+                          <div className="im-bubble">{m.attachment && <button type="button" className="im-img" onClick={() => setViewer(attachmentSrc(m.attachment))} aria-label="View the picture full size"><img src={attachmentSrc(m.attachment)} alt="Picture sent in this chat" loading="lazy" /></button>}{m.text && <p>{m.text}</p>}<span className="im-time"><time dateTime={m.at}>{timeOf(m.at)}</time></span>
+                            {m.attachment && (m.payment
+                              ? <span className="im-pay"><b>Payment {formatMoney(m.payment.amount)} · {m.payment.status === 'confirmed' ? 'Confirmed' : m.payment.status === 'rejected' ? 'Rejected' : 'Verification pending'}</b><Link className="im-link" to={`/payments?order=${selected.orderId}`}>Review in Payments</Link></span>
+                              : <span className="im-pay"><b>May be a payment proof</b>{selected.orderId ? <button type="button" className="im-link" onClick={() => readPicture(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Reading…' : 'Extract payment details'}</button> : <small>Link an order to read it</small>}</span>)}
+                            {!mine && m.text && (() => { const x = parsePaymentText(m.text); return x.isPayment ? (
+                              <span className="im-pay"><b>Looks like a payment{x.amount ? ` · ${formatMoney(x.amount)}` : ''}</b>
+                                {selected.orderId ? <button type="button" className="im-link" onClick={() => readAsPayment(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Reading…' : 'Read as payment'}</button> : <small>Link an order to file it</small>}</span>) : null; })()}
+                          </div>
+                          {m.text && <CopyButton text={m.text} />}
                         </div>
                       );
                     })}
                   </div>
                 ))}
 
+                {payNote?.convId === selected.id && (
+                  <div className={`notice ${payNote.ok ? 'ok' : 'info'}`} role="status">{payNote.text}{' '}
+                    {payNote.ok ? (!payNote.plain && <Link to={`/payments?order=${payNote.orderId}`}>Review in Payments</Link>) : payNote.fallback && <Link to={`/payments?record=${payNote.orderId}`}>Record it by hand</Link>}</div>
+                )}
                 {createdFor?.convId === selected.id && <div className="notice ok" role="status">Order created for {createdFor.customerName} and linked to this chat.</div>}
                 {linked && (
-                  <div className="im-linked"><div><p className="eyebrow">Linked order</p><strong>{linked.item}</strong> <StatusBadge status={linked.status} /></div><Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}>Open order</Link></div>
+                  <div className="im-linked"><div><p className="eyebrow">Linked order</p><strong>{linked.item}</strong> <StatusBadge status={linked.status} /></div><Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}>Open order</Link>
+                    {(() => { const r = paymentsQ.data?.rows.find((x) => x.orderId === linked.id); return r ? <p className="im-linked-pay"><StatusPill status={r.status} /> {r.balance !== null && <span>Paid {formatMoney(r.paid)} of {formatMoney(r.total)}</span>} <Link to={`/payments?order=${linked.id}`}>Payments</Link></p> : null; })()}</div>
                 )}
                 {!linked && selected.orderId && <p className="muted im-note">This chat is linked to an order that could not be loaded.</p>}
                 {!selected.orderId && drafting && (
@@ -203,6 +257,8 @@ export default function Inbox() {
           )}
         </section>
       </div>
+
+      {viewer && <Modal title="Picture from the chat" onClose={() => setViewer(null)}><div className="pm-proof-big"><img src={viewer} alt="Picture sent in this chat" /></div><p className="pm-fine">A screenshot does not prove the money reached your account.</p></Modal>}
 
       {paste && (
         <Drawer title="Draft an order from a message" onClose={() => setPaste(false)}>

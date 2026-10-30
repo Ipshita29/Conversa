@@ -162,3 +162,8 @@
   .ib.is-detail .ib-detail { display: block; }
   .ib-back { display: inline-flex; }
 }
+
+/* Payment-looking messages */
+.im-pay { display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem 0.7rem; margin-top: 0.45rem; padding-top: 0.4rem; border-top: 1px dashed rgba(98, 88, 79, 0.25); font-size: 0.78rem; } .im-pay b { font-weight: 600; color: var(--caramel-ink); } .im-pay small { color: var(--muted); }
+.im-img { display: block; margin: 0 0 0.4rem; padding: 0; border: 0; border-radius: 12px; overflow: hidden; background: transparent; cursor: zoom-in; } .im-img img { display: block; max-width: 220px; max-height: 260px; border-radius: 12px; }
+.im-linked-pay { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; width: 100%; margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--muted); }
