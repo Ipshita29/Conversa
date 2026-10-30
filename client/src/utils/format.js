@@ -1,5 +1,5 @@
 export const STATUS_LABEL = { pending: 'Pending', confirmed: 'Confirmed', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled' };
-export const PAYMENT_LABEL = { unverified: 'Unverified', pending: 'Payment pending', verified: 'Verified', rejected: 'Rejected' };
+export const PAYMENT_LABEL = { unverified: 'Unverified', pending: 'Payment pending', partial: 'Partly paid', verified: 'Verified', rejected: 'Rejected' };
 export const CHANNEL_LABEL = { manual: 'Manual', whatsapp: 'WhatsApp', instagram: 'Instagram' };
 export const RISK_LABEL = { low: 'Low risk', medium: 'Medium risk', high: 'High risk' };
 

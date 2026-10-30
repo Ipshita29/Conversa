@@ -71,6 +71,17 @@ test('order CRUD with validation, defaults, ids and conflicts', { skip }, async 
   const g = await call('GET', `/orders/${c.json.id}`);
   assert.equal(g.status, 200);
   assert.equal(g.json.customerName, 'Priya');
+
+  // the placed date/time can be supplied on create (not in the future) and is read-only afterwards; 'partial' is a real payment status
+  const placed = new Date(Date.now() - 3 * 3600000).toISOString();
+  const early = await call('POST', '/orders', { customerName: 'Asha', item: 'Brownies', createdAt: placed, paymentStatus: 'partial' });
+  assert.equal(early.status, 201);
+  assert.equal(new Date(early.json.createdAt).toISOString(), placed);
+  assert.equal(early.json.paymentStatus, 'partial');
+  const fut = await call('POST', '/orders', { customerName: 'Asha', item: 'Brownies', createdAt: new Date(Date.now() + 86400000).toISOString() });
+  assert.equal(fut.status, 422);
+  assert.equal(fut.json.error.details[0].field, 'createdAt');
+  assert.equal((await call('PATCH', `/orders/${early.json.id}`, { createdAt: placed })).status, 422);
   assert.equal((await call('GET', '/orders/not-an-id')).status, 404);
   assert.equal((await call('GET', '/orders/aaaaaaaaaaaaaaaaaaaaaaaa')).status, 404);
 

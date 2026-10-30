@@ -1,11 +1,13 @@
 // Order validation (docs/api-contract.md §2). Pure functions: returns { value, details }.
 export const ORDER_STATUSES = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'];
-export const PAYMENT_STATUSES = ['unverified', 'pending', 'verified', 'rejected'];
+export const PAYMENT_STATUSES = ['unverified', 'pending', 'partial', 'verified', 'rejected'];
 export const SOURCES = ['manual', 'whatsapp', 'instagram'];
 export const OPEN_STATUSES = ['pending', 'confirmed', 'in_progress'];
 
 const WRITABLE = ['price', 'customerName', 'customerContact', 'source', 'item', 'quantity', 'customisation', 'notes', 'prepTimeMinutes', 'deadline', 'status', 'paymentStatus'];
-const READ_ONLY = ['id', '_id', 'createdAt', 'updatedAt', 'risk', 'paymentEvidence'];
+const READ_ONLY = ['id', '_id', 'createdAt', 'updatedAt', 'risk', 'paymentEvidence', 'completedAt'];
+// createdAt (when the order was placed) can be supplied once, when an order is created by hand; it is read-only on every update.
+const PLACED_TOLERANCE_MS = 5 * 60 * 1000;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
 
 export const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -23,6 +25,7 @@ export function validateOrderInput(body, { partial = false } = {}) {
   if (!isPlainObject(body)) return { value, details: [{ field: 'body', message: 'Request body must be a JSON object.' }] };
 
   for (const k of Object.keys(body)) {
+    if (k === 'createdAt' && !partial) continue; // validated below
     if (READ_ONLY.includes(k)) add(k, 'This field is read-only.');
     else if (!WRITABLE.includes(k)) add(k, 'Unknown field.');
   }
@@ -68,6 +71,12 @@ export function validateOrderInput(body, { partial = false } = {}) {
       if (!d) add('deadline', 'Must be an ISO 8601 timestamp with a timezone (e.g. 2026-10-21T14:00:00Z), or null if unknown.');
       else value.deadline = d;
     }
+  }
+  if (!partial && has('createdAt')) {
+    const d = parseIsoDate(body.createdAt);
+    if (!d) add('createdAt', 'Must be an ISO 8601 timestamp with a timezone (when the order was placed).');
+    else if (d.getTime() > Date.now() + PLACED_TOLERANCE_MS) add('createdAt', 'The order cannot have been placed in the future.');
+    else value.createdAt = d;
   }
   for (const [field, allowed] of [['source', SOURCES], ['status', ORDER_STATUSES], ['paymentStatus', PAYMENT_STATUSES]]) {
     if (has(field)) {

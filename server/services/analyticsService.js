@@ -124,7 +124,7 @@ export function buildMonthly({ orders: raw, settings, month, now = new Date(), d
 
   // --- 4. Payments
   const monthEvidence = orders.flatMap((o) => (o.paymentEvidence ?? []).map((e) => ({ ...e, orderId: o.id }))).filter((e) => e.addedAt && monthOf(new Date(e.addedAt), tz) === month && typeof e.amount === 'number');
-  const payStatus = Object.fromEntries(['verified', 'pending', 'unverified', 'rejected'].map((s) => [s, cur.received.filter((o) => live(o) && (o.paymentStatus ?? 'unverified') === s).length]));
+  const payStatus = Object.fromEntries(['verified', 'partial', 'pending', 'unverified', 'rejected'].map((s) => [s, cur.received.filter((o) => live(o) && (o.paymentStatus ?? 'unverified') === s).length]));
   const payments = {
     statusCounts: payStatus,
     recordedNotes: monthEvidence.length ? ok({ count: monthEvidence.length, total: monthEvidence.reduce((s, e) => s + e.amount, 0) }, { basis: "Amounts the seller noted as payment evidence this month. These are notes, not verified payments." }) : unavailable('No payment amounts were noted this month.'),

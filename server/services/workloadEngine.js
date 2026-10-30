@@ -254,7 +254,7 @@ function buildRecommendations({ open, risks, unscheduledOrders, overloadedDays, 
     add('medium', `Add ${what} for ${o.customerName}'s order`, 'Orders without these details are left out of deadline and capacity planning.', o.id);
   }
   const soon = now.getTime() + 72 * 3600000;
-  for (const o of Object.values(open).filter((x) => x.deadline && x.deadline.getTime() < soon && ['unverified', 'pending'].includes(x.paymentStatus)).slice(0, 2)) {
+  for (const o of Object.values(open).filter((x) => x.deadline && x.deadline.getTime() < soon && ['unverified', 'pending', 'partial'].includes(x.paymentStatus)).slice(0, 2)) {
     add('medium', `Confirm payment for ${o.customerName}`, 'Payment is not verified and the deadline is within 3 days.', o.id);
   }
   if (overloadedDays.length && recs.length === 0) {
