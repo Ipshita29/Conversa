@@ -3,6 +3,7 @@ import { Navbar, Footer } from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Orders from './pages/Orders.jsx';
 import Plan from './pages/Plan.jsx';
+import Payments from './pages/Payments.jsx';
 import Risks from './pages/Risks.jsx';
 import Analytics from './pages/Analytics.jsx';
 import WhatIf from './pages/WhatIf.jsx';
@@ -24,6 +25,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/orders" element={<Orders />} />
+            <Route path="/payments" element={<Payments />} />
             <Route path="/plan" element={<Plan />} />
             <Route path="/risks" element={<Risks />} />
             <Route path="/insights" element={<Analytics />} />

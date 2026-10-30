@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, Hexagon, ArrowUpRight, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag } from 'lucide-react';
+import { Menu, Hexagon, ArrowUpRight, House, LayoutGrid, AlarmClock, FlaskConical, Inbox, ShoppingBag, Wallet } from 'lucide-react';
 import { scrollToTop } from '../utils/scroll.js';
 import { DEMO_MODE } from '../services/api.js';
 import { DemoBadge } from './UI.jsx';
@@ -12,6 +12,7 @@ import '../css/Navbar.css';
 const WORKSPACE = [
   { key: 'overview', to: '/', label: 'Home', hint: 'Your day, organised', icon: House },
   { key: 'orders', to: '/orders', label: 'Orders', hint: 'Every order, every channel', icon: ShoppingBag },
+  { key: 'payments', to: '/payments', label: 'Payments', hint: 'Paid, owed and to verify', icon: Wallet },
   { key: 'plan', to: '/plan', label: 'Plan', hint: 'What to make, and when', icon: AlarmClock },
   { key: 'insights', to: '/insights', label: 'Insights', hint: 'Your month at a glance', icon: LayoutGrid },
   { key: 'whatif', to: '/whatif', label: 'What-if', hint: 'Test a change first', icon: FlaskConical },
@@ -144,7 +145,7 @@ export function Footer() {
           <div className="sf-cols">
             <nav aria-label="Product">
               <p className="eyebrow">Product</p>
-              <ul><li><Link to="/orders">Orders</Link></li><li><Link to="/plan">Plan</Link></li><li><Link to="/insights">Insights</Link></li><li><Link to="/whatif">What-if</Link></li></ul>
+              <ul><li><Link to="/orders">Orders</Link></li><li><Link to="/payments">Payments</Link></li><li><Link to="/plan">Plan</Link></li><li><Link to="/insights">Insights</Link></li><li><Link to="/whatif">What-if</Link></li></ul>
             </nav>
             <nav aria-label="Explore">
               <p className="eyebrow">Explore</p>

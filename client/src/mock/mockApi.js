@@ -5,10 +5,12 @@ import { validateOrder } from '../utils/validateOrder.js';
 import { seedOrders, seedConversations, seedIntegrations, demoSettings } from './data.js';
 // The offline demo runs the SAME scheduler as the server, in the browser, so every page agrees with every other page.
 import { computePlan, publicPlan, suggestScenario } from '../../../server/services/workloadEngine.js';
+import { createMockPayments } from './mockPayments.js';
 import { buildDashboard as serverDashboard } from '../../../server/services/dashboardService.js';
 
 let orders = seedOrders();
 const conversations = seedConversations();
+const payments = createMockPayments(() => orders, () => conversations);
 const integrations = seedIntegrations();
 
 const wait = (ms = 350) => new Promise((r) => setTimeout(r, ms));
@@ -169,6 +171,7 @@ export async function handleMockRequest(method, path, body = {}) {
     }
   }
 
+  if (p === '/payments' || p.startsWith('/payments/') || /^\/conversations\/[^/]+\/(attachments|messages\/[^/]+\/extract-payment)$/.test(p)) return clone(await payments(method, p, body));
   if (method === 'POST' && p === '/ai/extract-order') return extract(body);
 
   if (method === 'GET' && p === '/planner') {
