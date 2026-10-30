@@ -6,6 +6,7 @@
 import mongoose from 'mongoose';
 import { config } from '../config/env.js';
 import Order from '../models/Order.js';
+import Payment from '../models/Payment.js';
 import { DEMO_MESSAGES, DEMO_MARK } from './demo-data.js';
 import { reseedDemoOrders, reseedDemoMessages, removeDemoMessages } from '../services/demoSeed.js';
 
@@ -16,6 +17,7 @@ await mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 8000 });
 if (process.argv.includes('--clear')) {
   const removed = (await Order.deleteMany({ notes: new RegExp(`^\\${MARK}`) })).deletedCount;
   const gone = await removeDemoMessages();
+  await Payment.deleteMany({ isDemo: true });
   console.log(`Removed ${removed} demo order(s) and ${gone.conversations} demo conversation(s) with ${gone.messages} message(s). Real data was not touched.`);
 } else {
   // Real open orders (not demo) are part of the queue too, so the story is built around them.

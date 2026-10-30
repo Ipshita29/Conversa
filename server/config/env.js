@@ -12,7 +12,9 @@ export const config = {
     apiKey: process.env.GROQ_API_KEY || '',
     model: process.env.GROQ_MODEL || 'openai/gpt-oss-20b',
     timeoutMs: int(process.env.GROQ_TIMEOUT_MS, 15000),
+    visionModel: process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct', // reads payment screenshots
   },
+  payments: { proofDir: process.env.PAYMENT_PROOF_DIR || '' }, // empty = server/storage/proofs
   meta: {
     graphVersion: process.env.META_GRAPH_VERSION || 'v21.0',
     appSecret: process.env.META_APP_SECRET || '',

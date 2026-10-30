@@ -2,7 +2,9 @@ import Order from '../models/Order.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import { getSettings } from './settingsService.js';
-import { buildDemoOrders, DEMO_MARK, DEMO_MESSAGES } from '../scripts/demo-data.js';
+import Payment from '../models/Payment.js';
+import { buildDemoOrders, buildDemoPayments, DEMO_MARK, DEMO_MESSAGES } from '../scripts/demo-data.js';
+import { syncOrder } from './paymentService.js';
 
 const MARK = new RegExp(`^\\${DEMO_MARK}`);
 const inHours = (h, now) => new Date(now.getTime() + h * 3600000);
@@ -10,8 +12,19 @@ const inHours = (h, now) => new Date(now.getTime() + h * 3600000);
 // Replaces the demo orders with a fresh set placed relative to `now`. Real (non-demo) orders are never touched.
 export async function reseedDemoOrders(now = new Date()) {
   const removed = (await Order.deleteMany({ notes: MARK })).deletedCount;
+  await Payment.deleteMany({ isDemo: true });
   const created = await Order.insertMany(buildDemoOrders(await getSettings(), now));
+  await reseedDemoPayments(created, now);
   return { removed, created };
+}
+
+// Sample payments for the demo orders (flagged isDemo). Real payments are never touched.
+export async function reseedDemoPayments(orders, now = new Date()) {
+  await Payment.deleteMany({ isDemo: true });
+  const plain = orders.map((o) => ({ ...o.toObject?.() ?? o, id: String(o._id ?? o.id) }));
+  const docs = buildDemoPayments(plain, now).map(({ orderId, ...p }) => ({ ...p, order: orderId, transactionKey: p.transactionId ? p.transactionId.toUpperCase() : null }));
+  await Payment.insertMany(docs);
+  for (const o of plain) await syncOrder(o.id);
 }
 
 // Removes ONLY records flagged as demo: demo conversations, their messages, and any demo message left without a conversation.
@@ -48,7 +61,11 @@ export async function refreshStaleDemo(now = new Date()) {
   const same = existing.length === expected.size && expected.size === current.size && [...expected].every(([name, day]) => current.get(name) === day);
   const chats = new Set((await Conversation.find({ isDemo: true }).select('customerName').lean()).map((c) => c.customerName));
   const sameChats = chats.size === DEMO_MESSAGES.length && DEMO_MESSAGES.every((m) => chats.has(m.customer));
-  if (same && sameChats) return false;
+  if (same && sameChats) {
+    if (await Payment.exists({ isDemo: true })) return false;
+    await reseedDemoPayments(await Order.find({ notes: MARK })); // demo orders from before payments existed
+    return true;
+  }
   const { created } = await reseedDemoOrders(now);
   if (sameChats) for (const o of created) await Conversation.updateMany({ isDemo: true, customerName: o.customerName }, { $set: { orderId: o._id } });
   else await reseedDemoMessages(created, now); // the sample conversations changed too: start them from the new story

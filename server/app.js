@@ -13,6 +13,7 @@ import settings from './routes/settings.js';
 import integrations from './routes/integrations.js';
 import webhooks from './routes/webhooks.js';
 import conversations from './routes/conversations.js';
+import payments from './routes/payments.js';
 
 export function createApp() {
   const app = express();
@@ -32,6 +33,7 @@ export function createApp() {
   app.use('/api/settings', settings);
   app.use('/api/integrations', integrations);
   app.use('/api/conversations', conversations);
+  app.use('/api/payments', payments);
   app.use('/api/webhooks', webhooks);
 
   app.use(notFoundHandler);
