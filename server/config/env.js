@@ -5,7 +5,11 @@ const int = (v, d) => (Number.isFinite(Number(v)) && v !== undefined && v !== ''
 // All configuration comes from environment variables. Secrets are never logged or returned by the API.
 export const config = {
   port: int(process.env.PORT, 5000),
-  clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  // Browser origins allowed to call the API: CLIENT_ORIGIN (comma-separated), plus the two local Vite dev servers outside production.
+  clientOrigins: [...new Set([
+    ...(process.env.CLIENT_ORIGIN || '').split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean),
+    ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173', 'http://localhost:5174']),
+  ])],
   mongoUri: process.env.MONGODB_URI || '',
   businessTimezone: process.env.BUSINESS_TIMEZONE || 'Asia/Kolkata',
   groq: {

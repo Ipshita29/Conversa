@@ -19,7 +19,17 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
-  app.use(cors({ origin: config.clientOrigin.split(',').map((s) => s.trim()) }));
+  // CORS comes first, so preflight (OPTIONS) requests are answered before any route, body parser or limiter. Only the listed origins get an
+  // Access-Control-Allow-Origin header (never '*'); no cookies are used, so credentials stay off.
+  const corsOptions = {
+    origin: config.clientOrigins,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-File-Name'], // X-File-Name: screenshot uploads send the original file name
+    exposedHeaders: ['Location', 'Retry-After'],
+    maxAge: 600,
+  };
+  app.use(cors(corsOptions));
+  app.options('*', cors(corsOptions));
   // The raw body is kept for webhook signature verification.
   app.use(express.json({ limit: '256kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 
