@@ -3,8 +3,10 @@ import { Link, Navigate, useLocation } from 'react-router-dom';
 import useWorkspace from '../hooks/useWorkspace.js';
 import { HeroSection, Reveal, ScrollR, useCardGlow } from '../components/Effects.jsx';
 import { StateMessage } from '../components/UI.jsx';
+import Marquee from '../components/Marquee.jsx';
 import { ConnectSection, DayWorkspace } from '../components/Insights.jsx';
 import { summarise } from '../utils/homeSummary.js';
+import { isDemoOrder } from '../utils/format.js';
 import useHashScroll from '../hooks/useHashScroll.js';
 import '../css/Dashboard.css';
 
@@ -82,6 +84,8 @@ export default function Dashboard() {
             : <StateMessage kind="loading" message="Loading your workspace…" />}
         </div>
       </Reveal>
+
+      <Marquee />
 
       <Connect />
     </section>

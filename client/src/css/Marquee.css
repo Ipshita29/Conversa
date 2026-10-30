@@ -1,0 +1,29 @@
+/* ---------- Marquee: a slim editorial divider above "Bring your conversations together" ----------
+   A narrow, centred, translucent glass strip. The page's Three.js field is fixed behind everything and stays visible through it. */
+.mq { position: relative; width: min(1240px, calc(100% - 48px)); max-width: 100%; margin: 0 auto clamp(26px, 3.4vw, 44px); padding: clamp(10px, 1.3vw, 16px) 0; overflow: hidden; border: 1px solid rgba(36, 63, 115, 0.13); border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); color: var(--primary);
+  /* the words fade in and out at the ends of the strip instead of being cut off */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%); }
+.mq-track { display: flex; width: max-content; animation: mq-slide 110s linear infinite; will-change: transform; }
+.mq:hover .mq-track { animation-play-state: paused; }
+.mq-set { display: flex; flex: none; align-items: center; margin: 0; padding: 0; list-style: none; }
+.mq-item { display: flex; flex: none; align-items: center; }
+.mq-word { font: 600 clamp(1.15rem, 3.1vw, 3rem)/1.1 var(--display); letter-spacing: -0.02em; text-transform: uppercase; white-space: nowrap; opacity: 0.9; }
+
+/* Separators: a hairline caramel plus and a small caramel diamond, alternating, kept quiet. */
+.mq-sep { position: relative; display: block; flex: none; width: clamp(10px, 1.2vw, 16px); height: clamp(10px, 1.2vw, 16px); margin-inline: clamp(16px, 2.6vw, 44px); opacity: 0.8; }
+.mq-sep.is-plus::before, .mq-sep.is-plus::after { content: ''; position: absolute; inset: 0; margin: auto; background: var(--caramel); }
+.mq-sep.is-plus::before { width: 100%; height: 1px; } .mq-sep.is-plus::after { width: 1px; height: 100%; }
+.mq-sep.is-diamond::before { content: ''; position: absolute; inset: 26%; background: var(--caramel); transform: rotate(45deg); }
+
+/* One copy is exactly half the track, so sliding by -50% lands on an identical frame: the loop never jumps. */
+@keyframes mq-slide { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-50%, 0, 0); } }
+
+@media (max-width: 640px) { .mq { width: calc(100% - 24px); } .mq-track { animation-duration: 85s; } .mq-word { letter-spacing: -0.015em; } }
+@media (prefers-reduced-motion: reduce) {
+  .mq { border-radius: 28px; -webkit-mask-image: none; mask-image: none; padding-block: 14px; }
+  .mq-track { width: auto; flex-wrap: wrap; justify-content: center; animation: none; will-change: auto; padding-inline: 16px; }
+  .mq-set { flex-wrap: wrap; justify-content: center; row-gap: 8px; }
+  .mq-set[aria-hidden='true'] { display: none; }
+  .mq-word { font-size: clamp(0.95rem, 2.2vw, 1.4rem); } .mq-sep { margin-inline: clamp(12px, 1.8vw, 24px); }
+}
