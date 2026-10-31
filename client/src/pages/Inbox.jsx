@@ -5,7 +5,7 @@ import { attachmentSrc, extractMessagePayment, extractPaymentText, getConversati
 import useAsync from '../hooks/useAsync.js';
 import { CHANNEL_LABEL, STATUS_LABEL } from '../utils/format.js';
 import { Drawer, Modal, StateMessage, StatusBadge } from '../components/UI.jsx';
-import { STATUS as PAY_STATUS, StatusPill } from '../components/Payments.jsx';
+import { METHOD as PAY_METHOD, STATUS as PAY_STATUS, StatusPill } from '../components/Payments.jsx';
 import { DraftOrder } from '../components/Orders.jsx';
 import { parsePaymentText } from '../../../server/services/paymentExtraction.js';
 import { formatMoney } from '../utils/format.js';
@@ -191,7 +191,7 @@ export default function Inbox() {
               <header className="im-chat-head">
                 <button type="button" className="im-icon-btn im-back" onClick={() => setChatOpen(false)} aria-label="Back to chats"><ArrowLeft size={18} aria-hidden="true" /></button>
                 <Avatar name={selected.customerName} channel={selected.channel} size="lg" />
-                <div className="im-chat-id"><h2>{selected.customerName}</h2><p>{CHANNEL_LABEL[selected.channel]}{selected.isDemo && <span className="im-demo"> · Demo conversation</span>}</p></div>
+                <div className="im-chat-id"><h2>{selected.customerName}</h2><p>{CHANNEL_LABEL[selected.channel]}{selected.isDemo && <span className="im-demo">Demo conversation</span>}</p></div>
                 <div className="im-chat-actions">
                   {linked ? <Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}><ExternalLink size={14} aria-hidden="true" /> Open order</Link>
                     : !selected.orderId && <button type="button" className="btn btn-sm btn-primary" onClick={() => setDrafting(true)} disabled={drafting}><Sparkles size={14} aria-hidden="true" /> Extract order</button>}
@@ -232,8 +232,20 @@ export default function Inbox() {
                 )}
                 {createdFor?.convId === selected.id && <div className="notice ok" role="status">Order created for {createdFor.customerName} and linked to this chat.</div>}
                 {linked && (
-                  <div className="im-linked"><div><p className="eyebrow">Linked order</p><strong>{linked.item}</strong> <StatusBadge status={linked.status} /></div><Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}>Open order</Link>
-                    {(() => { const r = paymentsQ.data?.rows.find((x) => x.orderId === linked.id); return r ? <p className="im-linked-pay"><StatusPill status={r.status} /> {r.balance !== null && <span>Paid {formatMoney(r.paid)} of {formatMoney(r.total)}</span>} <Link to={`/payments?order=${linked.id}`}>Payments</Link></p> : null; })()}</div>
+                  <div className="im-linked">
+                    <div className="im-linked-top">
+                      <div className="im-linked-main"><p className="im-linked-label">Linked order</p><div className="im-linked-title"><strong>{linked.item}</strong> <StatusBadge status={linked.status} /></div></div>
+                      <Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}>Open order</Link>
+                    </div>
+                    {(() => { const r = paymentsQ.data?.rows.find((x) => x.orderId === linked.id); return r ? (
+                      <dl className="im-linked-pay">
+                        <div><dt>Payment</dt><dd><StatusPill status={r.status} /></dd></div>
+                        {r.method && <div><dt>Method</dt><dd>{PAY_METHOD[r.method] ?? r.method}</dd></div>}
+                        {r.balance !== null && <div><dt>Received</dt><dd>{formatMoney(r.paid)}</dd></div>}
+                        {r.balance !== null && <div><dt>Order total</dt><dd>{formatMoney(r.total)}</dd></div>}
+                        <div className="im-linked-go"><Link to={`/payments?order=${linked.id}`}>View in Payments</Link></div>
+                      </dl>) : null; })()}
+                  </div>
                 )}
                 {!linked && selected.orderId && <p className="muted im-note">This chat is linked to an order that could not be loaded.</p>}
                 {!selected.orderId && drafting && (
@@ -249,7 +261,7 @@ export default function Inbox() {
                 <p className="im-composer-note" role="status"><i className="im-led is-off" />{sendNote}</p>
                 <div className="im-composer-row">
                   <button type="button" className="im-icon-btn" disabled aria-label="Attach a file (not available)" title="Attachments aren't supported yet"><Paperclip size={18} aria-hidden="true" /></button>
-                  <textarea rows={1} placeholder="Type a message…" disabled aria-label="Message" />
+                  <textarea rows={1} placeholder="Type a message..." disabled aria-label="Message" />
                   <button type="button" className="im-send" disabled aria-label="Send (not available)"><SendHorizontal size={18} aria-hidden="true" /></button>
                 </div>
               </footer>
