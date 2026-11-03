@@ -1,14 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, CircleCheck, Clock, Flame, IndianRupee, Info, ShoppingBag, Sparkles, TrendingUp, TriangleAlert } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, Flame, IndianRupee, Info, Sparkles, TrendingUp, TriangleAlert } from 'lucide-react';
 import useAsync from '../hooks/useAsync.js';
 import { getInsights } from '../services/api.js';
 import { DemoBadge, StateMessage } from '../components/UI.jsx';
-import { CARAMEL, ComboChart, Donut, INK, SOFT, Sparkline, compact } from '../components/Charts.jsx';
+import { CARAMEL, ComboChart, Donut, INK, SOFT, Sparkline, compact } from '../components/Insights.jsx';
 import '../css/Insights.css';
-
-// Soft, low-opacity decoration in the page margins only. It loads on demand and the dashboard is fully usable without it.
-const EdgeFacets = lazy(() => import('../components/EdgeFacets.jsx'));
 
 const plural = (n, one, many) => (n === 1 ? one : many);
 const inr = (n) => `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: n % 1 ? 2 : 0 }).format(n)}`;
@@ -82,12 +79,28 @@ function Change({ c, days }) {
   );
 }
 
-function Kpi({ Icon, tone, label, children, spark, sparkColor }) {
+function Kpi({ label, children, spark, sparkColor, open, onToggle }) {
   return (
-    <div className={`in-kpi is-${tone}`}>
-      <header><span className="in-ico"><Icon size={18} aria-hidden="true" /></span><span className="in-label">{label}</span></header>
-      <div className="in-kpi-body"><div className="in-kpi-main">{children}</div>{spark && <Sparkline values={spark} color={sparkColor} />}</div>
-    </div>
+    <button type="button" className={`in-kpi${open ? ' is-open' : ''}`} aria-expanded={open} onClick={onToggle}>
+      <span className="in-label">{label}</span>
+      <span className="in-kpi-body"><span className="in-kpi-main">{children}</span>{spark && <Sparkline values={spark} color={sparkColor} />}</span>
+    </button>
+  );
+}
+
+// What sits behind a KPI: a few labelled shares, all worked out from the figures already on the page.
+function Breakdown({ title, rows, note, onClose }) {
+  const total = rows.reduce((t, r) => t + r.value, 0);
+  return (
+    <section className="in-detail" aria-label={title}>
+      <header><h2>{title}</h2><button type="button" className="in-x" onClick={onClose}>Close</button></header>
+      {rows.length === 0 || total === 0 ? <p className="in-empty">Nothing to break down in this period.</p> : (
+        <ul>{rows.map((r) => (
+          <li key={r.label}><span>{r.label}</span><span className="in-meter" aria-hidden="true"><i style={{ width: `${Math.max(2, (r.value / total) * 100)}%`, background: r.color }} /></span><b>{r.text ?? r.value}</b><em>{Math.round((r.value / total) * 100)}%</em></li>
+        ))}</ul>
+      )}
+      {note && <p className="in-detail-note">{note}</p>}
+    </section>
   );
 }
 
@@ -104,6 +117,8 @@ export default function Analytics() {
   const requested = explicit ?? auto;
   const [mode, setMode] = useState('combined');
   const [rank, setRank] = useState('revenue');
+  const [kpiOpen, setKpiOpen] = useState(null); // which KPI's breakdown is showing
+  const [prodOpen, setProdOpen] = useState(null); // which product row is expanded
   const { status, data, error, reload } = useAsync(() => getInsights(custom ?? days, requested), [days, custom?.from, custom?.to, requested]);
   useEffect(() => { if (data && !explicit && auto === 'all') setAuto(data.datasets.real > 0 ? 'real' : 'demo'); }, [data, explicit, auto]);
   const setP = (changes) => setParams((p) => { const n = new URLSearchParams(p); Object.entries(changes).forEach(([k, v]) => (v === null ? n.delete(k) : n.set(k, v))); return n; }, { replace: true });
@@ -120,9 +135,7 @@ export default function Analytics() {
   const head = (
     <header className="in-head">
       <div className="in-title">
-        <p className="in-eyebrow">Business insights</p>
         <h1>Your business <em>at a glance.</em></h1>
-        <p className="in-sub">See how your orders, revenue and capacity are doing, and what to focus on next.</p>
       </div>
       <div className="in-controls">
         {data ? <DateRange range={data.range} custom={Boolean(custom)} days={days} onQuick={(d) => setP({ range: d === 7 ? null : d, from: null, to: null })} onCustom={(f, t) => setP({ from: f, to: t, range: null })} />
@@ -143,7 +156,6 @@ export default function Analytics() {
 
   const shell = (inner, cls = '') => (
     <section className={`page insights${cls}`}>
-      <Suspense fallback={null}><EdgeFacets /></Suspense>
       <div className="in-content">{head}{inner}</div>
     </section>
   );
@@ -167,6 +179,15 @@ export default function Analytics() {
   const timingRows = [{ key: 'onTime', label: 'On time', color: '#7FA97A', value: timing.onTime }, { key: 'delayed', label: 'Delayed', color: '#E39A6B', value: timing.delayed }];
   const timingPct = percents(timingRows.map((r) => r.value));
 
+  const toggleKpi = (k) => setKpiOpen((o) => (o === k ? null : k));
+  const pricedTotal = products.reduce((t, p) => t + (p.revenue ?? 0), 0);
+  const breakdown = {
+    revenue: { title: 'Where the revenue comes from', rows: [...products].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue).slice(0, 5).map((p) => ({ label: p.product, value: p.revenue, text: inr(p.revenue), color: CARAMEL })),
+      note: kpis.totalRevenue.unpricedOrders ? `${kpis.totalRevenue.unpricedOrders} ${plural(kpis.totalRevenue.unpricedOrders, 'order has', 'orders have')} no price yet and ${plural(kpis.totalRevenue.unpricedOrders, 'is', 'are')} not counted.` : null },
+    orders: { title: 'Orders by status', rows: statusRows.filter((r) => r.value > 0).map((r) => ({ label: r.label, value: r.value, color: r.color })) },
+    completed: { title: 'Completed against the rest', rows: [{ label: 'Completed', value: st.completed, color: '#7FA97A' }, { label: 'Still open', value: st.pending, color: SOFT.blue }, { label: 'Cancelled', value: st.cancelled, color: '#C9C1B4' }].filter((r) => r.value > 0) },
+    ontime: { title: 'Delivered orders against their deadline', rows: timingRows.filter((r) => r.value > 0).map((r) => ({ label: r.label, value: r.value, color: r.color })) },
+  };
   const sorted = [...products].sort((a, b) => (rank === 'units' ? b.units - a.units || (b.revenue ?? -1) - (a.revenue ?? -1) : (b.revenue ?? -1) - (a.revenue ?? -1) || b.units - a.units)).slice(0, 5);
   const peak = Math.max(...sorted.map((p) => (rank === 'units' ? p.units : p.revenue ?? 0)), 0);
   const noOrders = st.total === 0;
@@ -177,22 +198,24 @@ export default function Analytics() {
 
       <div className={`in-body${status === 'loading' ? ' is-loading' : ''}`}>
         <div className={`in-kpis ${hasDelivery ? 'has-4' : 'has-3'}`}>
-          <Kpi Icon={IndianRupee} tone="caramel" label="Total revenue" spark={revOn ? trend.map((d) => d.revenue) : null} sparkColor={CARAMEL}>
+          <Kpi label="Total revenue" open={kpiOpen === 'revenue'} onToggle={() => toggleKpi('revenue')} spark={revOn ? trend.map((d) => d.revenue) : null} sparkColor={CARAMEL}>
             {revOn ? <><b className="in-val">{inr(kpis.totalRevenue.value)}</b><Change c={kpis.totalRevenue.comparison} days={periodDays} /><small>{kpis.totalRevenue.unpricedOrders ? `Booked sales · ${kpis.totalRevenue.unpricedOrders} ${plural(kpis.totalRevenue.unpricedOrders, 'order has', 'orders have')} no price` : 'Booked sales, not money collected'}</small></>
               : <><b className="in-val is-na">—</b><span className="in-change is-muted">Not enough data yet</span><small>{kpis.totalRevenue.reason}</small></>}
           </Kpi>
-          <Kpi Icon={ShoppingBag} tone="blue" label="Total orders" spark={trend.map((d) => d.orders)} sparkColor={INK}>
+          <Kpi label="Total orders" open={kpiOpen === 'orders'} onToggle={() => toggleKpi('orders')} spark={trend.map((d) => d.orders)} sparkColor={INK}>
             <b className="in-val">{kpis.totalOrders.value}</b><Change c={kpis.totalOrders.comparison} days={periodDays} /><small>Received, cancelled excluded</small>
           </Kpi>
-          <Kpi Icon={CircleCheck} tone="green" label="Completed orders" spark={trend.map((d) => d.completed)} sparkColor="#5E9460">
+          <Kpi label="Completed orders" open={kpiOpen === 'completed'} onToggle={() => toggleKpi('completed')} spark={trend.map((d) => d.completed)} sparkColor="#5E9460">
             <b className="in-val">{kpis.completedOrders.value}</b><Change c={kpis.completedOrders.comparison} days={periodDays} /><small>{completedPct === null ? 'No orders received' : `${completedPct}% of ${kpis.totalOrders.value} received`}</small>
           </Kpi>
           {hasDelivery && (
-            <Kpi Icon={Clock} tone="blue" label="On-time delivery rate" spark={rateSeries} sparkColor={INK}>
+            <Kpi label="On-time delivery rate" open={kpiOpen === 'ontime'} onToggle={() => toggleKpi('ontime')} spark={rateSeries} sparkColor={INK}>
               <b className="in-val">{rate.value}%</b><Change c={rate.comparison} days={periodDays} /><small>{rate.onTime} of {rate.delivered} delivered on or before the deadline</small>
             </Kpi>
           )}
         </div>
+
+        {kpiOpen && breakdown[kpiOpen] && <Breakdown {...breakdown[kpiOpen]} onClose={() => setKpiOpen(null)} />}
 
         {noOrders ? <StateMessage message={`No orders were received in this period. Add an order, or choose another range.`}><Link className="btn btn-primary" to="/orders">Go to Orders</Link></StateMessage> : (
           <div className="in-main">
@@ -204,7 +227,7 @@ export default function Analytics() {
                 </div>
               </header>
               {!revOn && <p className="in-chart-note">Revenue appears here once your orders have prices. Showing orders for now.</p>}
-              <ComboChart points={trendPoints} show={show} barName="Revenue (booked)" lineName="Orders" fmtBar={inr} fmtLine={(v) => `${v} ${plural(v, 'order', 'orders')}`} tickBar={(v) => `₹${compact(v)}`} height={372}
+              <ComboChart key={`${effMode}-${data.range.from}-${data.range.to}-${sel}`} points={trendPoints} show={show} barName="Revenue (booked)" lineName="Orders" fmtBar={inr} fmtLine={(v) => `${v} ${plural(v, 'order', 'orders')}`} tickBar={(v) => `₹${compact(v)}`} height={372}
                 ariaLabel={`${show.bar ? 'Booked revenue' : 'Orders'} ${trend.length > 31 ? 'by week' : 'by day'}. ${trendPoints.map((p) => `${p.full}: ${show.bar ? `${inr(p.bar)}, ` : ''}${p.line} ${plural(p.line, 'order', 'orders')}`).join('. ')}`} />
               <ul className="in-legend">
                 {show.bar && <li><i className="sw bar" />Revenue (booked)</li>}
@@ -224,11 +247,20 @@ export default function Analytics() {
                   {sorted.map((p, i) => {
                     const v = rank === 'units' ? p.units : p.revenue ?? 0;
                     return (
-                      <li key={p.product}>
-                        <span className="in-rank">{i + 1}</span>
-                        <div className="in-prod"><strong title={p.product}>{p.product}</strong><small>{p.units} {plural(p.units, 'unit', 'units')} · {p.orders} {plural(p.orders, 'order', 'orders')}</small>
-                          <span className="in-meter" aria-hidden="true"><i style={{ width: peak ? `${Math.max(v ? 4 : 0, (v / peak) * 100)}%` : '0%' }} /></span></div>
-                        <span className={`in-rev${p.revenue == null ? ' is-na' : ''}`}>{p.revenue == null ? 'No price yet' : inr(p.revenue)}{p.partial && <small>some unpriced</small>}</span>
+                      <li key={p.product} className={prodOpen === p.product ? 'is-open' : ''}>
+                        <button type="button" className="in-prow" aria-expanded={prodOpen === p.product} onClick={() => setProdOpen((o) => (o === p.product ? null : p.product))}>
+                          <span className="in-rank">{i + 1}</span>
+                          <span className="in-prod"><strong title={p.product}>{p.product}</strong><small>{p.units} {plural(p.units, 'unit', 'units')} · {p.orders} {plural(p.orders, 'order', 'orders')}</small>
+                            <span className="in-meter" aria-hidden="true"><i style={{ width: peak ? `${Math.max(v ? 4 : 0, (v / peak) * 100)}%` : '0%' }} /></span></span>
+                          <span className={`in-rev${p.revenue == null ? ' is-na' : ''}`}>{p.revenue == null ? 'No price yet' : inr(p.revenue)}{p.partial && <small>some unpriced</small>}</span>
+                        </button>
+                        {prodOpen === p.product && (
+                          <dl className="in-pdetail">
+                            <div><dt>Share of revenue</dt><dd>{p.revenue != null && pricedTotal ? `${Math.round((p.revenue / pricedTotal) * 100)}%` : '—'}</dd></div>
+                            <div><dt>Orders</dt><dd>{p.orders}</dd></div>
+                            <div><dt>Average per unit</dt><dd>{p.revenue != null && p.units && !p.partial ? inr(Math.round((p.revenue / p.units) * 100) / 100) : '—'}</dd></div>
+                          </dl>
+                        )}
                       </li>
                     );
                   })}
@@ -262,7 +294,7 @@ export default function Analytics() {
             <header className="in-card-head"><div><h2><Sparkles size={17} aria-hidden="true" /> Smart insights</h2><p>Worked out from your orders and schedule</p></div></header>
             {insights.length === 0 ? <p className="in-empty">Nothing needs your attention. Insights appear here as your orders and schedule give a reason.</p> : (
               <ul>
-                {insights.map((i) => {
+                {insights.slice(0, 3).map((i) => {
                   const Icon = INSIGHT_ICON[i.id] ?? Sparkles;
                   return (
                     <li key={i.id} className={`is-${i.tone}`}>

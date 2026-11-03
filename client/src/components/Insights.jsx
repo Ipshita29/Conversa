@@ -1,457 +1,310 @@
-import { Link } from 'react-router-dom';
-import { ArrowRight, Check, ChevronDown, FlaskConical, Pencil, Info, PenLine } from 'lucide-react';
-import useAsync from '../hooks/useAsync.js';
-import { getConversations } from '../services/api.js';
-import { summarise } from '../utils/homeSummary.js';
-import { formatDayInTz, formatInTz, formatMinutes, formatTimeInTz, isDemoOrder, STATUS_LABEL, formatLongInTz } from '../utils/format.js';
-import { useId, useState } from 'react';
-import { SectionHead } from './Layout.jsx';
-import { RiskBadge, Modal, StateMessage } from './UI.jsx';
-import { CountUp } from './Effects.jsx';
-import '../css/Workspace.css';
-import '../css/Risk.css';
+import { useEffect, useId, useRef, useState } from 'react';
+import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion.js';
+import '../css/Insights.css';
 
-// ---------- DayWorkspace ----------
-const plural = (n, one, many) => (n === 1 ? one : many);
-const MISSING = { missing_prep_time: 'preparation time', missing_deadline: 'deadline', missing_both: 'preparation time and deadline' };
-const MAX_ISSUES = 3;
-const MAX_UPCOMING = 3;
+// ======== Charts ========
 
-// Under the hero: how busy am I, what needs attention, what should I do next. Everything is derived from the planner and orders
-// the API already returns (see utils/homeSummary.js); the scheduler's own ranking decides what comes first.
-export function DayWorkspace({ planner, orders }) {
-  const conv = useAsync(getConversations); // optional: only to link an order to its chat
-  const { tz, today, byId, open, todayIds, issues, riskIds, attention, nextDeadline, top } = summarise({ planner, orders });
-  const entry = Object.fromEntries(planner.schedule.map((e) => [e.orderId, e]));
-  const chatOf = Object.fromEntries((conv.data?.items ?? []).filter((c) => c.orderId).map((c) => [c.orderId, c.id]));
-  const unscheduledReason = Object.fromEntries(planner.unscheduledOrders.map((u) => [u.id, u.reason]));
+// Small SVG charts for the Insights dashboard, drawn from real numbers only. No chart library is installed in this project, so these are
+// plain React + SVG: scaled axes, gridlines, a combined bar + line chart with two axes and a tooltip, donuts, and sparklines.
 
-  if (orders.length === 0) return <StateMessage message="No orders yet. Add your first order, or draft one from a customer message."><Link className="btn btn-primary" to="/orders">Go to Orders</Link></StateMessage>;
+export const INK = '#243F73';      // navy
+export const CARAMEL = '#C58A52';
+export const SOFT = { blue: '#A9C9EE', green: '#9CC59A', peach: '#F0C7A4', navy: '#243F73', grey: '#D9D4CA' };
 
-  const attentionTo = riskIds.size > 0 ? '/plan?focus=risk' : '/plan?focus=missing';
-  const metrics = [
-    { key: 'today', label: 'Orders', value: todayIds.size, to: '/plan' },
-    { key: 'attn', label: 'At risk', value: riskIds.size, to: attention ? attentionTo : '/plan', tone: riskIds.size ? 'risk' : null },
-    { key: 'next', label: 'Next deadline', value: nextDeadline ? formatInTz(nextDeadline.deadline, tz) : 'None upcoming', note: nextDeadline ? `${nextDeadline.customerName} · ${nextDeadline.item}` : null, to: nextDeadline ? `/orders?edit=${nextDeadline.id}` : '/orders', small: true },
-  ];
+// Width of a container, kept up to date (so charts can be drawn at their real pixel size and stay crisp).
+export function useWidth() {
+  const ref = useRef(null); const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current; if (!el) return undefined;
+    const ro = new ResizeObserver(([e]) => setW(Math.round(e.contentRect.width))); ro.observe(el); setW(Math.round(el.getBoundingClientRect().width));
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
 
-  // One short line per order: what is wrong, with the exact deadline kept beside it.
-  const issueRows = issues.slice(0, MAX_ISSUES).map((m) => {
-    const o = byId[m.orderId]; const e = entry[m.orderId];
-    const missing = m.kind === 'needs_details';
-    const state = missing ? `Missing ${MISSING[unscheduledReason[m.orderId]] ?? 'details'}`
-      : m.kind === 'deadline_passed' ? 'Overdue' : m.kind === 'tight' ? `Tight, ${formatMinutes(e?.bufferMinutes)} to spare` : m.kind === 'late' ? `Late by ${formatMinutes(e?.shortfallMinutes)}` : 'Cannot be scheduled';
-    return { m, o, missing, state, tone: missing ? 'info' : m.kind === 'tight' ? 'warn' : 'late' };
-  });
-  const attnTitle = issueRows.length && issueRows.every((r) => r.m.kind === 'deadline_passed') ? 'Overdue' : issueRows.length && issueRows.every((r) => !r.missing && r.m.kind !== 'deadline_passed') ? 'At risk' : 'Needs review';
+// A "nice" axis: the smallest round maximum above the data, with 4 even steps.
+export function niceScale(max, steps = 4, whole = false) {
+  if (!(max > 0)) return { max: steps, step: 1 };
+  const raw = max / steps; const pow = 10 ** Math.floor(Math.log10(raw)); const f = raw / pow;
+  let step = (f <= 1 ? 1 : f <= 1.5 ? 1.5 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * pow;
+  if (whole) step = Math.max(1, Math.ceil(step)); // counts of orders: the axis only ever shows whole numbers
+  return { max: step * steps, step };
+}
+export const compact = (n) => (n >= 1e7 ? `${+(n / 1e7).toFixed(1)}Cr` : n >= 1e5 ? `${+(n / 1e5).toFixed(1)}L` : n >= 1e3 ? `${+(n / 1e3).toFixed(n % 1e3 ? 1 : 0)}K` : String(Math.round(n * 100) / 100));
 
-  const REASON = { deadline_passed: 'Deadline missed', late: 'Running late', tight: 'Tight deadline', needs_details: 'Missing details' };
-  const nextStep = top ? (() => {
-    const o = byId[top.orderId];
-    const contact = (top.kind === 'deadline_passed' || top.kind === 'late') && chatOf[top.orderId];
-    const who = o.customerName.split(' ')[0];
-    return {
-      top, o, to: contact ? `/inbox?conversation=${chatOf[top.orderId]}` : `/orders?edit=${top.orderId}`,
-      label: contact ? 'Open conversation' : top.kind === 'needs_details' ? 'Add details' : 'Review order',
-      title: contact ? `Contact ${who}` : top.kind === 'needs_details' ? `Complete ${who}'s order` : `Review ${who}'s order`,
-      detail: `${o.item}${o.quantity > 1 ? ` × ${o.quantity}` : ''} · ${REASON[top.kind] ?? 'Needs attention'}`,
-    };
-  })() : null;
-
-  const first = new Map();
-  for (const d of planner.days) for (const b of d.orders) if (byId[b.id] && !first.has(b.id)) first.set(b.id, { ...b, date: d.date });
-  const upcoming = [...first.values()].filter((r) => !riskIds.has(r.id) || entry[r.id]?.kind !== 'deadline_passed').sort((a, b) => new Date(a.start) - new Date(b.start)).slice(0, MAX_UPCOMING);
+// ---- Combined chart: bars (left axis) and a line (right axis) over the same dates -------------------------------------------
+// points: [{ label, full, bar, line }]. Either series can be turned off with `show`.
+export function ComboChart({ points, show = { bar: true, line: true }, barName, lineName, fmtBar, fmtLine, tickBar = compact, height = 300, barColor = CARAMEL, lineColor = INK, ariaLabel }) {
+  const [ref, width] = useWidth(); const [hover, setHover] = useState(null); const uid = useId().replace(/:/g, '');
+  const m = { l: show.bar ? 56 : 16, r: show.line ? 40 : 16, t: 14, b: 34 }; // margins: room for the axes' numbers
+  const W = Math.max(width, 280); const iw = W - m.l - m.r; const ih = height - m.t - m.b;
+  const n = points.length; const slot = iw / Math.max(n, 1);
+  const bScale = niceScale(Math.max(...points.map((p) => p.bar ?? 0), 0)); const lScale = niceScale(Math.max(...points.map((p) => p.line ?? 0), 0), 4, true);
+  const gridMax = show.bar ? bScale : lScale; // gridlines follow the left axis (or the right one when only the line shows)
+  const y = (v, sc) => m.t + ih - (v / sc.max) * ih;
+  const x = (i) => m.l + slot * i + slot / 2;
+  const barW = Math.min(34, Math.max(3, slot * 0.58));
+  const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 62)))); // thin out date labels so they never collide
+  const line = show.line ? points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.line, lScale).toFixed(1)}`).join(' ') : '';
+  const area = show.line && n > 1 ? `${line} L${x(n - 1).toFixed(1)} ${m.t + ih} L${x(0).toFixed(1)} ${m.t + ih} Z` : '';
+  const hp = hover === null ? null : points[hover];
+  const tipX = hover === null ? 0 : Math.min(Math.max(x(hover), 84), W - 84);
 
   return (
-    <div className="dw">
-      <SectionHead eyebrow="Today" title="Your day, at a glance." />
-      <dl className="dw-metrics">
-        {metrics.map((x) => (
-          <Link key={x.key} to={x.to} className={`dw-metric${x.tone ? ` is-${x.tone}` : ''}`}>
-            <dt>{x.label}</dt>
-            <dd className={x.small ? 'is-small' : ''}>{x.value}</dd>
-            {x.note && <small>{x.note}</small>}
-          </Link>
-        ))}
-      </dl>
-
-      <div className="dw-cols">
-        <div className="dw-left">
-          <section className="dw-sec" aria-labelledby="dw-attn">
-            <div className="dw-sec-head"><h3 id="dw-attn">{attnTitle}</h3>{attention > MAX_ISSUES && <Link to={attentionTo} className="dw-all">View all {attention} <ArrowRight size={14} aria-hidden="true" /></Link>}</div>
-            {issueRows.length === 0 ? (
-              <p className="dw-clear"><Check size={16} aria-hidden="true" /> All caught up.</p>
-            ) : (
-              <ul className="dw-issues">
-                {issueRows.map(({ m, o, missing, state, tone }) => (
-                  <li key={m.orderId} className={`dw-issue is-${tone}`}>
-                    <span className="dw-bar" aria-hidden="true" />
-                    <div className="dw-issue-main">
-                      <p><strong>{o.customerName}</strong>{isDemoOrder(o) && <span className="demo-tag">Demo</span>}<span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></p>
-                      <p className="dw-reason">{state}{o.deadline && !missing && <> · <time dateTime={o.deadline}>{formatInTz(o.deadline, tz)}</time></>}</p>
-                    </div>
-                    <Link to={`/orders?edit=${o.id}`} className="dw-act">{missing ? 'Add details' : 'Review'} <ArrowRight size={14} aria-hidden="true" /></Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="dw-sec dw-upcoming" aria-labelledby="dw-up">
-            <div className="dw-sec-head"><h3 id="dw-up">Coming up</h3><Link to="/plan" className="dw-all">Full schedule <ArrowRight size={14} aria-hidden="true" /></Link></div>
-            {upcoming.length === 0 ? <p className="dw-empty">Nothing is scheduled yet.</p> : (
-              <ol className="dw-up">
-                {upcoming.map((r) => { const o = byId[r.id]; const e = entry[r.id]; return (
-                  <li key={r.id}>
-                    <time dateTime={r.start}><b>{formatTimeInTz(r.start, tz)}</b><span>{r.date === today ? 'Today' : formatDayInTz(r.date)}</span></time>
-                    <div><strong>{o.customerName}</strong><span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></div>
-                    <span className={`dw-status${e?.risk === 'high' ? ' is-late' : e?.risk === 'medium' ? ' is-warn' : ''}`}>{e?.risk === 'high' ? 'At risk' : e?.risk === 'medium' ? 'Tight' : STATUS_LABEL[o.status]}</span>
-                  </li>); })}
-              </ol>
-            )}
-          </section>
+    <div className="ch" ref={ref} style={{ height }} onMouseLeave={() => setHover(null)}>
+      {width > 0 && (
+        <svg width={W} height={height} role="img" aria-label={ariaLabel}>
+          <defs><linearGradient id={`bar-${uid}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={barColor} /><stop offset="1" stopColor={barColor} stopOpacity="0.72" /></linearGradient>
+            <linearGradient id={`area-${uid}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={lineColor} stopOpacity="0.12" /><stop offset="1" stopColor={lineColor} stopOpacity="0" /></linearGradient></defs>
+          {Array.from({ length: 5 }, (_, k) => { const v = (gridMax.step * k); const yy = y(v, gridMax); return (
+            <g key={k}><line x1={m.l} x2={W - m.r} y1={yy} y2={yy} className="ch-grid" />
+              {show.bar && <text x={m.l - 10} y={yy + 4} textAnchor="end" className="ch-axis">{k === 0 ? '0' : tickBar(v)}</text>}
+              {show.line && <text x={W - m.r + 10} y={y(lScale.step * k, lScale) + 4} textAnchor="start" className="ch-axis">{compact(lScale.step * k)}</text>}
+            </g>); })}
+          {show.bar && points.map((p, i) => p.bar > 0 && <rect key={i} x={x(i) - barW / 2} y={y(p.bar, bScale)} width={barW} height={m.t + ih - y(p.bar, bScale)} rx={Math.min(6, barW / 2)} fill={`url(#bar-${uid})`} className={`ch-bar${hover === i ? ' is-hover' : ''}`} />)}
+          {area && <path d={area} fill={`url(#area-${uid})`} />}
+          {show.line && <path d={line} fill="none" stroke={lineColor} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" className="ch-line" />}
+          {show.line && points.map((p, i) => (n <= 31 || hover === i) && <circle key={i} cx={x(i)} cy={y(p.line, lScale)} r={hover === i ? 5 : 3.4} fill="#fff" stroke={lineColor} strokeWidth="2.2" />)}
+          {points.map((p, i) => i % every === 0 && <text key={i} x={x(i)} y={height - 10} textAnchor="middle" className="ch-axis">{p.label}</text>)}
+          {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={m.t + ih} className="ch-cursor" />}
+          {points.map((p, i) => <rect key={i} x={m.l + slot * i} y={m.t} width={slot} height={ih} fill="transparent" onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onTouchStart={() => setHover(i)} />)}
+        </svg>
+      )}
+      {hp && (
+        <div className="ch-tip" style={{ left: tipX, top: 8 }} role="status">
+          <b>{hp.full}</b>
+          {show.bar && <span><i style={{ background: barColor }} />{barName}<em>{fmtBar(hp.bar)}</em></span>}
+          {show.line && <span><i style={{ background: lineColor }} />{lineName}<em>{fmtLine(hp.line)}</em></span>}
         </div>
-
-        <aside className="dw-next" aria-labelledby="dw-next">
-          {nextStep ? (
-            <>
-              <p className="dw-label" id="dw-next">Suggested action</p>
-              <p className="dw-next-action">{nextStep.title}</p>
-              <p className="dw-next-why">{nextStep.detail}</p>
-              <Link to={nextStep.to} className="btn btn-primary">{nextStep.label} <ArrowRight size={16} aria-hidden="true" /></Link>
-            </>
-          ) : <p className="dw-clear" id="dw-next">Nothing is waiting on you.</p>}
-        </aside>
-      </div>
+      )}
     </div>
   );
 }
 
-// ---------- RiskTimeline ----------
-// Draws ONLY what the scheduler returned: each day's capacity window (startsAt + capacityMinutes) and the exact
-// time blocks it placed. Earlier orders = caramel, this order = blue, the part after the deadline = muted red.
-export function RiskTimeline({ entry, planner, tz }) {
-  const deadline = entry.deadline ? Date.parse(entry.deadline) : null;
-  const days = [...new Set((entry.blocks ?? []).map((b) => b.date))]
-    .map((date) => planner.days.find((d) => d.date === date))
-    .filter((d) => d && d.startsAt && d.capacityMinutes > 0);
-  if (days.length === 0) return null; // no scheduler detail for these days: show nothing rather than guess
-
-  const shownDays = days.slice(0, 5);
+// ---- Donut -----------------------------------------------------------------------------------------------------------------
+// slices: [{ key, label, value, color }]. Slices with 0 are not drawn. `center` is HTML-free text drawn in the hole.
+export function Donut({ slices, size = 136, thickness = 18, centerTop, centerBottom, ariaLabel }) {
+  const total = slices.reduce((s, x) => s + x.value, 0);
+  const r = (size - thickness) / 2; const c = size / 2; const circ = 2 * Math.PI * r;
+  let offset = 0;
   return (
-    <figure className="tl" aria-label="Where this order sits in your working days">
-      <figcaption>Where it sits in your working days <small>(times in {tz})</small></figcaption>
-      {shownDays.map((day) => {
-        const t0 = Date.parse(day.startsAt);
-        const span = day.capacityMinutes * 60000;
-        const pct = (t) => Math.max(0, Math.min(100, ((t - t0) / span) * 100));
-        const segs = [];
-        for (const o of day.orders) {
-          const s = Date.parse(o.start); const e = Date.parse(o.end);
-          if (o.id !== entry.orderId) { segs.push({ kind: 'other', left: pct(s), width: pct(e) - pct(s), label: `${o.customerName} · ${formatMinutes(o.scheduledMinutes)}` }); continue; }
-          const cut = deadline === null ? e : Math.max(s, Math.min(e, deadline));
-          if (cut > s) segs.push({ kind: 'self', left: pct(s), width: pct(cut) - pct(s), label: `This order · ${formatMinutes(Math.round((cut - s) / 60000))}` });
-          if (e > cut) segs.push({ kind: 'late', left: pct(cut), width: pct(e) - pct(cut), label: `After the deadline · ${formatMinutes(Math.round((e - cut) / 60000))}` });
-        }
-        const marker = deadline !== null && deadline >= t0 && deadline <= t0 + span ? pct(deadline) : null;
-        const summary = `${formatDayInTz(day.date)}: ${segs.map((s) => s.label).join('; ')}${marker !== null ? '; the deadline falls on this day' : ''}`;
-        return (
-          <div key={day.date} className="tl-day">
-            <span className="tl-label">{formatDayInTz(day.date)}<small>{formatMinutes(day.plannedMinutes)} of {formatMinutes(day.capacityMinutes)} booked</small></span>
-            <div className="tl-bar" role="img" aria-label={summary}>
-              {segs.map((s, i) => <i key={i} className={`tl-seg tl-${s.kind}`} style={{ left: `${s.left}%`, width: `${s.width}%` }} title={s.label} />)}
-              {marker !== null && <b className="tl-deadline" style={{ left: `${marker}%` }} title="Promised deadline" />}
-            </div>
-          </div>
-        );
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={ariaLabel} className="ch-donut">
+      <circle cx={c} cy={c} r={r} fill="none" stroke="#EFEBE3" strokeWidth={thickness} />
+      {total > 0 && slices.filter((s) => s.value > 0).map((s) => {
+        const len = (s.value / total) * circ; const gap = slices.filter((x) => x.value > 0).length > 1 ? Math.min(3, len * 0.2) : 0;
+        const el = <circle key={s.key} cx={c} cy={c} r={r} fill="none" stroke={s.color} strokeWidth={thickness} strokeDasharray={`${Math.max(len - gap, 0.5)} ${circ - Math.max(len - gap, 0.5)}`} strokeDashoffset={-offset} transform={`rotate(-90 ${c} ${c})`} strokeLinecap="butt" className="ch-slice" />;
+        offset += len; return el;
       })}
-      {days.length > shownDays.length && <p className="muted tl-more">+{days.length - shownDays.length} more working {days.length - shownDays.length === 1 ? 'day' : 'days'}</p>}
-      <ul className="tl-legend">
-        <li><i className="tl-seg tl-other" /> Earlier orders</li>
-        <li><i className="tl-seg tl-self" /> This order</li>
-        <li><i className="tl-seg tl-late" /> After the deadline</li>
-        <li><i className="tl-deadline-key" /> Promised deadline</li>
-      </ul>
-    </figure>
+      <text x={c} y={c - 2} textAnchor="middle" className="ch-center">{centerTop}</text>
+      <text x={c} y={c + 20} textAnchor="middle" className="ch-center-sub">{centerBottom}</text>
+    </svg>
   );
 }
 
-// ---------- RiskSection ----------
-const qty = (o) => (o.quantity > 1 ? ` × ${o.quantity}` : '');
-
-// Urgency: biggest predicted lateness first; overdue / unschedulable lead; then tightest buffers.
-const urgency = (e) => (e.kind === 'deadline_passed' || e.kind === 'unschedulable' ? Infinity : e.shortfallMinutes ?? -(e.bufferMinutes ?? 0));
-const byUrgency = (a, b) => urgency(b) - urgency(a) || (a.deadline ?? '').localeCompare(b.deadline ?? '');
-
-function impact(e) {
-  if (e.kind === 'deadline_passed') return { text: 'Past due', tone: 'late' };
-  if (e.kind === 'unschedulable') return { text: 'Cannot be scheduled', tone: 'late' };
-  if (e.bufferMinutes === null || e.bufferMinutes === undefined) return null;
-  return e.bufferMinutes < 0 ? { text: `${formatMinutes(-e.bufferMinutes)} late`, tone: 'late' } : { text: `${formatMinutes(e.bufferMinutes)} to spare`, tone: e.risk === 'medium' ? 'tight' : 'ok' };
+// ---- Sparkline -------------------------------------------------------------------------------------------------------------
+// values: numbers or null (a gap). Needs at least 2 real values, otherwise nothing is drawn (never a fake flat line).
+export function Sparkline({ values, color = INK, width = 112, height = 36 }) {
+  const uid = useId().replace(/:/g, '');
+  const real = values.filter((v) => v !== null);
+  if (real.length < 2) return null;
+  const max = Math.max(...real); const min = Math.min(...real); const span = max - min || 1;
+  const px = (i) => 2 + (i / (values.length - 1)) * (width - 4);
+  const py = (v) => height - 4 - ((v - min) / span) * (height - 8);
+  const pts = values.map((v, i) => (v === null ? null : [px(i), py(v)])).filter(Boolean);
+  const d = pts.map(([a, b], i) => `${i ? 'L' : 'M'}${a.toFixed(1)} ${b.toFixed(1)}`).join(' ');
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" className="ch-spark">
+      <defs><linearGradient id={`sp-${uid}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={color} stopOpacity="0.2" /><stop offset="1" stopColor={color} stopOpacity="0" /></linearGradient></defs>
+      <path d={`${d} L${pts.at(-1)[0].toFixed(1)} ${height} L${pts[0][0].toFixed(1)} ${height} Z`} fill={`url(#sp-${uid})`} />
+      <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts.at(-1)[0]} cy={pts.at(-1)[1]} r="2.6" fill={color} />
+    </svg>
+  );
 }
 
-function impactSentence(e, buf) {
-  if (e.kind === 'deadline_passed') return 'The promised deadline has already passed.';
-  if (e.kind === 'unschedulable') return e.reason;
-  if (e.bufferMinutes === null || e.bufferMinutes === undefined) return e.reason;
-  if (e.bufferMinutes < 0) return `Expected to finish ${formatMinutes(-e.bufferMinutes)} after the promised deadline.`;
-  return `Expected to finish ${formatMinutes(e.bufferMinutes)} before the promised deadline${e.risk === 'medium' ? `, which is less than the ${formatMinutes(buf)} safety buffer` : ''}.`;
+// ======== Animated amount figures ========
+
+// The three headline amounts of a payment (order total, confirmed paid, remaining balance).
+// The numbers are ordinary HTML text that counts up from the real backend values; a small, transparent Three.js canvas lays soft blue and
+// caramel particles and a light sweep over the figure that is changing. The canvas never holds information: if WebGL is missing or the
+// visitor prefers reduced motion, the numbers simply appear. Screen readers always get the final value, not the counting.
+
+const RUPEES = (n, decimals) => `₹${new Intl.NumberFormat('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n)}`;
+const decimalsOf = (n) => (Math.abs(n * 100 - Math.round(n * 100)) < 1e-6 && Math.round(n * 100) % 100 !== 0 ? 2 : 0);
+const ease = (t) => 1 - (1 - t) ** 3;
+const COUNT_MS = 950;
+const TINTS = { total: '#6F95CF', paid: '#3F66B0', left: '#C58A52' }; // soft blue, navy-blue, caramel
+
+// ---- the Three.js layer ----------------------------------------------------------------------------------------------------
+// Pixel-space orthographic scene over the figures row. It only renders while something is animating.
+async function createFx(host) {
+  const THREE = await import('three');
+  // Each scene gets a brand-new canvas: a canvas whose WebGL context was lost can never be reused, so one is never handed over.
+  const canvas = document.createElement('canvas'); canvas.className = 'pm-fx'; canvas.setAttribute('aria-hidden', 'true');
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true }); } catch { return null; } // no WebGL: numbers still animate
+  host.appendChild(canvas);
+  renderer.setClearColor(0x000000, 0);
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
+  const live = new Set();       // { object, update(t) -> bool (still alive) }
+  const disposables = [];
+  let raf = 0; let w = 1; let h = 1; let dead = false;
+
+  const dot = document.createElement('canvas'); dot.width = dot.height = 64;
+  { const g = dot.getContext('2d'); const r = g.createRadialGradient(32, 32, 0, 32, 32, 32); r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.45, 'rgba(255,255,255,0.55)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); }
+  const dotTex = new THREE.CanvasTexture(dot); disposables.push(dotTex);
+  const band = document.createElement('canvas'); band.width = 256; band.height = 8;
+  { const g = band.getContext('2d'); const r = g.createLinearGradient(0, 0, 256, 0); r.addColorStop(0, 'rgba(255,255,255,0)'); r.addColorStop(0.5, 'rgba(255,255,255,1)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 256, 8); }
+  const bandTex = new THREE.CanvasTexture(band); disposables.push(bandTex);
+
+  function resize() {
+    const r = host.getBoundingClientRect(); w = Math.max(1, r.width); h = Math.max(1, r.height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); renderer.setSize(w, h, false);
+    camera.left = 0; camera.right = w; camera.top = h; camera.bottom = 0; camera.updateProjectionMatrix();
+  }
+  const ro = new ResizeObserver(resize); ro.observe(host); resize();
+
+  function frame(now) {
+    raf = 0;
+    for (const e of [...live]) if (!e.update(now)) { scene.remove(e.object); e.object.geometry?.dispose(); e.object.material?.dispose(); live.delete(e); }
+    renderer.render(scene, camera);
+    if (live.size && !dead) raf = requestAnimationFrame(frame); else renderer.clear();
+  }
+  const kick = () => { if (!raf && !dead) raf = requestAnimationFrame(frame); };
+  // y is measured from the top of the host in CSS pixels; the scene's y axis points up.
+  const at = (rect) => ({ x: rect.left + rect.width / 2, y: h - (rect.top + rect.height / 2), rw: rect.width, rh: rect.height });
+
+  return {
+    // A short puff of soft particles rising from a number.
+    burst(rect, color, count = 26) {
+      const { x, y, rw } = at(rect);
+      const pos = new Float32Array(count * 3); const vel = [];
+      for (let i = 0; i < count; i++) {
+        pos[i * 3] = x + (Math.random() - 0.5) * rw * 0.8; pos[i * 3 + 1] = y + (Math.random() - 0.5) * 14;
+        vel.push({ vx: (Math.random() - 0.5) * 26, vy: 18 + Math.random() * 40 });
+      }
+      const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const mat = new THREE.PointsMaterial({ color, map: dotTex, size: 11, sizeAttenuation: false, transparent: true, opacity: 0.8, depthWrite: false });
+      const obj = new THREE.Points(geo, mat); scene.add(obj);
+      const t0 = performance.now(); let last = t0;
+      live.add({ object: obj, update(now2) {
+        const k = (now2 - t0) / 1100; if (k >= 1) return false;
+        const dt = Math.min(0.05, (now2 - last) / 1000); last = now2;
+        const a = geo.attributes.position;
+        for (let i = 0; i < count; i++) { a.array[i * 3] += vel[i].vx * dt; a.array[i * 3 + 1] += vel[i].vy * dt; vel[i].vy *= 0.985; }
+        a.needsUpdate = true; mat.opacity = 0.8 * (1 - ease(k)); return true;
+      } }); kick();
+    },
+    // A soft band of light that crosses a card once.
+    sweep(rect, color) {
+      const { x, y, rw, rh } = at(rect);
+      const mat = new THREE.MeshBasicMaterial({ color, map: bandTex, transparent: true, opacity: 0.0, depthWrite: false });
+      const obj = new THREE.Mesh(new THREE.PlaneGeometry(rw * 0.55, rh), mat); obj.position.set(x - rw * 0.6, y, 0); scene.add(obj);
+      const t0 = performance.now();
+      live.add({ object: obj, update(now2) {
+        const k = (now2 - t0) / 1000; if (k >= 1) return false;
+        obj.position.x = x - rw * 0.6 + rw * 1.2 * ease(k); mat.opacity = 0.26 * Math.sin(Math.PI * k); return true;
+      } }); kick();
+    },
+    resize,
+    dispose() {
+      dead = true; cancelAnimationFrame(raf); ro.disconnect();
+      for (const e of live) { scene.remove(e.object); e.object.geometry?.dispose(); e.object.material?.dispose(); }
+      live.clear(); disposables.forEach((d) => d.dispose()); renderer.dispose();
+      renderer.getContext()?.getExtension('WEBGL_lose_context')?.loseContext(); // hand the GPU context back now, not at garbage collection
+      canvas.remove();
+    },
+  };
 }
 
-function Row({ order, entry, tz, planner, byId, rec, recLabel = 'Recommended', buf, onSimulate }) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  const imp = impact(entry);
-  const risky = entry.risk !== 'low';
-  const ahead = (entry.precededBy ?? []).filter((p) => byId[p.orderId]);
-  const aheadMinutes = ahead.reduce((s, p) => s + p.minutes, 0);
-  const finish = entry.scheduledEnd;
+// ---- the component --------------------------------------------------------------------------------------------------------
+// figures: [{ key: 'total' | 'paid' | 'left', label, value (number | null) }]. `settleKey` replays a short settle (used after a rejection).
+export function AmountFigures({ figures, settleKey = 0 }) {
+  const reduced = usePrefersReducedMotion();
+  const host = useRef(null); const numEls = useRef({});
+  const fx = useRef(null);
+  const [shown, setShown] = useState(() => Object.fromEntries(figures.map((f) => [f.key, 0])));
+  const cur = useRef(Object.fromEntries(figures.map((f) => [f.key, 0]))); // what is on screen right now
+  const goal = useRef({});                                                  // the last real value each figure was sent to
+  const tweens = useRef({}); const raf = useRef(0);
+  const settle = useRef(settleKey);
+
+  // Three.js is loaded on demand and torn down with the component. Counting starts once it is ready (or has failed, or 1.5 s have
+  // passed), so the numbers and the particles always begin together and loading Three.js never swallows the start of the count.
+  const [ready, setReady] = useState(reduced);
+  useEffect(() => {
+    if (reduced) { setReady(true); return undefined; }
+    let gone = false;
+    const limit = setTimeout(() => { if (!gone) setReady(true); }, 1500);
+    createFx(host.current).then((f) => { if (gone) { f?.dispose(); return; } fx.current = f; setReady(true); }).catch(() => { if (!gone) setReady(true); });
+    return () => { gone = true; clearTimeout(limit); fx.current?.dispose(); fx.current = null; };
+  }, [reduced]);
+
+  useEffect(() => () => { cancelAnimationFrame(raf.current); raf.current = 0; }, []);
+
+  function run() {
+    if (raf.current) return;
+    const step = (now) => {
+      raf.current = 0; let again = false;
+      for (const [key, t] of Object.entries(tweens.current)) {
+        if (t.t0 === null) t.t0 = now; // the clock starts on the first painted frame, so a busy moment (loading Three.js) never eats the animation
+        const k = Math.max(0, Math.min(1, (now - t.t0) / COUNT_MS));
+        cur.current[key] = t.from + (t.to - t.from) * ease(k);
+        if (k < 1) again = true; else { cur.current[key] = t.to; delete tweens.current[key]; }
+      }
+      setShown({ ...cur.current });
+      if (again) raf.current = requestAnimationFrame(step);
+    };
+    raf.current = requestAnimationFrame(step);
+  }
+  const play = (key, from, to, delay = 0) => {
+    const el = numEls.current[key]; const hostRect = host.current?.getBoundingClientRect();
+    if (reduced || !el) { cur.current[key] = to; setShown((s) => ({ ...s, [key]: to })); return; }
+    setTimeout(() => {
+      tweens.current[key] = { from, to, t0: null }; run();
+      if (fx.current && hostRect) {
+        const r = el.getBoundingClientRect(); const rel = { left: r.left - hostRect.left, top: r.top - hostRect.top, width: r.width, height: r.height };
+        const card = el.closest('.pm-fig')?.getBoundingClientRect();
+        if (to > 0) fx.current.burst(rel, TINTS[key] ?? '#6F95CF');
+        if (card) fx.current.sweep({ left: card.left - hostRect.left, top: card.top - hostRect.top, width: card.width, height: card.height }, TINTS[key] ?? '#6F95CF');
+      }
+    }, delay);
+  };
+
+  // Whenever a real value differs from what the figure was last sent to, count from where it is now to the new value.
+  const values = figures.map((f) => f.value);
+  useEffect(() => {
+    if (!ready) return;
+    figures.forEach((f, i) => {
+      if (typeof f.value !== 'number') { goal.current[f.key] = null; cur.current[f.key] = 0; return; }
+      if (goal.current[f.key] === f.value) return;
+      const first = goal.current[f.key] === undefined;
+      goal.current[f.key] = f.value;
+      play(f.key, cur.current[f.key], f.value, first ? i * 130 : 0);
+    });
+  }, [ready, ...values]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A rejection changes no amount, but the figures re-settle onto the confirmed values so the owner sees them confirmed again.
+  useEffect(() => {
+    if (!ready || settle.current === settleKey) return;
+    settle.current = settleKey;
+    figures.forEach((f, i) => { if (typeof f.value === 'number' && f.value > 0) play(f.key, f.value * 0.55, f.value, i * 90); });
+  }, [settleKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <li className={`rk rk-${entry.risk}${open ? ' is-open' : ''}`}>
-      <div className="rk-head">
-        <div className="rk-who"><strong>{order.customerName}</strong><span>{order.item}{qty(order)}</span></div>
-        <div className="rk-when"><small>Promised deadline</small>{order.deadline ? formatInTz(order.deadline, tz) : '—'}</div>
-        <div className="rk-when"><small>Predicted finish</small>{finish ? formatInTz(finish, tz) : entry.kind === 'unschedulable' ? 'Not within the horizon' : '—'}</div>
-        <div className={`rk-impact rk-impact-${imp?.tone ?? 'ok'}`}>{imp?.text ?? '—'}</div>
-        <RiskBadge risk={entry.risk} />
-        <button type="button" className="rk-toggle" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
-          {risky ? 'Why is this at risk?' : 'Details'} <ChevronDown size={15} aria-hidden="true" />
-        </button>
-      </div>
-
-      {open && (
-        <div id={id} className="rk-body">
-          <div className="rk-compare">
-            <div><small>Promised deadline</small><b>{formatLongInTz(order.deadline, tz)}</b></div>
-            <ArrowRight size={20} className="rk-arrow" aria-hidden="true" />
-            <div className={entry.risk === 'high' ? 'is-late' : ''}><small>Expected finish</small><b>{finish ? formatLongInTz(finish, tz) : 'Not within the planning horizon'}</b></div>
-          </div>
-          <p className={`rk-sentence rk-sentence-${entry.risk}`}>{impactSentence(entry, buf)}</p>
-
-          <div className="rk-cols">
-            <div>
-              <h4>{risky ? 'Why is this at risk?' : 'How it was scheduled'}</h4>
-              <ul className="rk-why">
-                <li>{entry.reason}</li>
-                <li>Needs {formatMinutes(entry.prepTimeMinutes ?? order.prepTimeMinutes)} of preparation; work is planned to start {formatInTz(entry.scheduledStart, tz)}.</li>
-                {ahead.length > 0 ? (
-                  <li>
-                    Scheduled behind {ahead.length} {plural(ahead.length, 'order', 'orders')} with earlier deadlines ({formatMinutes(aheadMinutes)} of preparation):{' '}
-                    {ahead.map((p, i) => <span key={p.orderId}>{i > 0 && ', '}{byId[p.orderId].customerName} ({formatMinutes(p.minutes)})</span>)}.
-                  </li>
-                ) : entry.precededBy ? <li>No other order is scheduled ahead of it.</li> : null}
-              </ul>
-            </div>
-
-            {risky && (
-              <div>
-                <h4>Practical recovery</h4>
-                {entry.suggestedDeadline && (
-                  <div className="rk-suggest">
-                    <small>Suggested deadline · a recommendation, not a change</small>
-                    <b>{formatLongInTz(entry.suggestedDeadline, tz)}</b>
-                    <span>The customer's promised deadline stays {formatInTz(order.deadline, tz)} unless you change it.</span>
-                  </div>
-                )}
-                {rec && <p className="rk-rec"><b>{recLabel}:</b> {rec}</p>}
-                <div className="rk-actions">
-                  {onSimulate && <button type="button" className="btn btn-sm btn-primary" onClick={() => onSimulate({ orderId: order.id, deadline: entry.suggestedDeadline ?? order.deadline })}><FlaskConical size={14} aria-hidden="true" />{entry.suggestedDeadline ? 'Try the suggested deadline' : 'Simulate a schedule change'}</button>}
-                  <Link className="btn btn-sm" to={`/orders?edit=${order.id}`}><Pencil size={14} aria-hidden="true" />Edit this order</Link>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <RiskTimeline entry={entry} planner={planner} tz={tz} />
+    <div className="pm-figures" ref={host}>
+      {figures.map((f) => (
+        <div key={f.key} className={`pm-fig is-${f.key}`}>
+          <span className="pm-fig-label">{f.label}</span>
+          {typeof f.value === 'number' ? (
+            <>
+              <b className="pm-fig-num" aria-hidden="true" ref={(el) => { numEls.current[f.key] = el; }}>{RUPEES(shown[f.key] ?? 0, decimalsOf(f.value))}</b>
+              <span className="sr-only">{RUPEES(f.value, decimalsOf(f.value))}</span>
+            </>
+          ) : <b className="pm-fig-num is-none" ref={(el) => { numEls.current[f.key] = el; }}>Not priced</b>}
         </div>
-      )}
-    </li>
-  );
-}
-
-function RulesDialog({ buf, onClose }) {
-  const b = formatMinutes(buf);
-  return (
-    <Modal title="How is risk calculated?" onClose={onClose}>
-      <p className="muted rules-intro">Conversa's scheduler places your open orders earliest-deadline-first inside your working hours and daily capacity, then compares each order's expected finish with its promised deadline.</p>
-      <dl className="rules">
-        <div><dt><RiskBadge risk="high" /></dt><dd>The expected finish is after the deadline, or the deadline has already passed.</dd></div>
-        <div><dt><RiskBadge risk="medium" /></dt><dd>It finishes on time, but with less than {b} of buffer.</dd></div>
-        <div><dt><RiskBadge risk="low" /></dt><dd>It finishes on time with at least {b} of buffer.</dd></div>
-        <div><dt><RiskBadge needsDetails /></dt><dd>Preparation time or deadline is missing, so the order cannot be reliably scheduled. It is never given a guessed finish time or risk.</dd></div>
-      </dl>
-      <p className="muted rules-foot">Completed and cancelled orders are ignored. Today only counts the working time that is left.</p>
-    </Modal>
-  );
-}
-
-// Everything shown is the scheduling engine's output (planner API); nothing is recalculated in the browser.
-export function RiskSection({ planner, orders, onSimulate, eyebrow = 'Orders at risk', title = "Let's protect your deadlines.", subtitle = 'See which orders need attention, what is causing the conflict, and what you can do next.' }) {
-  const [rules, setRules] = useState(false);
-  const tz = planner.range.timezone;
-  const buf = planner.rules?.riskBufferMinutes ?? 240;
-  const byId = Object.fromEntries(orders.map((o) => [o.id, o]));
-  const schedule = (planner.schedule ?? []).filter((e) => byId[e.orderId]);
-  // The engine's own recovery suggestion for the order (planner.nextMoves); older responses fall back to its recommendation.
-  const recovery = (id) => (planner.nextMoves ?? []).find((m) => m.orderId === id)?.recovery ?? null;
-  const recFor = (id) => recovery(id) ?? planner.recommendations.find((r) => r.orderId === id)?.action ?? null;
-  const recLabelFor = (id) => (recovery(id) ? 'Recovery' : 'Recommended');
-
-  const high = schedule.filter((e) => e.risk === 'high').sort(byUrgency);
-  const medium = schedule.filter((e) => e.risk === 'medium').sort(byUrgency);
-  const low = schedule.filter((e) => e.risk === 'low');
-  const details = planner.unscheduledOrders.filter((u) => byId[u.id]);
-  const overdue = high.filter((e) => e.kind === 'deadline_passed').length;
-  const predicted = high.length - overdue;
-
-  const sentences = [];
-  if (predicted > 0) sentences.push(`${predicted} ${plural(predicted, 'order is', 'orders are')} predicted to miss ${plural(predicted, 'its deadline', 'their deadlines')}.`);
-  if (overdue > 0) sentences.push(`${overdue} ${plural(overdue, 'order is', 'orders are')} already past due.`);
-  if (predicted + overdue === 0 && medium.length > 0) sentences.push(`No orders are predicted to miss their deadlines, but ${medium.length} ${plural(medium.length, 'has', 'have')} less than ${formatMinutes(buf)} of buffer.`);
-  if (high.length + medium.length === 0 && low.length > 0) sentences.push(low.length === 1 ? 'Your scheduled order is on track.' : `All ${low.length} scheduled orders are on track.`);
-  if (details.length > 0) sentences.push(`${details.length} ${plural(details.length, 'order needs', 'orders need')} details before ${plural(details.length, 'it', 'they')} can be scheduled.`);
-  const total = high.length + medium.length + low.length + details.length;
-
-  const rulesButton = <button type="button" className="rk-rules-link" onClick={() => setRules(true)}><Info size={14} aria-hidden="true" /> How is risk calculated?</button>;
-
-  return (
-    <>
-      <SectionHead eyebrow={eyebrow} title={title} action={rulesButton}>{subtitle}</SectionHead>
-      {total === 0 ? (
-        <StateMessage message="No open orders to schedule." />
-      ) : (
-        <>
-          {sentences.length > 0 && <p className="sr-only" aria-live="polite">{sentences.join(' ')}</p>}
-          <dl className="rk-overview" aria-label="Risk overview">
-            <div className="rk-ov rk-ov-high"><dt>High risk</dt><dd><CountUp value={high.length} /></dd><small>{overdue > 0 ? `${overdue} already past due` : 'Predicted to miss the deadline'}</small></div>
-            <div className="rk-ov rk-ov-medium"><dt>Tight buffer</dt><dd><CountUp value={medium.length} /></dd><small>Under {formatMinutes(buf)} to spare</small></div>
-            <div className="rk-ov rk-ov-low"><dt>On track</dt><dd><CountUp value={low.length} /></dd><small>{formatMinutes(buf)} or more to spare</small></div>
-            <div className="rk-ov rk-ov-details"><dt>Needs details</dt><dd><CountUp value={details.length} /></dd><small>Can't be scheduled yet</small></div>
-          </dl>
-
-          {high.length > 0 && (
-            <section className="rk-group rk-group-high" aria-label="High risk">
-              <h3>High risk <span>{high.length}</span></h3>
-              <p>Predicted to miss the promised deadline, or already past it. Most urgent first.</p>
-              <ol className="rk-list">{high.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} recLabel={recLabelFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
-            </section>
-          )}
-
-          {medium.length > 0 && (
-            <section className="rk-group rk-group-medium" aria-label="Tight buffer">
-              <h3>Tight buffer <span>{medium.length}</span></h3>
-              <p>On time, but with less than {formatMinutes(buf)} of safety buffer.</p>
-              <ol className="rk-list">{medium.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={recFor(e.orderId)} recLabel={recLabelFor(e.orderId)} buf={buf} onSimulate={onSimulate} />)}</ol>
-            </section>
-          )}
-
-          {details.length > 0 && (
-            <section className="rk-group rk-group-details" aria-label="Needs details">
-              <h3>Needs details <span>{details.length}</span></h3>
-              <p className="muted">Left out of scheduling until complete. Nothing is guessed: no finish time and no risk is assigned.</p>
-              <ul className="rk-list">
-                {details.map((u) => {
-                  const o = byId[u.id];
-                  return (
-                    <li key={u.id} className="rk rk-details">
-                      <div className="rk-head rk-head-details">
-                        <div className="rk-who"><strong>{o.customerName}</strong><span>{o.item}{qty(o)}</span></div>
-                        <div className="rk-when"><small>Missing</small>{MISSING[u.reason]}</div>
-                        <div className="rk-when"><small>Promised deadline</small>{o.deadline ? formatInTz(o.deadline, tz) : 'Not set'}</div>
-                        <RiskBadge needsDetails />
-                        <Link className="btn btn-sm btn-primary" to={`/orders?edit=${o.id}`}>Complete order details</Link>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          )}
-
-          {low.length > 0 && (
-            <section className="rk-group rk-group-low" aria-label="On track">
-              <h3>On track <span>{low.length}</span></h3>
-              <ol className="rk-list">{low.map((e) => <Row key={e.orderId} order={byId[e.orderId]} entry={e} tz={tz} planner={planner} byId={byId} rec={null} buf={buf} />)}</ol>
-            </section>
-          )}
-        </>
-      )}
-      {rules && <RulesDialog buf={buf} onClose={() => setRules(false)} />}
-    </>
-  );
-}
-
-// ---------- ConnectSection ----------
-const CHANNELS = [
-  { key: 'whatsapp', name: 'WhatsApp', Logo: WhatsAppLogo, purpose: 'Customer messages and order requests will arrive in your inbox, ready to turn into orders.' },
-  { key: 'instagram', name: 'Instagram', Logo: InstagramLogo, purpose: 'Direct messages from your profile will land in the same inbox, next to every other conversation.' },
-];
-
-// Neither channel is wired up: the tiles are informational only (no buttons, no OAuth, no connected state).
-export function ConnectSection() {
-  return (
-    <div className="cx">
-      <h2 className="cx-lead">Bring your conversations together.</h2>
-      <div className="cx-body">
-        <div className="cx-intro">
-          <p className="eyebrow">Channels</p>
-          <h3 className="cx-title">Your conversations. <em>One workspace.</em></h3>
-          <p className="cx-text">Connect the channels where your customers already reach you, or get started by adding orders manually.</p>
-        </div>
-
-        <ul className="cx-tiles">
-          {CHANNELS.map(({ key, name, Logo, purpose }) => (
-            <li key={key} className={`cx-tile cx-${key}`}>
-              <Logo size={44} />
-              <div>
-                <p className="cx-name">{name} <span className="cx-status">Coming soon · Not connected</span></p>
-                <p className="cx-purpose">{purpose}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="cx-paths">
-        <p className="cx-paths-label">Conversa works today, without either channel.</p>
-        <div className="cx-actions">
-          <Link to="/plan" className="btn btn-primary">Continue with demo data <ArrowRight size={16} aria-hidden="true" /></Link>
-          <Link to="/orders?edit=new" className="btn"><PenLine size={15} aria-hidden="true" /> Add an order manually</Link>
-        </div>
-      </div>
+      ))}
     </div>
-  );
-}
-
-// ---------- ChannelLogos ----------
-// Brand marks drawn as inline SVG (lucide-react ships no brand logos, and no icon package with them is installed).
-export function WhatsAppLogo({ size = 40 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="WhatsApp">
-      <circle cx="24" cy="24" r="24" fill="#25D366" />
-      <path fill="#fff" d="M24.1 10.5a13.3 13.3 0 0 0-11.4 20.1l-1.9 6.9 7.1-1.9A13.3 13.3 0 1 0 24.1 10.5Zm0 2.4a10.9 10.9 0 1 1-5.6 20.3l-.5-.3-4.2 1.1 1.1-4.1-.3-.5A10.9 10.9 0 0 1 24.1 12.9Z" />
-      <path fill="#fff" d="M19.2 17.8c-.3-.7-.6-.7-.9-.7h-.7c-.3 0-.7.1-1.1.5-.4.4-1.400 1.400-1.400 3.400s1.500 3.900 1.700 4.200c.2.300 2.900 4.600 7.100 6.200 3.500 1.400 4.200 1.100 4.900 1 .8-.1 2.500-1 2.800-2 .4-1 .4-1.800.2-2-.1-.2-.4-.3-.8-.5l-2.700-1.300c-.4-.1-.6-.2-.9.200l-1.200 1.500c-.2.300-.5.300-.9.100-.4-.2-1.700-.6-3.200-2-1.200-1.100-2-2.400-2.200-2.800-.2-.4 0-.6.200-.8l.6-.7c.2-.2.300-.4.400-.7.100-.3.100-.5 0-.7l-1.200-3Z" />
-    </svg>
-  );
-}
-
-export function InstagramLogo({ size = 40 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="Instagram">
-      <defs>
-        <radialGradient id="ig-grad" cx="0.3" cy="1.05" r="1.25">
-          <stop offset="0" stopColor="#FFD879" />
-          <stop offset="0.25" stopColor="#F9A03A" />
-          <stop offset="0.5" stopColor="#E1306C" />
-          <stop offset="0.8" stopColor="#A133B8" />
-          <stop offset="1" stopColor="#5851DB" />
-        </radialGradient>
-      </defs>
-      <rect width="48" height="48" rx="13" fill="url(#ig-grad)" />
-      <rect x="12.5" y="12.5" width="23" height="23" rx="7" fill="none" stroke="#fff" strokeWidth="2.6" />
-      <circle cx="24" cy="24" r="5.6" fill="none" stroke="#fff" strokeWidth="2.6" />
-      <circle cx="30.8" cy="17.2" r="1.7" fill="#fff" />
-    </svg>
   );
 }
