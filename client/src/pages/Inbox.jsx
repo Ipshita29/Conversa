@@ -1,15 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check } from 'lucide-react';
 import { attachmentSrc, extractMessagePayment, extractPaymentText, getConversations, getIntegrations, getPayments, listOrders, updateConversation, uploadConversationImage, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { CHANNEL_LABEL, STATUS_LABEL } from '../utils/format.js';
 import { Drawer, Modal, StateMessage, StatusBadge } from '../components/UI.jsx';
-import { METHOD as PAY_METHOD, STATUS as PAY_STATUS, StatusPill } from '../components/Payments.jsx';
+import { METHOD as PAY_METHOD, REC_STATUS, StatusPill, recStatus } from '../components/Payments.jsx';
 import { DraftOrder } from '../components/Orders.jsx';
 import { parsePaymentText } from '../../../server/services/paymentExtraction.js';
 import { formatMoney } from '../utils/format.js';
-import '../css/Inbox.css';
+import '../css/Workspace.css';
 
 const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp'], ['instagram', 'Instagram']];
 const CHANNEL_ICON = { whatsapp: MessageCircle, instagram: Camera };
@@ -83,6 +83,14 @@ export default function Inbox() {
 
   useEffect(() => { setDrafting(false); setPayNote(null); }, [selected?.id]);
 
+  // Pictures are checked for a payment in the background. While any is still being read, look again every few seconds.
+  const scanning = convs.some((c) => c.messages.some((m) => m.scan?.state === 'processing'));
+  useEffect(() => {
+    if (!scanning) return undefined;
+    const t = setInterval(() => { conv.reload(); paymentsQ.reload(); }, 3000);
+    return () => clearInterval(t);
+  }, [scanning]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // A customer's payment message or screenshot is filed as "Verification pending" on the linked order. It is a claim, never proof.
   async function readAsPayment(m) {
     setPayBusy(m.id); setPayNote(null);
@@ -100,7 +108,7 @@ export default function Inbox() {
     try {
       await uploadConversationImage(selected.id, file);
       conv.reload();
-      setPayNote({ convId: selected.id, ok: true, text: 'Screenshot added to the chat. Use “Extract payment details” under it to read it. Nothing is saved as a payment until you do.', orderId: selected.orderId, plain: true });
+      setPayNote({ convId: selected.id, ok: true, text: 'Screenshot added to the chat. Use “Extract payment details” under it to read it. Nothing is saved as a payment until you do. (Pictures your customers send on WhatsApp are read automatically.)', orderId: selected.orderId, plain: true });
     } catch (er) { setPayNote({ convId: selected.id, ok: false, text: er.message, orderId: selected.orderId }); } finally { setPayBusy(null); }
   }
   // 2. Read it (server-side Groq vision) and file it as Verification pending on the chat's order. Asking twice returns the same record.
@@ -109,7 +117,7 @@ export default function Inbox() {
     try {
       const r = await extractMessagePayment(selected.id, m);
       conv.reload(); paymentsQ.reload();
-      setPayNote({ convId: selected.id, ok: true, text: r.existing ? 'This screenshot was already read. Its payment is below.' : `Read from the screenshot: ${formatMoney(r.payment.amount)}${r.payment.transactionId ? `, reference ${r.payment.transactionId}` : ''}. Filed as Verification pending. It is not counted as received until you confirm it.`, orderId: selected.orderId });
+      setPayNote({ convId: selected.id, ok: true, text: r.existing ? 'This screenshot was already read. Its payment is below.' : `Read from the screenshot: ${formatMoney(r.payment.amount)}${r.payment.transactionId ? `, reference ${r.payment.transactionId}` : ''}. Filed as Awaiting Verification. It is not counted as received until you confirm it.`, orderId: selected.orderId });
     } catch (er) { setPayNote({ convId: selected.id, ok: false, text: er.message, orderId: selected.orderId, fallback: er.status !== 409 }); } finally { setPayBusy(null); }
   }
 
@@ -157,7 +165,7 @@ export default function Inbox() {
           ) : shown.length === 0 ? (
             <div className="im-empty"><Search size={28} aria-hidden="true" /><h2>{q ? 'No chats found' : 'Nothing here'}</h2><p>{q ? `Nothing matches “${query.trim()}”.` : `No ${FILTERS.find(([k]) => k === filter)?.[1].toLowerCase()} conversations.`}</p>{(q || filter !== 'all') && <button type="button" className="btn btn-sm" onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filters</button>}</div>
           ) : (
-            <ul className="im-list">
+            <ul className="im-list" data-lenis-prevent>
               {shown.map((c) => {
                 const m = lastOf(c); const o = orderOf(c.orderId); const sel = selected?.id === c.id;
                 return (
@@ -202,7 +210,8 @@ export default function Inbox() {
                 </div>
               </header>
 
-              <div className="im-scroll" ref={scrollRef} onScroll={onScroll} tabIndex={0} aria-label="Messages">
+              <div className="im-scroll" ref={scrollRef} onScroll={onScroll} data-lenis-prevent tabIndex={0} aria-label="Messages">
+                {selected.isDemo && <div className="notice info im-demo-note" role="note"><b>Demo conversation.</b> These are sample messages and pictures to show how Conversa organises an order. They are not live WhatsApp or Instagram messages.</div>}
                 {markError && <div className="notice error" role="alert">Couldn't mark this conversation as read: {markError}</div>}
                 {groups.map((g) => (
                   <div key={g.key} className="im-day">
@@ -211,11 +220,20 @@ export default function Inbox() {
                       const mine = m.from && m.from !== 'customer';
                       return (
                         <div key={m.id} className={`im-msg ${mine ? 'is-mine' : 'is-theirs'}`}>
-                          <div className="im-bubble">{m.attachment && <button type="button" className="im-img" onClick={() => setViewer(attachmentSrc(m.attachment))} aria-label="View the picture full size"><img src={attachmentSrc(m.attachment)} alt="Picture sent in this chat" loading="lazy" /></button>}{m.text && <p>{m.text}</p>}<span className="im-time"><time dateTime={m.at}>{timeOf(m.at)}</time></span>
+                          <div className="im-bubble">{m.attachment && <button type="button" className="im-img" onClick={() => setViewer({ src: attachmentSrc(m.attachment), m })} aria-label="View the picture full size"><img src={attachmentSrc(m.attachment)} alt="Picture sent in this chat" loading="lazy" /></button>}{m.text && <p>{m.text}</p>}<span className="im-time"><time dateTime={m.at}>{timeOf(m.at)}</time></span>
                             {m.attachment && (m.payment
-                              ? <span className="im-pay"><b>Payment {formatMoney(m.payment.amount)} · {m.payment.status === 'confirmed' ? 'Confirmed' : m.payment.status === 'rejected' ? 'Rejected' : 'Verification pending'}</b><Link className="im-link" to={`/payments?order=${selected.orderId}`}>Review in Payments</Link></span>
+                              ? <span className={`im-pay${recStatus(m.payment) === 'pending_review' ? ' is-review' : ''}`} role="status">
+                                  <b>{m.scan?.state ? 'Payment detected' : 'Payment'} {formatMoney(m.payment.amount)} · {REC_STATUS[recStatus(m.payment)]}</b>
+                                  {recStatus(m.payment) === 'pending_review' && <small><AlertTriangle size={11} aria-hidden="true" /> {m.scan?.reason ?? 'Needs a look before it is used.'}</small>}
+                                  <Link className="im-link" to={`/payments?payment=${m.payment.id}`}>{recStatus(m.payment) === 'pending_review' ? 'Review in Payments' : 'Open in Payments'}</Link></span>
+                              : m.scan?.state === 'processing' ? <span className="im-pay" role="status"><b><span className="im-spin" aria-hidden="true" /> Checking for a payment…</b></span>
+                              : m.scan?.state === 'failed' ? <span className="im-pay is-failed" role="alert"><b>Couldn’t read this screenshot</b><small>{m.scan.reason}</small>
+                                  <button type="button" className="im-link" onClick={() => readPicture(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Trying…' : 'Try again'}</button>
+                                  <Link className="im-link" to={`/payments?record=${selected.orderId ?? ''}`}>Record it by hand</Link></span>
+                              : m.scan?.state === 'duplicate' ? <span className="im-pay"><b>Already recorded</b><small>{m.scan.reason}</small></span>
+                              : m.scan?.state === 'not_payment' ? <span className="im-pay"><b>Reference image</b>{selected.orderId ? <small>Shown in the order’s details</small> : <small>Link an order to keep it with the order</small>}</span>
                               : <span className="im-pay"><b>May be a payment proof</b>{selected.orderId ? <button type="button" className="im-link" onClick={() => readPicture(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Reading…' : 'Extract payment details'}</button> : <small>Link an order to read it</small>}</span>)}
-                            {!mine && m.text && (() => { const x = parsePaymentText(m.text); return x.isPayment ? (
+                            {!mine && m.text && !m.attachment && (() => { const x = parsePaymentText(m.text); return x.isPayment ? (
                               <span className="im-pay"><b>Looks like a payment{x.amount ? ` · ${formatMoney(x.amount)}` : ''}</b>
                                 {selected.orderId ? <button type="button" className="im-link" onClick={() => readAsPayment(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Reading…' : 'Read as payment'}</button> : <small>Link an order to file it</small>}</span>) : null; })()}
                           </div>
@@ -270,7 +288,12 @@ export default function Inbox() {
         </section>
       </div>
 
-      {viewer && <Modal title="Picture from the chat" onClose={() => setViewer(null)}><div className="pm-proof-big"><img src={viewer} alt="Picture sent in this chat" /></div><p className="pm-fine">A screenshot does not prove the money reached your account.</p></Modal>}
+      {viewer && (
+        <Modal variant="lightbox" title={viewer.m.payment || ['filed', 'review', 'duplicate'].includes(viewer.m.scan?.state) ? 'Payment screenshot' : 'Reference picture'} onClose={() => setViewer(null)}>
+          <div className="pm-proof-big"><img src={viewer.src} alt="Picture sent in this chat" /></div>
+          {viewer.m.payment ? <p className="pm-fine">A screenshot does not prove the money reached your account. <Link to={`/payments?payment=${viewer.m.payment.id}`}>Open the payment</Link></p>
+            : selected?.orderId && <p className="pm-fine">Kept with the order. <Link to={`/orders?edit=${selected.orderId}`}>Open the order</Link></p>}
+        </Modal>)}
 
       {paste && (
         <Drawer title="Draft an order from a message" onClose={() => setPaste(false)}>

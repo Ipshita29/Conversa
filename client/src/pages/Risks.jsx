@@ -1,8 +1,8 @@
 import { Link, useNavigate } from 'react-router-dom';
 import useWorkspace from '../hooks/useWorkspace.js';
 import { StateMessage } from '../components/UI.jsx';
-import { RiskSection } from '../components/Insights.jsx';
-import '../css/Plan.css';
+import { RiskSection } from '../components/Workspace.jsx';
+import '../css/Workspace.css';
 
 // The detailed view kept off the Plan page: every at-risk order with its reasoning.
 export default function Risks() {

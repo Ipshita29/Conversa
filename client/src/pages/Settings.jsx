@@ -5,7 +5,7 @@ import useAsync from '../hooks/useAsync.js';
 import { formatDateTime, CHANNEL_LABEL } from '../utils/format.js';
 import { PageHeader } from '../components/Layout.jsx';
 import { StateMessage } from '../components/UI.jsx';
-import '../css/Settings.css';
+import '../css/Layout.css';
 
 const STATUS_TEXT = { connected: 'Connected', disconnected: 'Not connected', unavailable: 'Unavailable', demo: 'Demo' };
 const ICON = { whatsapp: MessageCircle, instagram: Camera };
