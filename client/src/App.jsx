@@ -9,6 +9,7 @@ import Analytics from './pages/Analytics.jsx';
 import WhatIf from './pages/WhatIf.jsx';
 import Inbox from './pages/Inbox.jsx';
 import Settings from './pages/Settings.jsx';
+import CursorTrail from './components/CursorTrail.jsx';
 
 // Old addresses keep working: the Deadlines page became Plan (and its what-if section became What-if), Operations and Dashboard were merged.
 function Moved({ to, simulation }) {
@@ -18,7 +19,7 @@ function Moved({ to, simulation }) {
 
 export default function App() {
   return (
-    <div className="app">
+    <CursorTrail className="app">
       <Navbar />
       <div className="app-body">
         <main className="app-main">
@@ -41,6 +42,6 @@ export default function App() {
         </main>
         <Footer />
       </div>
-    </div>
+    </CursorTrail>
   );
 }

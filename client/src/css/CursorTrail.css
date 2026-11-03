@@ -1,0 +1,4 @@
+/* Cursor trail: the canvas fills the viewport, sits behind the content and never receives the pointer. */
+.ct { position: relative; isolation: isolate; }
+.ct-canvas { position: fixed; inset: 0; z-index: -1; width: 100vw; height: 100vh; pointer-events: none; user-select: none; display: block; }
+@media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) { .ct-canvas { display: none; } }
