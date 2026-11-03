@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDemoOrders, DEMO_MESSAGES, DEMO_MARK } from '../scripts/demo-data.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildDemoOrders, demoClock, DEMO_CONVERSATIONS, DEMO_MARK } from '../scripts/demo-data.js';
 import { computePlan, simulate, suggestScenario } from '../services/workloadEngine.js';
 import { defaultSettings } from '../config/defaults.js';
 
+const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'demo');
 const settings = { ...defaultSettings(), timezone: 'Asia/Kolkata' };
 const start = Date.parse('2026-10-19T00:00:00Z'); // a Monday, then 14 days in 2-hour steps: every hour of day, weekends included
 const moments = Array.from({ length: 24 * 7 }, (_, i) => new Date(start + i * 2 * 3600000));
@@ -13,7 +17,7 @@ test('the demo set is exactly five clearly-marked open orders with prices and be
   const orders = buildDemoOrders(settings, moments[0]);
   assert.equal(orders.length, 5);
   assert.ok(orders.every((o) => o.notes.startsWith(DEMO_MARK)));
-  assert.deepEqual(orders.map((o) => o.customerName), ['Meera Iyer', 'Rohan Mehta', 'Kabir Singh', 'Aanya Sharma', 'Neha Sharma']);
+  assert.deepEqual(orders.map((o) => o.customerName), ['Aanya Sharma', 'Kartik Singh', 'Rohan Mehta', 'Neha Sharma', 'Meera Iyer']);
   assert.equal(new Set(orders.map((o) => o.customerName)).size, 5); // no duplicates
   assert.ok(orders.every((o) => ['pending', 'confirmed', 'in_progress'].includes(o.status)));
   assert.deepEqual([...new Set(orders.map((o) => o.source))].sort(), ['instagram', 'whatsapp']);
@@ -21,14 +25,12 @@ test('the demo set is exactly five clearly-marked open orders with prices and be
   assert.ok(orders.some((o) => o.customisation));
 });
 
-test('the demo schedule is real: at every moment of the week, every demo order fits the scheduler without hidden problems', () => {
-  for (const now of moments) {
-    const orders = withIds(buildDemoOrders(settings, now));
-    const plan = computePlan({ orders, settings, now, rangeDays: 7 });
-    assert.equal(plan.schedule.length, 5, now.toISOString());
-    assert.equal(plan.unscheduledOrders.length, 0, now.toISOString());
-    assert.equal(plan.schedule.filter((e) => e.kind === 'deadline_passed').length, 1, now.toISOString()); // exactly Meera
-  }
+test('the demo schedule is real: planned from 9:00 on 3 November every order fits the scheduler and the day is feasible', () => {
+  const now = demoClock(settings);
+  const orders = withIds(buildDemoOrders(settings, now));
+  const plan = computePlan({ orders, settings, now, rangeDays: 1 });
+  assert.equal(plan.schedule.length, 5); assert.equal(plan.unscheduledOrders.length, 0);
+  assert.equal(plan.schedule.filter((e) => e.risk === 'high').length, 0);
 });
 
 test('there is always an engine-confirmed experiment to pitch, and it never creates a new risk', () => {
@@ -41,13 +43,17 @@ test('there is always an engine-confirmed experiment to pitch, and it never crea
   }
 });
 
-test('demo inbox: exactly five messages, one per demo order, four read and one unread, all linked', () => {
+test('demo conversations: one per demo order, realistic, with pictures, an updated instruction and exactly one unread message', () => {
   const orders = buildDemoOrders(settings, moments[0]);
-  assert.equal(DEMO_MESSAGES.length, 5);
-  assert.deepEqual(DEMO_MESSAGES.map((m) => m.customer).sort(), orders.map((o) => o.customerName).sort()); // no one else has a conversation
-  assert.equal(DEMO_MESSAGES.filter((m) => m.read).length, 4);
-  assert.deepEqual(DEMO_MESSAGES.filter((m) => !m.read).map((m) => m.customer), ['Neha Sharma']);
-  assert.deepEqual([...new Set(DEMO_MESSAGES.map((m) => m.channel))].sort(), ['instagram', 'whatsapp']);
-  assert.ok(DEMO_MESSAGES.every((m) => m.order === m.customer));
-  assert.ok(!DEMO_MESSAGES.some((m) => /Tara|Nikhil/.test(m.customer + m.text)));
+  assert.equal(DEMO_CONVERSATIONS.length, 5);
+  assert.deepEqual(DEMO_CONVERSATIONS.map((c) => c.customer).sort(), orders.map((o) => o.customerName).sort()); // no one else has a conversation
+  assert.ok(DEMO_CONVERSATIONS.every((c) => c.order === c.customer && c.messages.length >= 5));
+  assert.deepEqual([...new Set(DEMO_CONVERSATIONS.map((c) => c.channel))].sort(), ['instagram', 'whatsapp']);
+  const all = DEMO_CONVERSATIONS.flatMap((c) => c.messages);
+  assert.deepEqual(DEMO_CONVERSATIONS.filter((c) => c.messages.some((m) => m.unread)).map((c) => c.customer), ['Neha Sharma']);
+  assert.ok(DEMO_CONVERSATIONS.every((c) => c.messages.some((m) => m.image?.kind === 'reference'))); // every order has a reference picture
+  assert.ok(all.some((m) => m.image?.kind === 'payment') && all.every((m) => !m.image || fs.existsSync(path.join(assets, m.image.file)))); // local assets only
+  assert.ok(!all.some((m) => /https?:\/\//.test(m.text ?? '')));
+  assert.ok(!all.some((m) => /Tara|Nikhil/.test(m.text ?? '')));
+  assert.ok(DEMO_CONVERSATIONS.every((c) => c.messages.every((m, i, a) => i === 0 || m.hoursAgo <= a[i - 1].hoursAgo))); // in time order
 });

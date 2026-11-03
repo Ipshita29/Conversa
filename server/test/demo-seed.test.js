@@ -7,6 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import mongoose from 'mongoose';
 import { connectDb } from '../config/db.js';
+import { config } from '../config/env.js';
+import { DEMO_CONVERSATIONS, demoClock } from '../scripts/demo-data.js';
 import Order from '../models/Order.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
@@ -16,20 +18,24 @@ import { getSettings } from '../services/settingsService.js';
 
 const hasMongod = spawnSync('mongod', ['--version']).status === 0;
 const skip = hasMongod ? false : 'mongod not installed: integration tests skipped';
-let proc; let dir;
+let proc; let dir; let proofDir;
 before(async () => {
   if (!hasMongod) return;
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conversa-demo-'));
+  proofDir = fs.mkdtempSync(path.join(os.tmpdir(), 'conversa-demoproof-'));
+  config.payments.proofDir = proofDir; // demo pictures never go into the real storage folder
   const port = 28000 + Math.floor(Math.random() * 1000);
   proc = spawn('mongod', ['--dbpath', dir, '--port', String(port), '--bind_ip', '127.0.0.1', '--nounixsocket'], { stdio: 'ignore' });
   for (let i = 0; i < 40; i++) { if (await connectDb(`mongodb://127.0.0.1:${port}/conversa_demo_test`)) break; await new Promise((r) => setTimeout(r, 500)); }
 });
-after(async () => { await mongoose.disconnect(); proc?.kill(); if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
+after(async () => { await mongoose.disconnect(); proc?.kill(); for (const d of [dir, proofDir]) if (d) fs.rmSync(d, { recursive: true, force: true }); });
 
 const demoNames = async () => (await Order.find({ notes: /^\[DEMO\]/ }).lean()).map((o) => o.customerName).sort();
-const FIVE = ['Aanya Sharma', 'Kabir Singh', 'Meera Iyer', 'Neha Sharma', 'Rohan Mehta'];
+const TOTAL = DEMO_CONVERSATIONS.reduce((n, c) => n + c.messages.length, 0);
+const FIVE = ['Aanya Sharma', 'Kartik Singh', 'Meera Iyer', 'Neha Sharma', 'Rohan Mehta'];
+const ORDERS = FIVE; // the five orders of the 3 November scenario
 
-test('cleaning up a polluted demo leaves exactly the five orders and their five chats, and never touches real data', { skip }, async () => {
+test('cleaning up a polluted demo leaves exactly the five orders and the five chats, and never touches real data', { skip }, async () => {
   // Real data that must survive: orders (one with the same name as a demo customer), a conversation and a message.
   const real = await Order.create([
     { customerName: 'Neha Sharma', item: 'Chocolate birthday cake (2 kg)', quantity: 1, status: 'in_progress', prepTimeMinutes: 240, deadline: new Date(Date.now() + 2 * 86400000) },
@@ -51,11 +57,11 @@ test('cleaning up a polluted demo leaves exactly the five orders and their five 
   assert.equal((await demoNames()).length, 7);
 
   assert.equal(await refreshStaleDemo(), true); // the clean-up
-  assert.deepEqual(await demoNames(), FIVE);
+  assert.deepEqual(await demoNames(), ORDERS);
   const chats = await Conversation.find({ isDemo: true }).lean();
   assert.deepEqual(chats.map((c) => c.customerName).sort(), FIVE);
   assert.ok(chats.every((c) => c.orderId), 'every demo chat points at its demo order');
-  assert.equal(await Message.countDocuments({ isDemo: true }), 5);
+  assert.equal(await Message.countDocuments({ isDemo: true }), TOTAL);
   assert.equal(await Message.countDocuments({ isDemo: true, readAt: null }), 1); // one unread message
 
   // Real data is exactly as it was.
@@ -71,17 +77,17 @@ test('re-seeding and restarting are idempotent: nothing is duplicated and nothin
   assert.equal(await refreshStaleDemo(), false);
   assert.deepEqual((await Order.find({ notes: /^\[DEMO\]/ }).lean()).map((o) => String(o._id)).sort(), before);
   await reseedDemoOrders(new Date()); await reseedDemoOrders(new Date()); // the seed script, run twice
-  assert.deepEqual(await demoNames(), FIVE);
+  assert.deepEqual(await demoNames(), ORDERS);
   await reseedDemoMessages(await Order.find({ notes: /^\[DEMO\]/ }));
   assert.equal(await Conversation.countDocuments({ isDemo: true }), 5);
 });
 
-test('the Demo view of the board holds exactly the five orders (1 overdue, 2 on track, 2 upcoming), whatever real orders exist', { skip }, async () => {
+test('the Demo view of the board holds exactly the five demo orders, whatever real orders exist', { skip }, async () => {
   const orders = (await Order.find().lean()).map((o) => ({ ...o, id: String(o._id) }));
-  const b = buildBoard({ orders, settings: await getSettings(), now: new Date(), dataset: 'demo' });
+  const b = buildBoard({ orders, settings: await getSettings(), now: demoClock(await getSettings()), dataset: 'demo' });
   assert.equal(b.total, 5); assert.equal(b.needsDetails.length, 0);
-  assert.deepEqual(Object.values(b.sections).flat().map((x) => x.customerName).sort(), FIVE);
-  assert.deepEqual(b.counts, { overdue: 1, onTrack: 2, upcoming: 2 });
+  assert.deepEqual(Object.values(b.sections).flat().map((x) => x.customerName).sort(), ORDERS);
+  assert.equal(b.counts.overdue, 0);
 });
 
 test('clearing the demo removes only demo records', { skip }, async () => {

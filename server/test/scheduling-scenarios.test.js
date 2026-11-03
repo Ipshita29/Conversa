@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computePlan } from '../services/workloadEngine.js';
-import { buildDemoOrders } from '../scripts/demo-data.js';
+import { buildDemoOrders, demoClock } from '../scripts/demo-data.js';
 import { defaultSettings } from '../config/defaults.js';
 
 // Business hours Mon-Sat 09:00-18:00 Asia/Kolkata, 6h of productive preparation per day, 4h "tight" buffer.
@@ -89,12 +89,10 @@ test('a backlog of overdue orders pushes a later order back, and says exactly wh
   assert.equal(alone.kind, 'on_track'); // without the backlog it is comfortably on time
 });
 
-test('the demo is anchored to the calendar day: seeded two days ago it would be wrong today, so it is re-anchored', () => {
-  const seededAt = T('2026-10-21T06:00:00Z');
-  const later = T('2026-10-23T09:00:00Z');
+test('the demo is anchored to 3 November 2026, whenever it is seeded, and planned from 9:00 that day it is feasible', () => {
   const withIds = (os) => os.map((o, i) => ({ ...o, id: `d${i}` }));
-  const stale = computePlan({ orders: withIds(buildDemoOrders(settings, seededAt)), settings, now: later, rangeDays: 14 });
-  assert.ok(stale.schedule.filter((e) => e.kind === 'deadline_passed').length >= 3, 'the old anchor leaves several overdue orders');
-  const fresh = computePlan({ orders: withIds(buildDemoOrders(settings, later)), settings, now: later, rangeDays: 14 });
-  assert.equal(fresh.schedule.filter((e) => e.kind === 'deadline_passed').length, 1, 'a fresh anchor has exactly one overdue order');
+  const a = buildDemoOrders(settings, T('2026-10-21T06:00:00Z')); const b = buildDemoOrders(settings, T('2026-11-20T09:00:00Z'));
+  assert.deepEqual(a.map((o) => o.deadline.toISOString()), b.map((o) => o.deadline.toISOString())); // the same deadlines either way
+  const plan = computePlan({ orders: withIds(a), settings, now: demoClock(settings), rangeDays: 1 });
+  assert.equal(plan.schedule.filter((e) => e.risk === 'high').length, 0);
 });
