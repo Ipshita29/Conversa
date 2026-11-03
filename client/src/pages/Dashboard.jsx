@@ -1,17 +1,15 @@
-import { lazy, Suspense, useRef } from 'react';
+import { useRef } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import useWorkspace from '../hooks/useWorkspace.js';
-import { HeroSection, Reveal, ScrollR, useCardGlow } from '../components/Effects.jsx';
-import { StateMessage } from '../components/UI.jsx';
-import Marquee from '../components/Marquee.jsx';
-import { ConnectSection, DayWorkspace } from '../components/Insights.jsx';
+import { Field, HeroSection, Reveal, ScrollR, useCardGlow } from '../components/UI.jsx';
+import { Marquee } from '../components/Layout.jsx';
+import { ConnectSection } from '../components/Workspace.jsx';
 import { summarise } from '../utils/homeSummary.js';
 import { isDemoOrder } from '../utils/format.js';
 import useHashScroll from '../hooks/useHashScroll.js';
-import '../css/Dashboard.css';
+import '../css/Workspace.css';
 
 // The Three.js field is large: it loads after the first paint and never blocks the page.
-const Field = lazy(() => import('../components/Field.jsx'));
 
 // Old bookmarks like /#inbox or /#deadlines now live on their own pages.
 const MOVED = { inbox: '/inbox', deadlines: '/plan', next: '/plan', simulation: '/whatif' };
@@ -37,7 +35,7 @@ const Connect = () => (
 
 // The landing page: the hero, how a promise is made, how the work is planned, then today's live workspace.
 export default function Dashboard() {
-  const { status, data, error, reload } = useWorkspace();
+  const { data } = useWorkspace();
   const { hash } = useLocation();
   const pageRef = useRef(null);
   useHashScroll(Boolean(data));
@@ -51,7 +49,7 @@ export default function Dashboard() {
 
   return (
     <section className="page home" ref={pageRef}>
-      <Suspense fallback={null}><Field /></Suspense>
+      <Field />
 
       <div id="overview" className="home-hero"><HeroSection stats={data?.dashboard.stats} attention={sum?.attention} /></div>
 
@@ -73,16 +71,6 @@ export default function Dashboard() {
               <div className="fx-metric-bottom"><span className="fx-value">{value}</span><span className="fx-body">{caption}</span></div>
             </Link>
           ))}
-        </div>
-      </Reveal>
-
-      {/* 02 · Production planning: the field gathers into a heart behind this scene; today's live workspace sits over it */}
-      <Reveal as="section" id="planning" className="fx-section fx-assembly fx-reveal">
-        <p className="chip"><i aria-hidden="true" />02 · Production planning</p>
-        <div id="today" className="fx-panel fx-day-card">
-          {status === 'error' ? <StateMessage kind="error" message={`Couldn't load your workspace. ${error.message}`} onRetry={reload} />
-            : data ? <DayWorkspace planner={data.planner} orders={data.orders} />
-            : <StateMessage kind="loading" message="Loading your workspace…" />}
         </div>
       </Reveal>
 
