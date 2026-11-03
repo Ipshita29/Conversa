@@ -1,3 +1,4 @@
+/* ======== Orders ======== */
 .tabs { display: flex; gap: 0.2rem; flex-wrap: wrap; margin-bottom: 1.2rem; border-bottom: 1px solid var(--border); }
 .tab { padding: 0.65rem 1rem; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; font: inherit; font-size: 0.92rem; color: var(--muted); cursor: pointer; transition: color 0.18s var(--ease), border-color 0.18s var(--ease); }
 .tab:hover { color: var(--cocoa); }
@@ -118,3 +119,58 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; us
 .rc-msg textarea { width: 100%; max-width: 44rem; min-height: 0; padding: 0.7rem 0.8rem; font: 400 0.92rem/1.55 var(--sans); background: var(--white); border-radius: var(--radius-sm); }
 .rc-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
 .rc-confirm { font-size: 0.84rem; } .rc-copied { font-size: 0.82rem; color: var(--blue-ink); }
+
+/* Order details (wide dialog): facts and payment on the left, the conversation on the right */
+.odm { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 55fr) minmax(0, 45fr); grid-template-rows: minmax(0, 1fr); }
+.odm h3 { margin: 0 0 0.5rem; font: 600 0.8rem var(--display); letter-spacing: 0.01em; color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
+.odm-left, .odm-right { display: grid; align-content: start; gap: 1.1rem; min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; } .odm-right { border-left: 1px solid #ECE8E1; background: #FCFBF8; }
+.odm-block { min-width: 0; } .odm-block + .odm-block { padding-top: 1rem; border-top: 1px solid #F1EEE8; }
+.odm-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem 1.25rem; margin: 0; } .odm-facts.is-one { grid-template-columns: 1fr; }
+.odm-facts dt { font-size: 0.72rem; color: var(--faint); } .odm-facts dd { margin: 0.1rem 0 0; font-size: 0.92rem; color: var(--cocoa); overflow-wrap: anywhere; }
+.odm-none { margin: 0; font-size: 0.85rem; color: #8F5A2B; } .odm-none .im-link { margin-left: 0.25rem; }
+.odm-add { margin-left: 0.4rem; padding: 0 0.5rem; border: 1px solid #E4E0D8; border-radius: 999px; background: #fff; font: 500 0.7rem var(--display); color: var(--primary); cursor: pointer; } .odm-add:hover { background: var(--blue-soft); }
+.odm-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.odm-sum { margin: 0 0 0.4rem; font-size: 0.85rem; color: var(--muted); }
+.odm-pays { display: grid; gap: 0.4rem; margin: 0 0 0.4rem; padding: 0; list-style: none; } .odm-pays li { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; font-size: 0.88rem; } .odm-acts { display: inline-flex; gap: 0.7rem; margin-left: auto; }
+.odm-reqs { margin: 0; padding-left: 1rem; }
+.odm-conv-head { display: flex; align-items: center; gap: 0.6rem; } .odm-conv-head h3 { margin: 0; } .odm-conv-head .im-link { margin-left: auto; }
+.od-conv-demo { padding: 1px 8px; border-radius: 999px; background: #F1EBF8; color: #5A4380; font: 600 0.66rem var(--display); }
+.odm-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 0.6rem; margin: 0; padding: 0; list-style: none; }
+.odm-gallery button, .odm-thumb { display: block; width: 100%; padding: 0; border: 1px solid #E4E0D8; border-radius: 12px; overflow: hidden; background: #fff; cursor: zoom-in; } .odm-gallery img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; } .odm-gallery small { display: block; margin-top: 0.2rem; font-size: 0.68rem; color: var(--faint); }
+.odm-spec { display: grid; gap: 0.5rem; margin: 0; } .odm-spec > div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0.5rem; } .odm-spec dt { font-size: 0.8rem; color: var(--muted); } .odm-spec dd { margin: 0; font-size: 0.9rem; }
+.od-updated { margin-left: 0.5rem; padding: 1px 7px; border-radius: 999px; background: #E7F0FB; color: var(--primary); font: 600 0.66rem var(--display); }
+.odm-spec details { margin-top: 0.15rem; font-size: 0.76rem; color: var(--muted); } .odm-spec details ul { margin: 0.15rem 0 0; padding-left: 1rem; }
+@media (max-width: 820px) { .odm { display: block; } .odm-left, .odm-right { overflow: visible; } .odm-right { border-left: 0; border-top: 1px solid #ECE8E1; } }
+@media (max-width: 480px) { .odm-spec > div { grid-template-columns: 1fr; gap: 0.1rem; } }
+.odm-auto { padding: 1px 7px; border-radius: 999px; background: #E7F0FB; color: var(--primary); font: 600 0.64rem var(--display); }
+.odm-detected { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0 0 0.6rem; padding: 0; list-style: none; font-size: 0.84rem; color: var(--muted); } .odm-detected b { color: var(--cocoa); font-variant-numeric: tabular-nums; }
+.odm-change { margin-top: 0.5rem; font-size: 0.84rem; } .odm-change ul { margin: 0.15rem 0 0; padding: 0; list-style: none; color: var(--muted); } .odm-change li.is-now { color: var(--cocoa); } .odm-change time { margin-left: 0.3rem; font-size: 0.68rem; color: var(--faint); }
+.odm-pays li { align-items: center; } .odm-pay-main { display: grid; min-width: 0; font-size: 0.88rem; } .odm-pay-main small { font-size: 0.72rem; color: var(--faint); overflow-wrap: anywhere; }
+.odm-shot { flex: none; width: 52px; padding: 0; border: 1px solid #E4E0D8; border-radius: 8px; overflow: hidden; background: #fff; cursor: zoom-in; } .odm-shot img { display: block; width: 100%; height: 64px; object-fit: cover; object-position: top; }
+.odm-viewconv { margin: 0; padding-top: 0.2rem; font-size: 0.88rem; }
+
+/* ---------- Order accordion: narrow panels, the hovered one widens ---------- */
+.oa { display: flex; gap: 12px; height: clamp(440px, 68vh, 620px); width: 100%; }
+.oa-card { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; border-radius: 26px; background: #EFE9DF; cursor: pointer; isolation: isolate; }
+.oa-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; transform: scale(1.04); transition: transform 0.9s cubic-bezier(0.22, 0.61, 0.36, 1), filter 0.5s; filter: saturate(0.85) brightness(0.96); }
+.oa-card.is-on .oa-img { transform: scale(1); filter: none; }
+.oa-shade { position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(30, 24, 20, 0.18) 0%, rgba(30, 24, 20, 0) 30%, rgba(30, 24, 20, 0.72) 100%); opacity: 0.55; transition: opacity 0.5s; }
+.oa-card.is-on .oa-shade { opacity: 1; }
+.oa-num { position: absolute; top: 20px; left: 0; right: 0; text-align: center; font: 400 1.5rem var(--brand); color: #fff; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.25); }
+.oa-card.is-on .oa-num { left: 26px; right: auto; font-size: 1.9rem; }
+.oa-vert { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%) rotate(180deg); writing-mode: vertical-rl; font: 500 0.95rem var(--display); letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.92); white-space: nowrap; transition: opacity 0.25s; }
+.oa-card.is-on .oa-vert { opacity: 0; }
+.oa-body { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 28px 26px; color: #fff; }
+.oa-body h3 { margin: 0; font: 500 clamp(1.8rem, 3vw, 2.6rem)/1.05 var(--display); letter-spacing: -0.035em; color: #fff; }
+.oa-item { margin: 0.35rem 0 1rem; font-size: 1.02rem; color: rgba(255, 255, 255, 0.88); }
+.oa-body dl { display: flex; flex-wrap: wrap; gap: 0.7rem 2rem; margin: 0 0 1.1rem; }
+.oa-body dt { font: 600 0.62rem var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 255, 255, 0.62); }
+.oa-body dd { margin: 0.15rem 0 0; font: 500 0.95rem var(--display); color: #fff; white-space: nowrap; }
+.oa-body dd em { font-style: normal; color: #F0C998; }
+.oa-open { padding: 0.55rem 1.1rem; border: 1px solid rgba(255, 255, 255, 0.55); border-radius: 999px; background: rgba(255, 255, 255, 0.14); backdrop-filter: blur(8px); font: 500 0.88rem var(--display); color: #fff; cursor: pointer; transition: background 0.2s; }
+.oa-open:hover { background: rgba(255, 255, 255, 0.28); }
+@media (max-width: 760px) {
+  .oa { gap: 8px; height: 520px; } .oa-card { border-radius: 18px; }
+  .oa-body { padding: 0 16px 18px; } .oa-body dl { gap: 0.5rem 1.2rem; } .oa-body dd { white-space: normal; }
+  .oa-card.is-on .oa-num { left: 16px; }
+}

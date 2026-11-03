@@ -1,11 +1,17 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, GripVertical, MessageCircle, Camera, PenLine, Pencil, Sparkles } from 'lucide-react';
 import { validateOrder, ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validateOrder.js';
 import { STATUS_LABEL, PAYMENT_LABEL, CHANNEL_LABEL, OPEN, toLocalInput, fromLocalInput, formatInTz, formatDateTime, formatMinutes, formatMoney, isDemoOrder } from '../utils/format.js';
 import { Modal, RiskBadge } from './UI.jsx';
+import { METHOD as METHOD_LABEL, RecPill } from './Payments.jsx';
 import useAsync from '../hooks/useAsync.js';
 import { needsRecovery, situationOf, proposeRevision, buildMessage, customerFirstName, copyText } from '../utils/recoveryMessage.js';
-import { extractOrder, createOrder, updateConversation, updateOrder, getPlanner, simulatePlanner, DEMO_MODE } from '../services/api.js';
+import { attachmentSrc, getOrderConversation, getPayments, extractOrder, createOrder, updateConversation, updateOrder, getPlanner, simulatePlanner, DEMO_MODE } from '../services/api.js';
+import '../css/Orders.css';
+
+// ======== Orders ========
 
 // ---------- OrderForm ----------
 function Field({ label, hint, children, error, isMissing, note }) {
@@ -351,6 +357,54 @@ function OrderCard({ o, dragging, onOpen, onStart, onMove, ignoreClick }) {
   );
 }
 
+// ---------- OrderAccordion ----------
+// Orders as a row of narrow vertical panels; the one under the cursor widens to take most of the row (tap on touch screens).
+// Pictures are the bakery's own photos in /public, picked from the product name.
+const PHOTOS = [[/cupcake/i, '/cupcake.png'], [/pastr/i, '/pastry.png'], [/pineapple/i, '/pineapple.png'], [/./, '/chocolate.png']];
+const photoFor = (o) => PHOTOS.find(([re]) => re.test(o.item ?? ''))[1];
+const pad2 = (n) => String(n).padStart(2, '0');
+const SPRING = { type: 'spring', stiffness: 170, damping: 26, mass: 0.9 };
+
+export function OrderAccordion({ orders, onOpen }) {
+  const [active, setActive] = useState(null);
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const dl = (o) => (o.deadline ? Date.parse(o.deadline) : Infinity);
+  const list = useMemo(() => [...orders].sort((a, b) => dl(a) - dl(b)), [orders]);
+  return (
+    <div className="oa" role="list" onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActive(null); }}>
+      {list.map((o, i) => {
+        const on = active === o.id; const pay = payTag(o); const rel = relativeDue(o);
+        return (
+          <motion.article key={o.id} role="listitem" className={`oa-card${on ? ' is-on' : ''}`} initial={false}
+            animate={{ flexGrow: on ? 7 : 1 }} transition={reduced ? { duration: 0 } : SPRING}
+            onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActive(o.id); }}
+            onClick={(e) => { if (e.target.closest('button')) return; setActive((a) => (a === o.id ? null : o.id)); }}
+            onFocus={() => setActive(o.id)}>
+            <img className="oa-img" src={photoFor(o)} alt="" loading="lazy" draggable="false" />
+            <span className="oa-shade" aria-hidden="true" />
+            <span className="oa-num">{pad2(i + 1)}</span>
+            <span className="oa-vert" aria-hidden="true">{o.customerName}</span>
+            <AnimatePresence>
+              {on && (
+                <motion.div className="oa-body" initial={reduced ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} transition={{ duration: 0.35, delay: reduced ? 0 : 0.12, ease: [0.22, 0.61, 0.36, 1] }}>
+                  <h3>{o.customerName}</h3>
+                  <p className="oa-item">{o.item} · × {o.quantity}</p>
+                  <dl>
+                    <div><dt>Delivery</dt><dd>{o.deadline ? formatDateTime(o.deadline) : 'No deadline'}{rel && <em className={rel.tone ? `is-${rel.tone}` : ''}> · {rel.text}</em>}</dd></div>
+                    <div><dt>Payment</dt><dd>{pay.label}{o.price != null && ` · ${formatMoney(o.price)}`}</dd></div>
+                    <div><dt>Status</dt><dd>{STATUS_LABEL[o.status] ?? o.status}</dd></div>
+                  </dl>
+                  <button type="button" className="oa-open" onClick={() => onOpen(o.id)}>View order <span aria-hidden="true">→</span></button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.article>
+        );
+      })}
+    </div>
+  );
+}
+
 // Pointer-based drag (mouse, pen and touch). A floating copy follows the pointer; the column under it lights up, or explains why it can't take the card.
 // Touch drags start from the grip only, so the page can still scroll. Escape cancels. The page scrolls itself when the card nears the top or bottom edge.
 function useBoardDrag(onDrop) {
@@ -494,32 +548,97 @@ export function KanbanBoard({ orders, onMove, onOpen }) {
 
 // ---------- OrderDetails ----------
 // What the old expanded row showed, in a dialog: the numbers, contact and notes, a status picker, Edit, and the customer-recovery panel for risky orders.
+// Everything in Order Details comes from the customer's conversation: their reference pictures, what they asked for (read from their own
+// words, the newest instruction current and the earlier ones kept) and the original messages. What they did not say stays "Not provided"
+// with a way to add it: nothing is assumed.
+const SPEC_ALWAYS = ['product', 'quantity', 'deadline'];
+
 export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus, onChanged }) {
   const open = OPEN.includes(o.status);
+  const conv = useAsync(() => getOrderConversation(o.id), [o.id]);
+  const pays = useAsync(getPayments);
+  const [photo, setPhoto] = useState(null);
+  const data = conv.data; const spec = data?.spec;
+  const row = pays.data?.rows.find((r) => r.orderId === o.id) ?? null;
+  const records = (row?.payments ?? []).filter((p) => p.kind !== 'refund' && p.status !== 'rejected');
+  const proofCount = (row?.payments ?? []).filter((p) => p.proof).length;
+  const add = (label) => <button type="button" className="odm-add" onClick={() => onEdit(o.id)} aria-label={`Add ${label}`}>Add</button>;
+  const fields = (spec?.fields ?? []).filter((f) => SPEC_ALWAYS.includes(f.key) || f.value);
+  const requests = spec?.specialRequests ?? [];
   return (
-    <Modal title={`${o.customerName}${o.item ? ` · ${o.item}` : ''}`} onClose={onClose}>
-      <div className="od-detail">
-        <dl>
-          <div><dt>Quantity</dt><dd>{o.quantity}</dd></div>
-          <div><dt>Placed</dt><dd>{o.createdAt ? formatDateTime(o.createdAt) : '—'}</dd></div>
-          <div><dt>Deadline</dt><dd>{o.deadline ? formatDateTime(o.deadline) : 'Not set'}</dd></div>
-          <div><dt>Preparation</dt><dd>{o.prepTimeMinutes === null ? 'Not set' : formatMinutes(o.prepTimeMinutes)}</dd></div>
-          <div><dt>Amount</dt><dd>{o.price == null ? 'Not set' : formatMoney(o.price)}</dd></div>
-          <div><dt>Payment</dt><dd><span className={`pay-tag pt-${payTag(o).key}`}>{payTag(o).label}</span> <small>{PAYMENT_LABEL[o.paymentStatus]}</small></dd></div>
-          <div><dt>Channel</dt><dd>{CHANNEL_LABEL[o.source]}</dd></div>
-          {o.customerContact && <div><dt>Contact</dt><dd>{o.customerContact}</dd></div>}
-          {o.customisation && <div><dt>Customisation</dt><dd>{o.customisation}</dd></div>}
-          {o.notes && !isDemoOrder(o) && <div><dt>Notes</dt><dd>{o.notes}</dd></div>}
-        </dl>
-        <div className="od-actions">
-          <label className="od-statuspick"><span>Status</span>
-            <select className={`status-select status-${o.status}`} value={o.status} disabled={busy || LOCKED.includes(o.status)} onChange={(e) => onStatus(o, e.target.value)} aria-label={`Status for ${o.customerName}`}>
-              {ORDER_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-            </select></label>
-          <button type="button" className="btn btn-sm" onClick={() => onEdit(o.id)} aria-label={`Edit ${o.customerName}'s order`}><Pencil size={13} aria-hidden="true" /> Edit</button>
-        </div>
-        {open && (o.risk === 'high' || o.risk === 'medium') && <RecoveryPanel order={o} onChanged={onChanged} />}
+    <Modal variant="wide" title={o.customerName} subtitle={o.item} onClose={onClose}>
+      <div className="odm">
+        <section className="odm-left" aria-label="Order information">
+          <dl className="odm-facts">
+            <div><dt>Quantity</dt><dd>{o.quantity}</dd></div>
+            <div><dt>Amount</dt><dd>{o.price == null ? <span className="odm-none">Not provided {add('amount')}</span> : formatMoney(o.price)}</dd></div>
+            <div><dt>Deadline</dt><dd>{o.deadline ? formatDateTime(o.deadline) : <span className="odm-none">Not provided {add('a deadline')}</span>}</dd></div>
+            <div><dt>Preparation</dt><dd>{o.prepTimeMinutes === null ? <span className="odm-none">Not provided {add('preparation time')}</span> : formatMinutes(o.prepTimeMinutes)}</dd></div>
+            <div><dt>Payment</dt><dd><span className={`pay-tag pt-${payTag(o).key}`}>{payTag(o).label}</span></dd></div>
+            <div><dt>Channel</dt><dd>{CHANNEL_LABEL[o.source]}{o.customerContact ? ` · ${o.customerContact}` : ''}</dd></div>
+            <div><dt>Placed</dt><dd>{o.createdAt ? formatDateTime(o.createdAt) : '—'}</dd></div>
+          </dl>
+
+          <div className="odm-row">
+            <label className="od-statuspick"><span>Status</span>
+              <select className={`status-select status-${o.status}`} value={o.status} disabled={busy || LOCKED.includes(o.status)} onChange={(e) => onStatus(o, e.target.value)} aria-label={`Status for ${o.customerName}`}>
+                {ORDER_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+              </select></label>
+            <button type="button" className="btn btn-sm" onClick={() => onEdit(o.id)} aria-label={`Edit ${o.customerName}'s order`}><Pencil size={13} aria-hidden="true" /> Edit</button>
+          </div>
+
+          <div className="odm-block"><h3>Reference images</h3>
+            {!spec ? <p className="odm-none">{conv.status === 'error' ? 'Couldn’t load.' : 'Loading…'}</p> : spec.referenceImages.length === 0 ? <p className="odm-none">None received.</p> : (
+              <ul className="odm-gallery">{spec.referenceImages.map((r) => (
+                <li key={r.messageId}><button type="button" onClick={() => setPhoto(r)} aria-label="View the reference image full size"><img src={attachmentSrc(r)} alt="Reference picture sent by the customer" loading="lazy" /></button>
+                  <small>{formatDateTime(r.at)}</small></li>))}</ul>)}
+          </div>
+
+          <div className="odm-block"><h3>Customer requirements</h3>
+            <dl className="odm-spec">
+              <div><dt>Notes</dt><dd>{o.customisation ?? <span className="odm-none">Not provided {add('customisation')}</span>}</dd></div>
+              {fields.map((f) => (
+                <div key={f.key}><dt>{f.label}</dt><dd>{f.value ? <>{f.value}{f.changed && <span className="od-updated">Updated</span>}</> : <span className="odm-none">Not provided {add(f.label.toLowerCase())}</span>}</dd></div>))}
+              {spec?.decorations.length > 0 && <div><dt>Decorations</dt><dd>{spec.decorations.map((d) => d.value).join(', ')}</dd></div>}
+              {requests.length > 0 && <div><dt>Special requests</dt><dd><ul className="odm-reqs">{requests.map((r) => <li key={r.messageId + r.value}>{r.value}</li>)}</ul></dd></div>}
+            </dl>
+          </div>
+          {open && (o.risk === 'high' || o.risk === 'medium') && <RecoveryPanel order={o} onChanged={onChanged} />}
+          {data?.conversation && <p className="odm-viewconv"><Link className="im-link" to={`/inbox?conversation=${data.conversation.id}`} state={{ orderId: o.id }}>View original conversation →</Link></p>}
+        </section>
+
+        <section className="odm-right" aria-label="From the conversation">
+          <header className="odm-conv-head"><h3>From the conversation</h3>
+            {data?.conversation?.isDemo && <span className="od-conv-demo" title="Sample messages, not a live WhatsApp or Instagram chat">Demo</span>}</header>
+          {conv.status === 'error' && <p className="odm-none">Couldn’t load the conversation. {conv.error.message} <button type="button" className="im-link" onClick={conv.reload}>Try again</button></p>}
+          {!data && conv.status !== 'error' && <p className="odm-none">Loading the conversation…</p>}
+          {data && !data.conversation && <p className="odm-none">No conversation is linked to this order.</p>}
+          {data?.conversation && <div className="odm-block"><h3>Detected automatically <span className="odm-auto">from messages</span></h3>
+            <ul className="odm-detected">
+              <li><b>{spec.referenceImages.length}</b> reference {spec.referenceImages.length === 1 ? 'image' : 'images'}</li>
+              <li><b>{fields.filter((f) => f.value).length + spec.decorations.length + requests.length}</b> requirement details</li>
+              <li><b>{fields.filter((f) => f.changed).length}</b> updated {fields.filter((f) => f.changed).length === 1 ? 'instruction' : 'instructions'}</li>
+            </ul>
+            {fields.filter((f) => f.changed).map((f) => (
+              <div key={f.key} className="odm-change"><b>{f.label}</b>
+                <ul>{f.history.map((h) => <li key={h.messageId} className={h.current ? 'is-now' : ''}>{h.current ? 'Now' : 'Earlier'}: “{h.value}” <time>{formatDateTime(h.at)}</time></li>)}</ul></div>))}
+          </div>}
+
+          <div className="odm-block"><h3>Payment</h3>
+            {row && row.total !== null && <p className="odm-sum">{formatMoney(row.paid)} confirmed of {formatMoney(row.total)}</p>}
+            {records.length === 0 && <p className="odm-none">No payment proof received. <Link className="im-link" to={`/payments?record=${o.id}`}>Add payment proof</Link></p>}
+            {records.length > 0 && (
+              <ul className="odm-pays">{records.map((p) => (
+                <li key={p.id}>
+                  {p.proof && <button type="button" className="odm-shot" onClick={() => setPhoto(p.proof)} aria-label="View the payment screenshot full size"><img src={attachmentSrc(p.proof)} alt="" loading="lazy" /></button>}
+                  <span className="odm-pay-main"><b>{formatMoney(p.amount)}</b> · {METHOD_LABEL[p.method] ?? p.method}{p.transactionId && <small>{p.transactionId}</small>}{!p.proof && <small className="odm-none">No screenshot attached</small>}</span>
+                  <RecPill p={p} />
+                  {p.status === 'pending' && <span className="odm-acts"><Link className="im-link" to={`/payments?payment=${p.id}&act=confirm`}>Verify</Link><Link className="im-link" to={`/payments?payment=${p.id}&act=reject`}>Reject</Link></span>}</li>))}</ul>)}
+            {records.length > 0 && <Link className="im-link" to={`/payments?order=${o.id}`}>All payment records</Link>}
+          </div>
+        </section>
       </div>
+      {photo && <Modal variant="lightbox" title="Picture from the conversation" onClose={() => setPhoto(null)}><div className="pm-proof-big"><img src={attachmentSrc(photo)} alt="Picture sent by the customer" /></div></Modal>}
     </Modal>
   );
 }

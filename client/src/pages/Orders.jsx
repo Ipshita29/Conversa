@@ -5,7 +5,7 @@ import { listOrders, createOrder, getOrder, updateOrder } from '../services/api.
 import useAsync from '../hooks/useAsync.js';
 import { OPEN } from '../utils/format.js';
 import { DemoBadge, Modal, StateMessage } from '../components/UI.jsx';
-import { COLUMNS, KanbanBoard, OrderDetails, OrderForm, statusFor } from '../components/Orders.jsx';
+import { COLUMNS, OrderAccordion, OrderDetails, OrderForm, statusFor } from '../components/Orders.jsx';
 import '../css/Orders.css';
 
 
@@ -87,7 +87,7 @@ export default function Orders() {
       <header className="od-head">
         <div className="od-title">
           <h1>Orders</h1>
-          <p className="od-sub">Drag an order to move it through your day.</p>
+          <p className="od-sub">Hover an order to open it.</p>
           {data && <p className="od-pulse"><b>{stats.open}</b> open{stats.overdue > 0 && <> · <b className="is-late">{stats.overdue}</b> overdue</>} · <b>{stats.due}</b> awaiting payment</p>}
         </div>
         <div className="od-head-actions">
@@ -106,7 +106,7 @@ export default function Orders() {
       )}
       {data && orders.length > 0 && (
         <>
-          <KanbanBoard orders={shown} onMove={onMove} onOpen={setOpenId} />
+          <OrderAccordion orders={shown} onOpen={setOpenId} />
           {search && shown.length === 0 && <p className="od-foot">No orders match “{search}”. <button type="button" className="od-clear" onClick={() => setSearch('')}>Clear search</button></p>}
         </>
       )}
