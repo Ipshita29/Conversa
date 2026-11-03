@@ -60,6 +60,11 @@ export const updateOrder = (id, patch) => request('PATCH', `/orders/${encodeURIC
 export const extractOrder = (payload) => request('POST', '/ai/extract-order', payload);
 
 export const getPlanner = (params) => request('GET', `/planner${qs(params)}`);
+// Smart Commitment Management: the overview (can each order keep its deadline, and its earliest realistic deadline) and Move a deadline.
+// `scope` is 'demo' (the five seeded demo orders) or 'all'. Both run the shared workload engine on copies and save nothing; applying a change is
+// an ordinary updateOrder().
+export const getWhatIf = (scope) => request('GET', `/planner/whatif?scope=${scope}`);
+export const simulateMove = (scope, body) => request('POST', '/planner/whatif/move', { scope, ...body });
 export const simulatePlanner = (payload) => request('POST', '/planner/simulate', payload);
 
 // Payments. Nothing here marks money as received on its own: records start as "pending" until the owner confirms them.
@@ -67,6 +72,9 @@ export const getPayments = () => request('GET', '/payments');
 export const getPayment = (id) => request('GET', `/payments/${encodeURIComponent(id)}`);
 export const confirmPayment = (id, body) => request('POST', `/payments/${encodeURIComponent(id)}/confirm`, body);
 export const rejectPayment = (id, body) => request('POST', `/payments/${encodeURIComponent(id)}/reject`, body);
+// An order's conversation and the specification read out of it (reference pictures, customisation, history).
+export const getOrderConversation = (id) => request('GET', `/orders/${encodeURIComponent(id)}/conversation`);
+export const assignPayment = (id, body) => request('POST', `/payments/${encodeURIComponent(id)}/assign`, body);
 export const refundPayment = (id, body) => request('POST', `/payments/${encodeURIComponent(id)}/refund`, body);
 export const extractPaymentText = (body) => request('POST', '/payments/extract', body);
 
@@ -115,7 +123,7 @@ export async function extractMessagePayment(conversationId, message) {
   return handleMockRequest('POST', path, { file, extraction });
 }
 // Where a stored screenshot is shown from (live: through the API; demo: an in-memory image).
-export const proofSrc = (proof) => (!proof?.url ? null : /^(data:|https?:)/.test(proof.url) ? proof.url : `${API_BASE_URL}${proof.url}`);
+export const proofSrc = (proof) => (!proof?.url ? null : /^(data:|https?:|\/assets\/|\/@fs\/|\/src\/)/.test(proof.url) ? proof.url : `${API_BASE_URL}${proof.url}`);
 export const attachmentSrc = proofSrc;
 
 export const getIntegrations = () => request('GET', '/integrations');

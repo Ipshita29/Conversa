@@ -1,12 +1,13 @@
 // The in-browser DEMO payments backend. It runs the SAME rules as the server (server/services/paymentLogic.js and paymentExtraction.js),
 // on in-memory records that reset on reload. Nothing here talks to a bank, WhatsApp or any server, and no screenshot leaves the browser.
 import { ApiError } from '../services/api.js';
-import { buildDemoPayments } from '../../../server/scripts/demo-data.js';
+import { buildDemoPayments, demoVision, demoOwnerReview, DEMO_OWNER } from '../../../server/scripts/demo-data.js';
+import { demoMessageMeta } from './data.js';
 import {
   buildLedger, summarize, orderPaymentStatus, toPublic, txnKey, findDuplicate, duplicateError,
-  validatePaymentInput, validateConfirm, validateReject, validateRefund, findDuplicateProof, duplicateProofError,
+  validatePaymentInput, validateConfirm, validateReject, validateRefund, findDuplicateProof, duplicateProofError, decideDetectedPayment,
 } from '../../../server/services/paymentLogic.js';
-import { parsePaymentText } from '../../../server/services/paymentExtraction.js';
+import { parsePaymentText, toReading } from '../../../server/services/paymentExtraction.js';
 
 const iso = (d) => (d ? new Date(d).toISOString() : null);
 const invalid = (details) => new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed.', details);
@@ -40,6 +41,38 @@ export function createMockPayments(getOrders, getConversations = () => []) {
   const hist = (action, by, note) => ({ at: iso(new Date()), action, by: by ?? null, note: note ?? null });
   const sync = (oid) => { const o = orderOf(oid); if (o) o.paymentStatus = orderPaymentStatus(o, ofOrder(oid)); };
   list.forEach((p) => sync(p.orderId));
+
+  // The demo conversations are processed like real ones: each payment screenshot is read (the preset reading stands in for the vision model)
+  // and goes through the same matching, review and duplicate rules as on the server. Reference pictures need no processing.
+  const short = (p) => ({ id: p.id, status: p.status, displayStatus: toPublic(p).displayStatus, orderId: p.orderId, amount: p.amount, method: p.method, transactionId: p.transactionId }); // what a chat message shows of its payment
+  for (const conv of getConversations()) {
+    for (const msg of conv.messages) {
+      const meta = demoMessageMeta.get(msg.id);
+      if (!meta?.reading) continue;
+      const dupe = list.find((p) => p.proofHash === meta.file && p.status !== 'rejected'); // the same picture again
+      if (dupe) { msg.scan = { state: 'duplicate', reason: 'This screenshot was already recorded.' }; msg.payment = short(dupe); continue; }
+      const v = demoVision(meta.reading, new Date(msg.at));
+      const orders = getOrders().map((o) => ({ id: o.id, customerName: o.customerName, customerContact: o.customerContact ?? null, status: o.status, balance: summarize(o, list.filter((p) => p.orderId === o.id)).balance }));
+      const d = decideDetectedPayment({ x: toReading(v), succeeded: true, conv: { orderId: conv.orderId, customerName: conv.customerName, contactId: conv.id }, orders, existing: list, receivedAt: new Date(msg.at), now: new Date(msg.at) });
+      msg.scan = { state: d.state, reason: d.reason };
+      if (d.state === 'duplicate') { msg.payment = null; continue; }
+      const rec = stamp({ ...d.record, kind: 'payment', isDemo: true, conversationId: conv.id, messageId: msg.id, proofHash: meta.file, proof: { url: msg.attachment.url, contentType: 'image/png', size: null }, paidAt: iso(d.record.paidAt), createdAt: iso(msg.at),
+        extraction: { ...d.record.extraction, extractedAt: iso(msg.at) }, history: [{ at: iso(msg.at), action: 'extracted', by: null, note: `Read from a screenshot in Messages automatically. ${d.record.orderId ? '' : 'No order matched yet. '}Waiting for review and verification.` }] });
+      list = [rec, ...list];
+      if (meta.ownerConfirmed) { // the demo owner's own check, recorded as such; a screenshot never does this
+        Object.assign(rec, { status: 'confirmed', review: demoOwnerReview(rec.amount, iso(msg.at)) });
+        rec.history.push({ at: iso(msg.at), action: 'confirmed', by: DEMO_OWNER, note: 'Owner confirmed the money arrived (demo). Checked manually; not verified with a bank.' });
+      }
+      if (rec.orderId) sync(rec.orderId);
+      msg.payment = short(rec);
+    }
+  }
+  // The message a payment came from, so Payments can show it beside the screenshot (the server does the same).
+  const sourceOf = (p) => {
+    const conv = p.conversationId ? getConversations().find((c) => c.id === p.conversationId) : null;
+    const msg = conv?.messages.find((m) => m.id === p.messageId);
+    return msg ? { ...p, sourceMessage: { conversationId: conv.id, customerName: conv.customerName, channel: conv.channel, text: msg.text, at: msg.at } } : p;
+  };
   const withUrl = (p) => (p.proof ? { ...p, proof: { ...p.proof, url: p.proof.url ?? proofs.get(p.id) } } : p);
   const pub = (p) => toPublic(withUrl(p));
   const detail = (p) => { const o = orderOf(p.orderId); return { payment: pub(p), order: { id: o.id, customerName: o.customerName, item: o.item, quantity: o.quantity, price: o.price ?? null, status: o.status }, summary: summarize(o, ofOrder(o.id)) }; };
@@ -97,7 +130,11 @@ export function createMockPayments(getOrders, getConversations = () => []) {
 
   return async function handle(method, p, body = {}) {
     let m;
-    if (method === 'GET' && p === '/payments') return buildLedger(getOrders(), list.map(withUrl));
+    if (method === 'GET' && p === '/payments') {
+      const led = buildLedger(getOrders(), list.map((x) => sourceOf(withUrl(x))));
+      const keep = (x) => (x.sourceMessage ? x : { ...x, sourceMessage: sourceOf(list.find((y) => y.id === x.id) ?? {}).sourceMessage });
+      return { ...led, unassigned: led.unassigned.map(keep), rows: led.rows.map((r) => ({ ...r, payments: r.payments.map(keep) })) };
+    }
     if (method === 'POST' && p === '/payments') {
       if (body.file) checkFile(body.file);
       const hash = body.file ? await sha256(body.file) : null;

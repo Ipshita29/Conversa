@@ -2,13 +2,16 @@
 // State resets on page reload. Nothing here talks to a real server.
 import { ApiError } from '../services/api.js';
 import { validateOrder } from '../utils/validateOrder.js';
-import { seedOrders, seedConversations, seedIntegrations, demoSettings } from './data.js';
+import { seedOrders, seedConversations, seedIntegrations, demoSettings as baseSettings } from './data.js';
 // The offline demo runs the SAME scheduler as the server, in the browser, so every page agrees with every other page.
 import { computePlan, publicPlan, suggestScenario } from '../../../server/services/workloadEngine.js';
 import { createMockPayments } from './mockPayments.js';
+import { scopeOrders, scopeNow, overview, runMove } from '../../../server/services/whatIf.js';
+import { extractOrderSpec, imageKind } from '../../../server/services/orderSpec.js';
 import { buildDashboard as serverDashboard } from '../../../server/services/dashboardService.js';
 
 let orders = seedOrders();
+const demoSettings = () => baseSettings();
 const conversations = seedConversations();
 const payments = createMockPayments(() => orders, () => conversations);
 const integrations = seedIntegrations();
@@ -191,7 +194,21 @@ export async function handleMockRequest(method, path, body = {}) {
     const now = new Date();
     return clone({ ...publicPlan(computePlan({ orders, settings: demoSettings(), now, rangeDays: days })), suggestedScenario: suggestScenario({ orders, settings: demoSettings(), now, rangeDays: days }) });
   }
+  if (p === '/planner/whatif' || p === '/planner/whatif/move') { // the What-if page: the same engine module as the server, on the loaded orders, read-only
+    const asked = method === 'GET' ? q.get('scope') : body?.scope; const scope = asked === 'all' || asked === 'commitment' ? asked : 'demo';
+    const input = { orders: scopeOrders(clone(orders), scope), settings: demoSettings(), now: scopeNow(scope, demoSettings(), new Date()) };
+    if (p === '/planner/whatif') return clone(overview(input));
+    return clone(runMove({ ...input, orderId: body?.orderId, deadline: body?.deadline }));
+  }
   if (method === 'POST' && p === '/planner/simulate') return simulateWithRealEngine(body);
+
+  if (method === 'GET' && (m = p.match(/^\/orders\/([^/]+)\/conversation$/))) { // the order's conversation and the specification read from it (same rules as the server)
+    const id = decodeURIComponent(m[1]);
+    if (!orders.some((o) => o.id === id)) throw notFound(id);
+    const conv = conversations.find((c) => c.orderId === id);
+    const messages = (conv?.messages ?? []).map((x) => ({ ...x, kind: imageKind(x) }));
+    return clone({ conversation: conv ? { id: conv.id, channel: conv.channel, customerName: conv.customerName, isDemo: Boolean(conv.isDemo) } : null, messages, spec: extractOrderSpec(messages) });
+  }
 
   if (method === 'GET' && p === '/integrations') return { items: clone(integrations) };
   if (method === 'POST' && (m = p.match(/^\/integrations\/(whatsapp|instagram)\/connect$/))) {
