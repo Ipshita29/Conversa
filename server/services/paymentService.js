@@ -7,8 +7,9 @@ import { ApiError, notFound, validationError } from '../utils/errors.js';
 import { config } from '../config/env.js';
 import { groqJson } from './groqClient.js';
 import { isDbReady } from '../config/db.js';
+import Message from '../models/Message.js';
 import { saveProof, readProof, deleteProof, checkImage, hashImage } from './proofStore.js';
-import { parsePaymentText, validateVisionOutput, VISION_PROMPT } from './paymentExtraction.js';
+import { parsePaymentText, validateVisionOutput, toReading as pureReading, VISION_PROMPT } from './paymentExtraction.js';
 import {
   buildLedger, summarize, orderPaymentStatus, toPublic, txnKey, findDuplicate, duplicateError,
   validatePaymentInput, validateConfirm, validateReject, validateRefund, duplicateProofError,
@@ -41,26 +42,47 @@ export async function syncOrder(orderId) {
   return next;
 }
 
+// The message a payment was detected in, so the owner can see what the customer actually wrote next to the screenshot.
+async function sourceMessages(payments) {
+  const ids = [...new Set(payments.map((p) => p.messageId).filter((m) => ID.test(String(m))))];
+  if (!ids.length) return {};
+  const msgs = await Message.find({ _id: { $in: ids } }).lean();
+  const convs = await Conversation.find({ _id: { $in: msgs.map((m) => m.conversation) } }).lean();
+  const cBy = Object.fromEntries(convs.map((c) => [String(c._id), c]));
+  return Object.fromEntries(msgs.map((m) => {
+    const c = cBy[String(m.conversation)];
+    return [String(m._id), { conversationId: String(m.conversation), customerName: c?.customerName ?? null, channel: m.channel, text: m.text ?? null, at: m.receivedAt?.toISOString?.() ?? null }];
+  }));
+}
+
 export async function getLedger() {
   const [orders, payments] = await Promise.all([Order.find().limit(5000), Payment.find().limit(20000)]);
-  return buildLedger(orders.map(plain), payments.map(plain).map(forLogic));
+  const ledger = buildLedger(orders.map(plain), payments.map(plain).map(forLogic));
+  const src = await sourceMessages(payments);
+  const attach = (p) => (p.messageId && src[p.messageId] ? { ...p, sourceMessage: src[p.messageId] } : p);
+  ledger.unassigned = ledger.unassigned.map(attach);
+  for (const r of ledger.rows) r.payments = r.payments.map(attach);
+  return ledger;
 }
 
 export async function getPayment(id) {
   const p = await loadPayment(id);
+  const sm = p.messageId ? (await sourceMessages([p]))[p.messageId] : null;
+  const payment = { ...toPublic(forLogic(plain(p))), ...(sm ? { sourceMessage: sm } : {}) };
+  if (!p.order) return { payment, order: null, summary: null };
   const order = await loadOrder(p.order);
   const all = await paymentsOf(order.id);
-  return { payment: toPublic(forLogic(plain(p))), order: { id: order.id, customerName: order.customerName, item: order.item, quantity: order.quantity, price: order.price ?? null, status: order.status }, summary: summarize(order.toJSON(), all) };
+  return { payment, order: { id: order.id, customerName: order.customerName, item: order.item, quantity: order.quantity, price: order.price ?? null, status: order.status }, summary: summarize(order.toJSON(), all) };
 }
 
 // The one payment (pending or confirmed) already filed from this exact image, if any.
-async function existingByHash(hash) {
+export async function existingByHash(hash) {
   if (!hash) return null;
   const p = await Payment.findOne({ proofHash: hash, status: { $in: ['pending', 'confirmed'] } });
   return p ? { id: p.id, status: p.status, orderId: String(p.order) } : null;
 }
 
-function historyEntry(action, by, note) { return { at: new Date(), action, by: by ?? null, note: note ?? null }; }
+export function historyEntry(action, by, note) { return { at: new Date(), action, by: by ?? null, note: note ?? null }; }
 
 async function insert(doc) {
   try { return await Payment.create(doc); } catch (e) {
@@ -126,6 +148,7 @@ export async function getProofFile(id) {
 
 export async function confirmPayment(id, body) {
   const p = await loadPayment(id);
+  if (!p.order) throw new ApiError(409, 'CONFLICT', 'This payment is not matched to an order yet. Choose the order first, then confirm it.');
   const order = await loadOrder(p.order);
   const all = await paymentsOf(order.id);
   const v = validateConfirm(body, forLogic(plain(p)), summarize(order.toJSON(), all.filter((x) => x.id !== p.id)));
@@ -151,7 +174,7 @@ export async function rejectPayment(id, body) {
     ? { status: 'rejected', review }
     : { review, extraction: { ...(p.extraction?.toObject?.() ?? {}), method: p.extraction?.method ?? 'manual', needsReview: true, issues: [...(p.extraction?.issues ?? []), ...(v.note ? [v.note] : [])] } };
   await Payment.updateOne({ _id: p._id }, { $set: set, $push: { history: historyEntry(v.mode === 'reject' ? 'rejected' : 'needs_review', v.reviewer, v.note) } });
-  await syncOrder(p.order);
+  if (p.order) await syncOrder(p.order);
   return getPayment(id);
 }
 
@@ -195,21 +218,18 @@ export async function extractFromText({ message, orderId, conversationId, messag
 // Reads a payment screenshot with the vision model (GROQ_VISION_MODEL). THE one reading service: Inbox, the Payments modal and the
 // browser demo all come through here. It writes nothing. Fails closed: if the picture cannot be read into an amount it throws, and the
 // caller offers manual entry instead.
-export async function readScreenshot(buffer) {
+// The model's answer, validated. Says whether the picture is a payment screenshot at all; callers decide what to do when it is not.
+export async function visionRead(buffer) {
   const mime = checkImage(buffer).type;
   const raw = await groqJson({ ...VISION_PROMPT, image: `data:${mime};base64,${buffer.toString('base64')}` }); // throws AI_UNAVAILABLE without a key
-  let x;
-  try { x = validateVisionOutput(raw); } catch { throw new ApiError(422, 'EXTRACTION_FAILED', 'The screenshot could not be read reliably. Enter the payment by hand and keep the screenshot attached.'); }
-  if (!x.isPaymentScreenshot || x.amount === null) throw new ApiError(422, 'EXTRACTION_FAILED', 'This does not look like a readable payment screenshot, or no amount could be read. Enter the payment by hand and keep the screenshot attached.');
-  const warnings = [...x.uncertainties];
-  if (!x.transactionId) warnings.push('No transaction ID visible.');
-  if (!x.paidAt) warnings.push('No payment date and time visible.');
-  if (x.succeeded === false) warnings.push('The screenshot may show a failed or pending payment.');
-  return {
-    amount: x.amount, transactionId: x.transactionId, paymentDate: x.paidAt ? x.paidAt.toISOString() : null, paymentMethod: x.method, recipientDetails: x.recipient,
-    extractionConfidence: x.confidence, warnings, model: config.groq.visionModel,
-  };
+  try { return validateVisionOutput(raw); } catch { throw new ApiError(422, 'EXTRACTION_FAILED', 'The screenshot could not be read reliably. Enter the payment by hand and keep the screenshot attached.'); }
 }
+
+export async function readScreenshot(buffer) {
+  return toReading(await visionRead(buffer));
+}
+
+export const toReading = (x) => pureReading(x, config.groq.visionModel);
 
 // POST /payments/read-image: the reading, plus whether this exact image is already filed. Saves nothing and stores nothing.
 export async function readImageOnly(buffer) {
@@ -219,7 +239,7 @@ export async function readImageOnly(buffer) {
   return { extraction, proofHash, duplicate };
 }
 
-const recordExtraction = (x) => ({ method: 'vision', confidence: x.extractionConfidence, needsReview: true, issues: x.warnings, recipient: x.recipientDetails, model: x.model, extractedAt: new Date() });
+export const recordExtraction = (x) => ({ method: 'vision', confidence: x.extractionConfidence, needsReview: true, issues: x.warnings, recipient: x.recipientDetails, model: x.model, extractedAt: new Date() });
 
 // Reads a screenshot and files it as a Verification pending payment on the order. Used by the Inbox (a screenshot in a chat) and by
 // anything that has an image and an order. Nothing is stored if the reading fails.
@@ -247,3 +267,27 @@ export async function draftFromIncoming(conv, text, messageId, receivedAt) {
   } catch { return null; }
 }
 
+
+// The owner picks the order for a payment that was detected but could not be matched safely. Nothing else about it changes: it stays
+// unverified (and stays in Pending Review only if the reading itself was doubtful).
+export async function assignPayment(id, body) {
+  const p = await loadPayment(id);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw validationError([{ field: 'body', message: 'Request body must be a JSON object.' }]);
+  const details = [];
+  if (typeof body.orderId !== 'string' || !ID.test(body.orderId)) details.push({ field: 'orderId', message: 'Choose the order this payment is for.' });
+  if (typeof body.reviewer !== 'string' || !body.reviewer.trim() || body.reviewer.trim().length > 80) details.push({ field: 'reviewer', message: 'Enter your name so this is recorded.' });
+  if (details.length) throw validationError(details);
+  if (p.order) throw new ApiError(409, 'CONFLICT', 'This payment already belongs to an order.');
+  if (p.status !== 'pending') throw new ApiError(409, 'CONFLICT', `This payment is already ${p.status}.`);
+  const order = await loadOrder(body.orderId);
+  if (order.status === 'cancelled') throw new ApiError(409, 'CONFLICT', 'This order is cancelled, so no payment can be recorded against it.');
+  const dup = findDuplicate(await paymentsOf(order.id), txnKey(p.transactionId), p.id);
+  if (dup) throw duplicateError(dup);
+  const m = p.match?.toObject?.() ?? p.match ?? {};
+  await Payment.updateOne({ _id: p._id, order: null }, {
+    $set: { order: order._id, match: { ...m, state: 'matched', by: body.reviewer.trim(), reason: 'Order chosen by the owner.', reviewRequired: Boolean(m.lowConfidence) } },
+    $push: { history: historyEntry('assigned', body.reviewer.trim(), `Matched to ${order.customerName} · ${order.item}.`) },
+  });
+  await syncOrder(order.id);
+  return getPayment(id);
+}

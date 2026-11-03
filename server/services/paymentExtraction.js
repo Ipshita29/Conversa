@@ -1,6 +1,7 @@
 // Reads payment details out of a customer's chat message. Deterministic (no model, no cost), so it works with no API key.
 // It only ever PROPOSES a record: what it finds is a claim made by the customer, never proof that money arrived.
 import { round2 } from './paymentLogic.js';
+import { ApiError } from '../utils/errors.js';
 
 const CUES = /\b(paid|pay(?:ment)?|transferred?|sent|upi|gpay|google ?pay|phone ?pe|paytm|bhim|neft|imps|rtgs|utr|txn|transaction|screenshot|advance|deposit|done)\b/i;
 const AMOUNT = [/(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d{1,2})?)/gi, /([\d,]+(?:\.\d{1,2})?)\s*(?:rs\b|rupees|inr\b|\/-)/gi];
@@ -79,6 +80,20 @@ export function validateVisionOutput(o) {
   return {
     isPaymentScreenshot: o.isPaymentScreenshot === true, amount: amount === null ? null : round2(amount), transactionId: s(o.transactionId, 64), paidAt: paidAt === null ? null : new Date(paidAt),
     method: m, recipient: s(o.recipient, 120), succeeded: o.status === 'success' ? true : o.status === 'failed' ? false : null, confidence: round2(c), uncertainties: u,
+  };
+}
+
+// The reading as the rest of the app uses it (see readScreenshot): what was read, and every doubt about it. Throws when it is not a readable
+// payment screenshot. `model` is only a label for the record.
+export function toReading(x, model = null) {
+  if (!x.isPaymentScreenshot || x.amount === null) throw new ApiError(422, 'EXTRACTION_FAILED', 'This does not look like a readable payment screenshot, or no amount could be read. Enter the payment by hand and keep the screenshot attached.');
+  const warnings = [...x.uncertainties];
+  if (!x.transactionId) warnings.push('No transaction ID visible.');
+  if (!x.paidAt) warnings.push('No payment date and time visible.');
+  if (x.succeeded === false) warnings.push('The screenshot may show a failed or pending payment.');
+  return {
+    amount: x.amount, transactionId: x.transactionId, paymentDate: x.paidAt ? x.paidAt.toISOString() : null, paymentMethod: x.method, recipientDetails: x.recipient,
+    extractionConfidence: x.confidence, warnings, model: x.model ?? model,
   };
 }
 

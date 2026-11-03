@@ -9,7 +9,9 @@ import { parseIsoDate, isPlainObject } from '../utils/validation.js';
 
 export const METHODS = ['upi', 'bank_transfer', 'cash', 'cod', 'other'];
 export const PAYMENT_RECORD_STATUSES = ['pending', 'confirmed', 'rejected'];
-export const PAYMENT_SOURCES = ['manual', 'chat_text', 'chat_screenshot', 'screenshot_upload'];
+export const PAYMENT_SOURCES = ['manual', 'chat_text', 'chat_screenshot', 'screenshot_upload', 'auto_screenshot'];
+export const MATCH_STATES = ['matched', 'uncertain', 'unmatched'];
+export const LOW_CONFIDENCE = 0.6;
 export const MAX_AMOUNT = 10000000;
 const PAID_TOLERANCE_MS = 5 * 60 * 1000;
 const TXN = /^[A-Za-z0-9][A-Za-z0-9\-_/ ]{3,63}$/;
@@ -114,8 +116,17 @@ export function orderPaymentStatus(order, payments) {
   return 'unverified';
 }
 
+// Three things are tracked apart and a screenshot only ever moves the first two: what was READ (extraction), whether it was MATCHED to an
+// order (match), and whether the owner VERIFIED the money (status). Only the owner's confirmation produces 'verified'.
+export function displayStatus(p) {
+  if (p.status === 'rejected') return 'rejected';
+  if (p.status === 'confirmed') return 'verified';
+  if (!p.orderId || p.match?.reviewRequired || p.review?.mode === 'needs_review') return 'pending_review';
+  return 'awaiting_verification';
+}
+
 export const toPublic = (p) => ({
-  id: p.id, orderId: p.orderId, kind: p.kind ?? 'payment', amount: p.amount, method: p.method, status: p.status,
+  id: p.id, orderId: p.orderId ?? null, displayStatus: displayStatus(p), match: p.match ?? null, kind: p.kind ?? 'payment', amount: p.amount, method: p.method, status: p.status,
   transactionId: p.transactionId ?? null, paidAt: p.paidAt ? new Date(p.paidAt).toISOString() : null, source: p.source ?? 'manual', notes: p.notes ?? null,
   conversationId: p.conversationId ?? null, messageId: p.messageId ?? null,
   proof: p.proof ? { url: p.proof.url ?? `/payments/${p.id}/proof`, contentType: p.proof.contentType, size: p.proof.size ?? null } : null,
@@ -126,7 +137,8 @@ export const toPublic = (p) => ({
 // The ledger: every order with its payment summary and records, plus the four headline numbers, all computed from the records.
 export function buildLedger(orders, payments) {
   const by = {};
-  for (const p of payments) (by[p.orderId] ??= []).push(p);
+  for (const p of payments) if (p.orderId) (by[p.orderId] ??= []).push(p);
+  const unassigned = payments.filter((p) => !p.orderId && p.status !== 'rejected').sort((a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0)).map(toPublic);
   const when = (p) => new Date(p.paidAt ?? p.createdAt ?? 0).getTime();
   const rows = orders.map((o) => {
     const list = (by[o.id] ?? []).slice().sort((a, b) => when(b) - when(a));
@@ -149,9 +161,10 @@ export function buildLedger(orders, payments) {
     partialBalance: round2(live.filter((r) => r.paid > EPS).reduce((s, r) => s + (r.balance ?? 0), 0)),
     toVerify: rows.reduce((s, r) => s + r.toVerify, 0),
     toVerifyAmount: round2(rows.reduce((s, r) => s + r.pending, 0)),
+    toReview: unassigned.length + rows.reduce((s, r) => s + r.payments.filter((p) => p.displayStatus === 'pending_review').length, 0),
     codDue: round2(rows.reduce((s, r) => s + r.codDue, 0)),
   };
-  return { kpis, rows };
+  return { kpis, rows, unassigned };
 }
 
 // ---- Checks used before a write -----------------------------------------------------------------------------------------
@@ -210,4 +223,81 @@ export function validateRefund(body, original, existing) {
   if (typeof body.reason !== 'string' || !body.reason.trim() || body.reason.length > 500) details.push({ field: 'reason', message: 'Say why it is being refunded or reversed.' });
   if (details.length) throw validationError(details);
   return { amount: round2(body.amount), reviewer: body.reviewer.trim(), reason: body.reason.trim() };
+}
+
+// ---- Automatic detection: matching and duplicates -----------------------------------------------------------------------
+const digits = (v) => String(v ?? '').replace(/\D/g, '');
+const sameNumber = (a, b) => { const x = digits(a); const y = digits(b); return x.length >= 7 && y.length >= 7 && x.slice(-10) === y.slice(-10); };
+const sameName = (a, b) => { const n = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' '); return n(a).length > 1 && n(a) === n(b); };
+
+// Which order does a screenshot belong to? Pure, so it is tested on its own.
+//  conv: { orderId, customerName, contactId }   orders: [{ id, customerName, customerContact, status, balance }]   amount: number
+// 'matched'   the chat is linked to the order, or the sender's own phone number picks out exactly one open order. The order is set.
+// 'uncertain' something points at an order but not firmly enough (name only, several candidates, amount above the balance). No order is set
+//             unless the chat itself is linked; the candidates are suggested and the owner decides.
+// 'unmatched' nothing fits. The record waits, with no order, until the owner assigns one.
+export function matchOrder(conv, orders, amount) {
+  const open = orders.filter((o) => o.status !== 'cancelled');
+  const fits = (o) => o.balance === null || o.balance === undefined || amount - o.balance <= EPS;
+  if (conv.orderId) {
+    const o = open.find((x) => x.id === String(conv.orderId));
+    if (!o) return { state: 'unmatched', orderId: null, candidates: [], reason: 'This chat is linked to an order that is cancelled or no longer exists.' };
+    return fits(o) ? { state: 'matched', orderId: o.id, candidates: [o.id], reason: 'The chat is linked to this order.' }
+      : { state: 'uncertain', orderId: o.id, candidates: [o.id], reason: `The amount is more than the ${o.balance} still owed on the linked order.` };
+  }
+  const due = open.filter((o) => o.balance === null || o.balance === undefined || o.balance > EPS);
+  const byPhone = due.filter((o) => sameNumber(o.customerContact, conv.contactId));
+  const byName = due.filter((o) => sameName(o.customerName, conv.customerName));
+  const pool = byPhone.length ? byPhone : byName;
+  const via = byPhone.length ? 'phone number' : 'customer name';
+  if (pool.length === 0) return { state: 'unmatched', orderId: null, candidates: [], reason: 'No open order was found for this customer.' };
+  const exact = pool.filter((o) => o.balance !== null && o.balance !== undefined && Math.abs(o.balance - amount) <= EPS);
+  const pick = pool.length === 1 ? pool[0] : exact.length === 1 ? exact[0] : null;
+  if (!pick) return { state: 'uncertain', orderId: null, candidates: pool.map((o) => o.id), reason: `${pool.length} open orders fit this customer. Choose the right one.` };
+  if (via === 'customer name') return { state: 'uncertain', orderId: null, candidates: [pick.id], reason: 'Matched by customer name only, which is not firm enough to assign automatically.' };
+  if (!fits(pick)) return { state: 'uncertain', orderId: null, candidates: [pick.id], reason: `The amount is more than the ${pick.balance} still owed on the matching order.` };
+  return { state: 'matched', orderId: pick.id, candidates: [pick.id], reason: `Matched by the sender's phone number${pool.length > 1 ? ' and the amount' : ''}.` };
+}
+
+// Why a record needs a person to look at it before anyone relies on it. An empty list means it can wait in the normal verification queue.
+export function reviewReasons({ x, match, hasMethod }) {
+  const why = [];
+  if (match.state !== 'matched') why.push(match.reason);
+  if (x.confidence < LOW_CONFIDENCE) why.push(`Low reading confidence (${Math.round(x.confidence * 100)}%).`);
+  if (!x.transactionId) why.push('No transaction ID could be read.');
+  if (!hasMethod) why.push('The payment method could not be read.');
+  if (x.succeeded === false) why.push('The screenshot may show a failed or pending payment.');
+  return why;
+}
+
+// An identifier-based duplicate check across ALL orders: same transaction ID, else same amount + method at the same minute.
+export function findPossibleDuplicate(payments, { key, amount, method, paidAt }) {
+  const live = payments.filter((p) => p.status !== 'rejected' && p.kind !== 'refund');
+  if (key) { const hit = live.find((p) => txnKey(p.transactionId) === key); if (hit) return hit; }
+  if (paidAt) return live.find((p) => p.paidAt && Math.abs(amount - p.amount) < EPS && p.method === method && Math.abs(new Date(p.paidAt) - new Date(paidAt)) <= 60000) ?? null;
+  return null;
+}
+
+// The whole decision for one payment screenshot that has been read: duplicate, or a pending record (with its match) that is either
+// ready for verification ('filed') or needs a person first ('review'). Pure, so the server pipeline, the demo seed and the browser demo
+// all make the same call. `x` is the reading (see toReading); `existing` are the payments already on file; `orders` the candidates.
+export function decideDetectedPayment({ x, succeeded = true, conv, orders, existing, receivedAt, manual = false, now = new Date() }) {
+  const match = matchOrder(conv, orders, x.amount);
+  const paidAt = x.paymentDate && new Date(x.paymentDate) <= now ? new Date(x.paymentDate) : null;
+  const key = txnKey(x.transactionId);
+  const method = x.paymentMethod ?? 'other';
+  const same = findPossibleDuplicate(existing, { key, amount: x.amount, method, paidAt });
+  if (same) return { state: 'duplicate', reason: `This payment is already recorded${x.transactionId ? ` (transaction ${x.transactionId})` : ''}.`, duplicate: same };
+  const why = reviewReasons({ x: { confidence: x.extractionConfidence, transactionId: x.transactionId, succeeded }, match, hasMethod: Boolean(x.paymentMethod) });
+  const lowConfidence = why.some((w) => /confidence|failed or pending/.test(w));
+  const issues = [...x.warnings, ...(paidAt ? [] : ['No usable payment date; the message time is used.'])];
+  return {
+    state: why.length ? 'review' : 'filed', reason: why.length ? why.join(' ') : null,
+    record: {
+      orderId: match.orderId, amount: round2(x.amount), method, status: 'pending', transactionId: x.transactionId ?? null, transactionKey: key, paidAt: paidAt ?? receivedAt,
+      source: manual ? 'chat_screenshot' : 'auto_screenshot', notes: 'Read from a screenshot in Messages. Not yet verified.',
+      extraction: { method: 'vision', confidence: x.extractionConfidence, needsReview: true, issues, recipient: x.recipientDetails ?? null, model: x.model ?? null, extractedAt: now },
+      match: { state: match.state, by: 'auto', reason: match.reason, candidates: match.candidates, reviewRequired: why.length > 0, lowConfidence, auto: !manual },
+    },
+  };
 }

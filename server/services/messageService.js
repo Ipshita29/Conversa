@@ -2,8 +2,11 @@ import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import Payment from '../models/Payment.js';
 import crypto from 'node:crypto';
+import { displayStatus } from './paymentLogic.js';
+import { extractOrderSpec, imageKind } from './orderSpec.js';
 import { draftFromIncoming, extractFromImage, publicPayment } from './paymentService.js';
 import { saveProof, readProof } from './proofStore.js';
+import { queueScan, retryScan } from './paymentAutoDetect.js';
 import { downloadMedia } from './integrations/whatsappService.js';
 import { ApiError, notFound } from '../utils/errors.js';
 
@@ -16,8 +19,11 @@ export async function ingest(messages) {
     const conv = await upsertConversation(m);
     try {
       const attachment = await fetchAttachment(m);
-      const msg = await Message.create({ conversation: conv._id, channel: m.channel, externalId: m.externalId, text: m.text, messageType: m.messageType, receivedAt: m.receivedAt, attachment });
+      // Every image is checked for a payment in the background. If the picture could not be downloaded, say so instead of staying silent.
+      const paymentScan = m.messageType !== 'image' ? null : attachment ? { state: 'processing', at: new Date() } : { state: 'failed', reason: 'The picture could not be downloaded, so it was not checked for a payment.', at: new Date() };
+      const msg = await Message.create({ conversation: conv._id, channel: m.channel, externalId: m.externalId, text: m.text, messageType: m.messageType, receivedAt: m.receivedAt, attachment, paymentScan });
       stored++;
+      if (paymentScan?.state === 'processing') queueScan(msg._id);
       // A payment-looking message in a chat already linked to an order is filed as Verification pending (never as paid).
       await draftFromIncoming(conv, m.text, String(msg._id), m.receivedAt);
     } catch (err) {
@@ -56,15 +62,25 @@ const shape = (c, msgs) => ({
   unread: msgs.filter((m) => !m.read).length, messages: msgs.slice(-30),
 });
 
+// A scan that has been "processing" for minutes was lost (server restarted mid-read): show it as failed so it can be retried.
+const STALE_MS = 3 * 60 * 1000;
+function scanOf(m) {
+  const s = m.paymentScan;
+  if (!s?.state) return null;
+  if (s.state === 'processing' && Date.now() - new Date(s.at ?? 0).getTime() > STALE_MS) return { state: 'failed', reason: 'Checking this picture took too long. Try again.' };
+  return { state: s.state, reason: s.reason ?? null };
+}
+
 async function messagesByConversation(ids) {
   const msgs = await Message.find({ conversation: { $in: ids } }).sort({ receivedAt: 1 }).lean();
   const pays = await Payment.find({ _id: { $in: msgs.map((m) => m.paymentId).filter(Boolean) } }).lean();
-  const payBy = Object.fromEntries(pays.map((p) => [String(p._id), { id: String(p._id), status: p.status, amount: p.amount, method: p.method, transactionId: p.transactionId ?? null }]));
+  const payBy = Object.fromEntries(pays.map((p) => [String(p._id), { id: String(p._id), status: p.status, displayStatus: displayStatus({ ...p, orderId: p.order ? String(p.order) : null }), orderId: p.order ? String(p.order) : null, amount: p.amount, method: p.method, transactionId: p.transactionId ?? null }]));
   const by = {};
   for (const m of msgs) {
     (by[m.conversation] ??= []).push({
-      id: String(m._id), from: 'customer', text: m.text ?? (m.attachment ? null : `[${m.messageType} message — not shown]`), at: m.receivedAt.toISOString(), read: Boolean(m.readAt),
+      id: String(m._id), from: m.direction === 'outbound' ? 'business' : 'customer', text: m.text ?? (m.attachment ? null : `[${m.messageType} message — not shown]`), at: m.receivedAt.toISOString(), read: Boolean(m.readAt),
       attachment: m.attachment ? { url: `/conversations/${m.conversation}/messages/${m._id}/attachment`, contentType: m.attachment.contentType } : null,
+      scan: scanOf(m),
       payment: m.paymentId ? payBy[String(m.paymentId)] ?? null : null,
     });
   }
@@ -125,10 +141,25 @@ export async function extractMessagePayment(convId, msgId) {
     if (existing) return { payment: publicPayment(existing), extraction: null, existing: true };
   }
   const conv = await Conversation.findById(convId);
+  if (!conv?.orderId && msg.paymentScan?.state && msg.paymentScan.state !== 'processing') { // an image from Messages: the automatic pipeline, which can match the order itself
+    await Message.updateOne({ _id: msg._id, 'paymentScan.state': { $in: ['failed', 'not_payment'] } }, { $set: { 'paymentScan.state': 'failed' } });
+    const r = await retryScan(msg._id);
+    if (r.payment) return { payment: publicPayment(r.payment), extraction: null, existing: false };
+    throw new ApiError(r.state === 'duplicate' ? 409 : 422, r.state === 'duplicate' ? 'DUPLICATE_SCREENSHOT' : 'EXTRACTION_FAILED', r.reason ?? 'Nothing could be read from this picture.');
+  }
   if (!conv?.orderId) throw new ApiError(409, 'CONFLICT', 'Link this chat to an order first, so the payment goes to the right one.');
   const buffer = await readProof(msg.attachment);
   if (!buffer) throw notFound('Attachment', msgId);
   const r = await extractFromImage({ buffer, proofMeta: msg.attachment.toObject?.() ?? msg.attachment, orderId: String(conv.orderId), conversationId: String(conv._id), messageId: String(msg._id) });
-  await Message.updateOne({ _id: msg._id }, { $set: { paymentId: r.payment.id } });
+  await Message.updateOne({ _id: msg._id }, { $set: { paymentId: r.payment.id, ...(msg.paymentScan?.state ? { 'paymentScan.state': 'filed', 'paymentScan.reason': null } : {}) } });
   return { ...r, existing: false };
+}
+
+// An order's conversation: the customer's messages (the original, in time order, never edited), and the specification read out of them.
+// The specification is worked out fresh from the messages every time, so a changed instruction updates it and the history stays.
+export async function orderConversation(orderId) {
+  const conv = await Conversation.findOne({ orderId }).sort({ lastMessageAt: -1 }).lean();
+  if (!conv) return { conversation: null, messages: [], spec: extractOrderSpec([]) };
+  const messages = ((await messagesByConversation([conv._id]))[conv._id] ?? []).map((m) => ({ ...m, kind: imageKind(m) }));
+  return { conversation: { id: String(conv._id), channel: conv.channel, customerName: conv.customerName, isDemo: Boolean(conv.isDemo) }, messages, spec: extractOrderSpec(messages) };
 }
