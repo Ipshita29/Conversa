@@ -1,0 +1,42 @@
+/* Production sequence: big step numbers scroll on the left, one production card stays put on the right. */
+.ps { margin: 0 0 3.5rem; }
+.ps-head { margin-bottom: 1.2rem; }
+.ps-head h2 { margin: 0; font-size: clamp(1.9rem, 3.6vw, 2.7rem); line-height: 1.05; letter-spacing: -0.04em; font-weight: 500; }
+.ps-head em { font-family: var(--brand); font-style: italic; font-weight: 400; color: var(--caramel-dark); }
+.ps-head p { margin: 0.4rem 0 0; color: var(--muted); }
+.ps-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 480px); gap: clamp(1.5rem, 5vw, 5rem); align-items: start; }
+.ps-steps { margin: 0; padding: 0; list-style: none; }
+.ps-step { display: flex; align-items: center; min-height: 78vh; }
+.ps-step:first-child { min-height: 70vh; } .ps-step:last-child { min-height: 70vh; }
+.ps-step-in { display: grid; gap: 0.25rem; }
+.ps-num { font: 400 clamp(6rem, 15vw, 12.5rem)/0.85 var(--brand); letter-spacing: -0.05em; color: var(--primary); font-variant-numeric: lining-nums; }
+.ps-step h3 { margin: 0.7rem 0 0; font: 600 clamp(1.6rem, 3vw, 2.3rem) var(--display); letter-spacing: -0.03em; color: var(--cocoa); }
+.ps-title { margin: 0; font-size: 1.1rem; color: var(--muted); }
+.ps-desc { margin: 0.8rem 0 0; max-width: 28rem; font-size: 0.95rem; color: var(--faint); }
+
+.ps-card { position: sticky; top: 6.2rem; display: grid; gap: 1rem; align-self: start; height: min(620px, calc(100vh - 8rem)); padding: 1.1rem 1.2rem 1.3rem; border: 1px solid #D7E4F5; border-radius: 28px; background: #fff; box-shadow: 0 1px 2px rgba(36, 63, 115, 0.05), 0 30px 60px -34px rgba(36, 63, 115, 0.4); grid-template-rows: auto 1fr; overflow: hidden; }
+.ps-card-top { display: flex; align-items: center; justify-content: space-between; }
+.ps-count { font: 500 0.82rem var(--display); color: var(--faint); font-variant-numeric: tabular-nums; } .ps-count b { color: var(--primary); font-weight: 600; }
+.ps-dots { display: flex; gap: 0.4rem; }
+.ps-dots button { width: 22px; height: 6px; padding: 0; border: 0; border-radius: 99px; background: #D7E4F5; cursor: pointer; transition: background 0.3s, width 0.3s; } .ps-dots button.is-on { width: 34px; background: var(--primary); }
+.ps-card-body { display: grid; grid-auto-rows: min-content; align-content: start; gap: 0.35rem; min-height: 0; }
+.ps-pic { position: relative; display: grid; place-items: center; height: clamp(150px, 28vh, 250px); margin-bottom: 0.7rem; border-radius: 20px; background: #EEF4FC; overflow: hidden; }
+.ps-pic img { width: 100%; height: 100%; object-fit: cover; display: block; } .ps-pic > span { font: 400 5rem var(--brand); color: #8FB1DE; }
+.ps-prio { position: absolute; top: 0.7rem; left: 0.7rem; padding: 3px 10px; border-radius: 99px; background: #fff; font: 600 0.72rem var(--display); font-style: normal; color: var(--low); }
+.ps-prio.is-medium { color: var(--caramel-ink); background: var(--papaya-soft); } .ps-prio.is-high { color: var(--high); background: var(--high-bg); }
+.ps-card-body h3 { margin: 0; font: 600 1.7rem var(--display); letter-spacing: -0.03em; }
+.ps-card-item { margin: 0; color: var(--muted); }
+.ps-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem 1rem; margin: 0.9rem 0 0; padding-top: 0.9rem; border-top: 1px solid #ECE7DC; }
+.ps-facts .is-wide { grid-column: 1 / -1; }
+.ps-facts dt { font: 500 0.74rem var(--display); letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.ps-facts dd { margin: 0.1rem 0 0; font: 600 1.15rem var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; } .ps-facts .is-wide dd { font-size: 1.6rem; color: var(--primary); }
+.ps-facts small { display: block; font: 400 0.78rem var(--display); letter-spacing: 0; color: var(--faint); }
+.ps-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.9rem 0 0; } .ps-chips span { padding: 3px 11px; border-radius: 99px; background: var(--papaya-soft); color: var(--caramel-ink); font: 600 0.76rem var(--display); }
+
+@media (max-width: 900px) {
+  .ps-grid { grid-template-columns: 1fr; gap: 0; }
+  .ps-card { order: -1; top: 4.6rem; z-index: 3; height: auto; max-height: 52vh; padding: 0.8rem 0.9rem 1rem; border-radius: 22px; }
+  .ps-pic { height: 96px; margin-bottom: 0.2rem; } .ps-card-body h3 { font-size: 1.3rem; } .ps-facts { margin-top: 0.5rem; padding-top: 0.6rem; gap: 0.5rem 1rem; } .ps-chips { margin-top: 0.5rem; }
+  .ps-step { min-height: 62vh; } .ps-num { font-size: clamp(5rem, 28vw, 8rem); }
+}
+@media (prefers-reduced-motion: reduce) { .ps-dots button { transition: none; } }
