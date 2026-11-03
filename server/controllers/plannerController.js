@@ -4,6 +4,7 @@ import { getSettings } from '../services/settingsService.js';
 import { computePlan, publicPlan, simulate, suggestScenario } from '../services/workloadEngine.js';
 import { zonedTimeToUtc } from '../utils/timezone.js';
 import { isPlainObject } from '../utils/validation.js';
+import { scopeOrders, scopeNow, overview, runMove } from '../services/whatIf.js';
 
 // `from` (YYYY-MM-DD, business timezone) may move the planning start into the future; past dates mean "now".
 function planningStart(from, tz) {
@@ -38,4 +39,23 @@ export const simulatePlanner = asyncHandler(async (req, res) => {
   const [orders, settings] = await Promise.all([Order.find().limit(5000), getSettings()]);
   // Read-only: orders are only read, never written.
   res.json(simulate({ orders, changes: req.body.changes, settings, now: planningStart(from, settings.timezone), rangeDays: days, probeMinutes }));
+});
+
+// The What-if page. `scope` is 'commitment' (the five seeded demo orders planned from 9:00 on the scenario day), 'demo' (the same orders on the real clock) or 'all' (every order); both run the same engine on copies and nothing is saved.
+const scopeOf = (v) => (v === 'all' || v === 'commitment' ? v : 'demo');
+const whatIfInputs = async (scope) => {
+  const [orders, settings] = await Promise.all([Order.find().limit(5000), getSettings()]);
+  const kind = scopeOf(scope);
+  return { orders: scopeOrders(orders.map((o) => o.toJSON()), kind), settings, now: scopeNow(kind, settings, new Date()) };
+};
+const body = (b, check) => {
+  if (!isPlainObject(b)) throw validationError([{ field: 'body', message: 'Request body must be a JSON object.' }]);
+  const details = check(b);
+  if (details.length) throw validationError(details);
+  return b;
+};
+export const whatIf = asyncHandler(async (req, res) => res.json(overview(await whatIfInputs(req.query.scope))));
+export const whatIfMove = asyncHandler(async (req, res) => {
+  const b = body(req.body, (x) => [...(typeof x.orderId === 'string' && x.orderId ? [] : [{ field: 'orderId', message: 'Choose the order to move.' }]), ...(typeof x.deadline === 'string' ? [] : [{ field: 'deadline', message: 'Enter the proposed deadline.' }])]);
+  res.json(runMove({ ...(await whatIfInputs(b.scope)), orderId: b.orderId, deadline: b.deadline }));
 });

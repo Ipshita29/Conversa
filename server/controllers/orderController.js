@@ -3,6 +3,7 @@ import { asyncHandler, badQuery, notFound, validationError, ApiError } from '../
 import { validateOrderInput, validateEvidenceInput, ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validation.js';
 import { getSettings } from '../services/settingsService.js';
 import { riskMap, withRisk } from '../services/orderService.js';
+import { orderConversation } from '../services/messageService.js';
 
 const TERMINAL = ['completed', 'cancelled'];
 const SORTS = { deadline: 1, '-deadline': -1, createdAt: 1, '-createdAt': -1 };
@@ -85,3 +86,5 @@ export const addPaymentEvidence = asyncHandler(async (req, res) => {
   await order.save();
   res.status(201).json(withRisk(order, await riskMap(await getSettings())));
 });
+
+export const conversation = asyncHandler(async (req, res) => res.json(await orderConversation((await findOrder(req.params.id)).id)));

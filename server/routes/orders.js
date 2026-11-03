@@ -8,5 +8,6 @@ r.get('/', c.list);
 r.post('/', c.create);
 r.get('/:id', c.get);
 r.patch('/:id', c.update);
+r.get('/:id/conversation', c.conversation);
 r.post('/:id/payment-evidence', c.addPaymentEvidence);
 export default r;
