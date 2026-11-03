@@ -1,17 +1,75 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { X, AlertTriangle, Check, MessageSquare, Paperclip, RotateCcw, ShieldAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, Check, Paperclip, RotateCcw, ShieldAlert } from 'lucide-react';
-import { confirmPayment, proofSrc, readPaymentScreenshot, recordPayment, refundPayment, rejectPayment, uploadPaymentProof } from '../services/api.js';
+import { assignPayment, confirmPayment, proofSrc, readPaymentScreenshot, recordPayment, refundPayment, rejectPayment, uploadPaymentProof } from '../services/api.js';
 import { formatMoney, fromLocalInput, toLocalInput } from '../utils/format.js';
 import { Modal } from './UI.jsx';
-import AmountFigures from './AmountFigures.jsx';
-import { useGuard } from './PaymentModal.jsx';
+import { AmountFigures } from './Insights.jsx';
 import { validatePaymentInput } from '../../../server/services/paymentLogic.js';
+import '../css/Payments.css';
+
+// ======== Payment modal ========
+
+// A large, centred dialog for one order's payments. Closing by clicking outside or pressing Escape is refused while a form is open
+// (unsaved changes) or a request is in flight (pending action); the close button is refused only while a request is in flight.
+// Panels inside report their state through the guard.
+const Guard = createContext({ setDirty() {}, setBusy() {} });
+export const useGuard = () => useContext(Guard);
+
+export function PaymentModal({ title, onClose, refreshing = false, children }) {
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(''); // why a close was refused, shown briefly
+  const [shake, setShake] = useState(false);
+  const box = useRef(null); const closeBtn = useRef(null);
+  const noticeTimer = useRef(0);
+  const state = useRef({ dirty, busy }); state.current = { dirty, busy };
+
+  const tryClose = useCallback((explicit) => {
+    const { dirty: d, busy: b } = state.current;
+    if (b || (!explicit && d)) { setNotice(b ? 'Saving… please wait a moment.' : 'Finish or cancel the open form first.'); setShake(true); setTimeout(() => setShake(false), 420); clearTimeout(noticeTimer.current); noticeTimer.current = setTimeout(() => setNotice(''), 3200); return; } // refused: shake the dialog and say why
+    onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    const before = document.activeElement;
+    closeBtn.current?.focus();
+    document.documentElement.classList.add('pm-lock');
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); if (!document.querySelector('.payments .modal-backdrop')) tryClose(false); return; } // a screenshot viewer or form on top closes first
+      if (e.key !== 'Tab' || !box.current) return;
+      const f = [...box.current.querySelectorAll('button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])')].filter((el) => !el.disabled && el.offsetParent !== null);
+      if (!f.length) return;
+      const first = f[0]; const last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { clearTimeout(noticeTimer.current); document.removeEventListener('keydown', onKey); document.documentElement.classList.remove('pm-lock'); before?.focus?.(); };
+  }, [tryClose]);
+
+  const guard = useMemo(() => ({ setDirty, setBusy }), []);
+  return (
+    <Guard.Provider value={guard}>
+      <div className="pm-backdrop" data-lenis-prevent onMouseDown={(e) => e.target === e.currentTarget && tryClose(false)}>
+        <div className={`pm-modal${shake ? ' is-nudged' : ''}`} ref={box} role="dialog" aria-modal="true" aria-label={title}>
+          <button type="button" ref={closeBtn} className="pm-x" onClick={() => tryClose(true)} aria-label="Close payment details" disabled={busy}><X size={18} aria-hidden="true" /></button>
+          <div className="pm-modal-body" data-lenis-prevent>{children}</div>
+          <p className="pm-modal-live" role="status" aria-live="polite">{notice || (refreshing && !busy ? 'Updating…' : '')}</p>
+        </div>
+      </div>
+    </Guard.Provider>
+  );
+}
+
+// ======== Payments ========
 
 export const STATUS = { paid: 'Paid', partial: 'Partially paid', due: 'Due', cod: 'COD', verification_pending: 'Verification pending' };
 export const METHOD = { upi: 'UPI', bank_transfer: 'Bank transfer', cash: 'Cash', cod: 'COD', other: 'Other' };
-export const SOURCE = { manual: 'Entered manually', chat_text: 'From a chat message', chat_screenshot: 'From a chat screenshot', screenshot_upload: 'From an uploaded screenshot' };
-const REC_STATUS = { pending: 'Verification pending', confirmed: 'Confirmed', rejected: 'Rejected' };
+export const SOURCE = { manual: 'Entered manually', chat_text: 'From a chat message', chat_screenshot: 'From a chat screenshot', screenshot_upload: 'From an uploaded screenshot', auto_screenshot: 'Automatically detected from Messages' };
+// What a record is called: read and matched are not the same as verified, and only the owner's confirmation says Verified.
+export const REC_STATUS = { pending_review: 'Pending Review', awaiting_verification: 'Awaiting Verification', verified: 'Verified', rejected: 'Rejected' };
+export const recStatus = (p) => p.displayStatus ?? (p.status === 'confirmed' ? 'verified' : p.status === 'rejected' ? 'rejected' : 'awaiting_verification');
+export const RecPill = ({ p }) => <em className={`pm-pill is-rec-${recStatus(p)}`}>{REC_STATUS[recStatus(p)]}</em>;
 const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
 const shortId = (id) => `#${/^[a-f\d]{24}$/i.test(String(id)) ? String(id).slice(-6).toUpperCase() : String(id).replace(/^ord_/, '')}`;
 const REVIEWER_KEY = 'conversa.reviewer';
@@ -37,6 +95,30 @@ export function Kpis({ kpis }) {
   );
 }
 
+// The customer's own message the screenshot arrived in, with a way back to the conversation.
+export function SourceMessage({ m }) {
+  if (!m) return null;
+  return (
+    <div className="pm-srcmsg"><MessageSquare size={14} aria-hidden="true" />
+      <div><p><b>{m.customerName ?? 'A customer'}</b> · {m.channel === 'instagram' ? 'Instagram' : 'WhatsApp'} · {when(m.at)}</p>
+        <p className="pm-srcmsg-text">{m.text ? `“${m.text}”` : 'A picture with no text.'}</p>
+        <Link className="pm-link" to={`/inbox?conversation=${m.conversationId}`}>Open the message</Link></div></div>
+  );
+}
+
+// Three separate facts about an automatically detected payment. Reading and matching never make it verified.
+function Stages({ p }) {
+  if (!p.match) return null;
+  const matched = p.match.state === 'matched';
+  return (
+    <ol className="pm-stages" aria-label="Where this payment stands">
+      <li className="is-done"><Check size={12} aria-hidden="true" /> Read from screenshot</li>
+      <li className={matched ? 'is-done' : 'is-warn'}>{matched ? <Check size={12} aria-hidden="true" /> : <AlertTriangle size={12} aria-hidden="true" />} {matched ? 'Matched to order' : 'Match needs review'}</li>
+      <li className={p.status === 'confirmed' ? 'is-done' : ''}>{p.status === 'confirmed' ? <Check size={12} aria-hidden="true" /> : null} {p.status === 'confirmed' ? 'Verified by you' : p.status === 'rejected' ? 'Rejected' : 'Not verified yet'}</li>
+    </ol>
+  );
+}
+
 export function ProofThumb({ proof, onOpen, size = 'sm' }) {
   const src = proofSrc(proof);
   if (!src) return <span className="pm-noproof">—</span>;
@@ -44,7 +126,7 @@ export function ProofThumb({ proof, onOpen, size = 'sm' }) {
 }
 
 export function ProofViewer({ src, onClose }) {
-  return <Modal title="Payment screenshot" onClose={onClose}><div className="pm-proof-big"><img src={src} alt="Payment screenshot sent by the customer" /></div><p className="pm-fine">The original file, exactly as it was received. A screenshot does not prove the money reached your account.</p></Modal>;
+  return <Modal variant="lightbox" title="Payment screenshot" onClose={onClose}><div className="pm-proof-big"><img src={src} alt="Payment screenshot sent by the customer" /></div><p className="pm-fine">The original file, exactly as it was received. A screenshot does not prove the money reached your account.</p></Modal>;
 }
 
 // ---- Detail drawer content ------------------------------------------------------------------------------------------------
@@ -178,12 +260,15 @@ function Record({ p, row, tz, onProof, act, setAct, onChanged, onRejected }) {
     <article id={`pm-rec-${p.id}`} className={`pm-rec is-${p.status}${refund ? ' is-refund' : ''}`}>
       <header>
         <div><b>{refund ? '−' : ''}{formatMoney(p.amount)}</b><span> · {refund ? 'Refund' : METHOD[p.method]}</span></div>
-        <em className={`pm-pill is-rec-${refund ? 'refund' : p.status}`}>{refund ? 'Refunded' : p.method === 'cod' && p.status === 'pending' ? 'COD · due on delivery' : REC_STATUS[p.status]}</em>
+        {refund || (p.method === 'cod' && p.status === 'pending') ? <em className={`pm-pill is-rec-${refund ? 'refund' : 'pending'}`}>{refund ? 'Refunded' : 'COD · due on delivery'}</em> : <RecPill p={p} />}
       </header>
+      <Stages p={p} />
       <Facts rows={[['Reference', p.transactionId ?? (p.method === 'cod' || p.method === 'cash' ? 'None needed' : '—')], ['Paid', p.paidAt ? when(p.paidAt) : p.method === 'cod' ? 'On delivery' : '—'], ['Source', `${SOURCE[p.source] ?? p.source}${p.isDemo ? ' · demo' : ''}`], p.notes && ['Notes', p.notes]]} />
       {p.proof ? <div className="pm-rec-proof"><ProofThumb proof={p.proof} onOpen={onProof} size="lg" /><span>Original screenshot, kept as received</span></div>
         : !refund && <label className="pm-attach"><Paperclip size={13} aria-hidden="true" /> {adding ? 'Uploading…' : 'Attach screenshot'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={attach} disabled={adding} /></label>}
       {p.extraction && <Extraction x={p.extraction} />}
+      {p.match && p.match.state !== 'matched' && <p className="pm-fine pm-matchnote"><AlertTriangle size={12} aria-hidden="true" /> {p.match.reason}</p>}
+      <SourceMessage m={p.sourceMessage} />
       {p.review && <p className="pm-fine pm-review">{p.review.mode === 'confirmed' || p.review.mode === 'manual_entry' ? <Check size={12} aria-hidden="true" /> : null} {p.review.mode === 'rejected' ? 'Rejected' : p.review.mode === 'needs_review' ? 'Flagged' : p.review.mode === 'refund' ? 'Refund recorded' : 'Confirmed manually'} by {p.review.by} · {when(p.review.at)}{p.review.note ? ` · “${p.review.note}”` : ''}</p>}
 
       {mine === 'confirm' && <ConfirmPanel payment={p} row={row} onProof={onProof} onCancel={() => setAct(null)} onDone={() => { setAct(null); onChanged(); }} />}
@@ -202,14 +287,14 @@ function Record({ p, row, tz, onProof, act, setAct, onChanged, onRejected }) {
   );
 }
 
-export function PaymentDetail({ row, tz, onChanged, onRecord, onProof, refreshing = false }) {
-  const [act, setAct] = useState(null);
+export function PaymentDetail({ row, tz, onChanged, onRecord, onProof, refreshing = false, initialAct = null }) {
+  const [act, setAct] = useState(initialAct); // { id, kind }: opened straight into Verify or Reject from the list
   const [settle, setSettle] = useState(0); // bumped after a rejection so the figures re-settle on the confirmed values
   const guard = useGuard();
   const root = useRef(null);
   // After a confirmation, rejection or refund, return to the amounts so the owner sees them settle.
   const changed = () => { root.current?.closest('.pm-modal-body')?.scrollTo({ top: 0, behavior: 'smooth' }); onChanged(); };
-  useEffect(() => { setAct(null); }, [row.orderId]);
+  useEffect(() => { setAct(initialAct); }, [row.orderId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { guard.setDirty(Boolean(act)); return () => guard.setDirty(false); }, [act]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (act) document.getElementById(`pm-rec-${act.id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [act]);
 
@@ -358,3 +443,150 @@ export function RecordPayment({ rows, orderId, onClose, onSaved }) {
   );
 }
 
+
+// ---- Detected from Messages -----------------------------------------------------------------------------------------------
+// Payments Conversa found by itself in a customer's picture that no order has claimed yet, newest first. Detected payments that already belong to an order are
+// listed once, in the ledger below (marked "Automatically detected from Messages"), not repeated here.
+export const detectedFrom = (data) => data.unassigned
+  .map((p) => ({ ...p, customerName: p.sourceMessage?.customerName ?? 'Unknown sender', item: null }))
+  .sort((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
+
+export function DetectedList({ items, onOpen, onProof }) {
+  if (!items.length) return null;
+  const review = items.filter((p) => recStatus(p) === 'pending_review').length;
+  return (
+    <section className="pm-detected" aria-label="Payments detected from Messages">
+      <header><h2>Unmatched payments from Messages</h2>{review > 0 && <b className="pm-review-count">{review} to review</b>}</header>
+      <div className="pm-ledger pm-det" role="table" aria-label="Detected payments">
+        <div className="pm-row pm-row-head" role="row">
+          <span role="columnheader">Customer</span><span role="columnheader">Order</span><span role="columnheader" className="r">Amount</span><span role="columnheader">Method</span>
+          <span role="columnheader">Transaction ID</span><span role="columnheader">Paid on</span><span role="columnheader">Status</span><span role="columnheader">Screenshot</span><span role="columnheader">Source</span>
+        </div>
+        {items.map((p) => (
+          <div key={p.id} role="row" className="pm-row" tabIndex={0} onClick={() => onOpen(p)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p); } }} aria-label={`${p.customerName}, ${formatMoney(p.amount)}, ${REC_STATUS[recStatus(p)]}. Open.`}>
+            <span role="cell" className="pm-who"><b>{p.customerName}</b></span>
+            <span role="cell" className="pm-ord" data-l="Order">{p.orderId ? <>{shortId(p.orderId)}<small>{p.item}</small></> : <em className="pm-unmatched">Not matched</em>}</span>
+            <span role="cell" className="r" data-l="Amount">{formatMoney(p.amount)}</span>
+            <span role="cell" data-l="Method">{METHOD[p.method] ?? p.method}</span>
+            <span role="cell" className="pm-txn" data-l="Transaction ID">{p.transactionId ?? '—'}</span>
+            <span role="cell" data-l="Paid on">{when(p.paidAt)}</span>
+            <span role="cell"><RecPill p={p} /></span>
+            <span role="cell"><ProofThumb proof={p.proof} onOpen={onProof} /></span>
+            <span role="cell" className="pm-src" data-l="Source">{SOURCE[p.source]}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// A detected payment with no order yet: the owner sees the screenshot and the message, picks the order (suggestions first), or rejects it.
+export function AssignPayment({ payment: p, rows, onClose, onSaved }) {
+  const open = rows.filter((r) => r.orderStatus !== 'cancelled');
+  const suggested = new Set(p.match?.candidates ?? []);
+  const sorted = [...open.filter((r) => suggested.has(r.orderId)), ...open.filter((r) => !suggested.has(r.orderId))];
+  const [orderId, setOrderId] = useState(suggested.size === 1 ? [...suggested][0] : '');
+  const [reviewer, setReviewer] = useState(savedReviewer()); const [err, setErr] = useState(null); const [busy, setBusy] = useState(false); const [proof, setProof] = useState(null); const [rejecting, setRejecting] = useState(false);
+  async function go(e) {
+    e.preventDefault();
+    if (!orderId) return setErr('Choose the order this payment is for.');
+    if (!reviewer.trim()) return setErr('Enter your name.');
+    setBusy(true); setErr(null);
+    try { saveReviewer(reviewer.trim()); await assignPayment(p.id, { orderId, reviewer: reviewer.trim() }); onSaved(orderId); } catch (er) { setErr(er.details?.[0]?.message ?? er.message); setBusy(false); }
+  }
+  return (
+    <Modal title="Which order is this payment for?" onClose={onClose}>
+      <div className="pm-assign">
+        <div className="pm-assign-top">{p.proof && <ProofThumb proof={p.proof} onOpen={setProof} size="lg" />}
+          <div><b>{formatMoney(p.amount)}</b> · {METHOD[p.method]} · <RecPill p={p} />
+            <p className="pm-fine">{p.transactionId ? `Reference ${p.transactionId}` : 'No reference was read.'} · {when(p.paidAt)}</p></div></div>
+        <p className="pm-matchnote"><AlertTriangle size={13} aria-hidden="true" /> {p.match?.reason ?? 'No order could be matched.'} Nothing was assigned automatically.</p>
+        <SourceMessage m={p.sourceMessage} />
+        {p.extraction && <Extraction x={p.extraction} />}
+        {rejecting ? <RejectPanel payment={p} onCancel={() => setRejecting(false)} onDone={() => onSaved(null)} /> : (
+          <form onSubmit={go} noValidate>
+            <label className="field"><span className="field-label">Order *</span>
+              <select value={orderId} onChange={(e) => setOrderId(e.target.value)}><option value="">Choose an order…</option>
+                {sorted.map((r) => <option key={r.orderId} value={r.orderId}>{suggested.has(r.orderId) ? 'Suggested · ' : ''}{r.customerName} · {r.item}{r.balance ? ` · ${formatMoney(r.balance)} due` : ''}</option>)}</select></label>
+            <label className="field"><span className="field-label">Your name (recorded) *</span><input value={reviewer} onChange={(e) => setReviewer(e.target.value)} autoComplete="name" /></label>
+            {err && <span className="field-note error" role="alert">{err}</span>}
+            <p className="pm-fine">Choosing the order does not verify the payment. You still confirm it once you have checked your account.</p>
+            <div className="form-actions"><button type="button" className="btn" onClick={() => setRejecting(true)}>Reject</button><button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Assign to this order'}</button></div>
+          </form>)}
+      </div>
+      {proof && <ProofViewer src={proof} onClose={() => setProof(null)} />}
+    </Modal>
+  );
+}
+
+// ---- Needs action -----------------------------------------------------------------------------------------------------------
+// One compact list of everything the owner has to do by hand, built from the ledger (and unreadable screenshots from Messages).
+// Nothing here marks money as received: Verify only opens the confirmation form, where the owner checks the details first.
+export function actionItems(data, conversations = []) {
+  const items = [];
+  const name = (p) => p.customerName ?? p.sourceMessage?.customerName ?? 'Unknown sender';
+  for (const p of data.unassigned) items.push({ id: `u${p.id}`, customer: name(p), order: null, amount: p.amount, reason: 'Customer or order could not be matched', actions: [['review', 'Review details', p]] });
+  for (const r of data.rows) {
+    if (['cancelled'].includes(r.orderStatus)) continue;
+    for (const p of r.payments) {
+      if (p.status !== 'pending' || p.kind === 'refund' || p.method === 'cod') continue;
+      const review = p.displayStatus === 'pending_review';
+      items.push({ id: `p${p.id}`, customer: r.customerName, order: r.item, orderId: r.orderId, amount: p.amount, reason: review ? (p.match?.reason && p.match.state !== 'matched' ? p.match.reason : 'Details need checking') : 'Awaiting verification',
+        actions: [...(p.proof ? [] : [['proof', 'Add payment proof', p]]), ['review', 'Review details', p], ['verify', 'Verify', p], ['reject', 'Reject', p]] });
+    }
+    if (r.payments.length === 0 && r.status === 'due' && (r.balance ?? 0) > 0) items.push({ id: `n${r.orderId}`, customer: r.customerName, order: r.item, orderId: r.orderId, amount: null, reason: 'No payment proof received', actions: [['proof', 'Add payment proof', { orderId: r.orderId }]] });
+  }
+  for (const c of conversations) for (const m of c.messages) {
+    if (m.attachment && m.scan?.state === 'failed') items.push({ id: `f${m.id}`, customer: c.customerName, order: null, orderId: c.orderId, amount: null, reason: 'Screenshot could not be extracted', actions: [['proof', 'Enter details', { orderId: c.orderId }]] });
+  }
+  return items;
+}
+
+export function ActionList({ items, onAct }) {
+  if (!items.length) return null;
+  return (
+    <section className="pm-actions" aria-label="Needs your action">
+      <header><h2>Needs action</h2><b>{items.length}</b></header>
+      <ul>{items.map((it) => (
+        <li key={it.id}>
+          <span className="pm-act-who"><b>{it.customer}</b>{it.order && <small>{it.order}</small>}</span>
+          <span className="pm-act-amt">{it.amount == null ? '' : formatMoney(it.amount)}</span>
+          <span className="pm-act-why">{it.reason}</span>
+          <span className="pm-act-btns">{it.actions.map(([kind, label, p]) => <button key={kind} type="button" className={kind === 'verify' ? 'btn btn-sm btn-primary' : 'btn btn-sm'} onClick={() => onAct(kind, p, it)}>{label}</button>)}</span>
+        </li>))}</ul>
+    </section>
+  );
+}
+
+// ---- Verify payment: the one compact view behind the single Verify button --------------------------------------------------
+// Shows what was claimed and the screenshot large; nothing is recorded until Confirm or Reject is submitted in the form below.
+export function VerifyPayment({ payment: p, row, onClose, onChanged, onProof }) {
+  const [act, setAct] = useState(null); // null | 'confirm' | 'reject'
+  const src = proofSrc(p.proof);
+  const done = () => { onChanged(); onClose(); };
+  return (
+    <PaymentModal title={`Verify payment from ${row.customerName}`} onClose={onClose}>
+      <div className="pm-verify">
+        <header className="pm-mhead">
+          <div><h3>{row.customerName}</h3><p>{row.item}{row.orderId ? ` · Order ${shortId(row.orderId)}` : ''}</p></div>
+        </header>
+        {src ? <button type="button" className="pm-verify-proof" onClick={() => onProof(src)} aria-label="Open the screenshot full size"><img src={src} alt="Payment screenshot sent by the customer" /></button>
+          : <p className="pm-note">No screenshot was attached to this payment.</p>}
+        <dl className="pm-verify-facts">
+          <div><dt>Claimed amount</dt><dd>{formatMoney(p.amount)}</dd></div>
+          <div><dt>Method</dt><dd>{METHOD[p.method] ?? p.method}</dd></div>
+          <div><dt>Transaction ID</dt><dd>{p.transactionId ?? '—'}</dd></div>
+          <div><dt>Payment date</dt><dd>{p.paidAt ? when(p.paidAt) : '—'}</dd></div>
+        </dl>
+        {!act && (
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={() => setAct('reject')}>Reject payment</button>
+            <button type="button" className="btn btn-primary" onClick={() => setAct('confirm')}>Confirm payment</button>
+          </div>
+        )}
+        {act === 'confirm' && <ConfirmPanel payment={p} row={row} onProof={onProof} onCancel={() => setAct(null)} onDone={done} />}
+        {act === 'reject' && <RejectPanel payment={p} onCancel={() => setAct(null)} onDone={done} />}
+      </div>
+    </PaymentModal>
+  );
+}

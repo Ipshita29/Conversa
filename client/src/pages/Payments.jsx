@@ -1,66 +1,73 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Search } from 'lucide-react';
 import { getPayments } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { formatMoney } from '../utils/format.js';
 import { DemoBadge, StateMessage } from '../components/UI.jsx';
-import PaymentModal from '../components/PaymentModal.jsx';
-import { Kpis, METHOD, PaymentDetail, ProofThumb, ProofViewer, RecordPayment, SOURCE, STATUS, StatusPill } from '../components/Payments.jsx';
+import { PaymentModal, AssignPayment, Kpis, METHOD, PaymentDetail, ProofViewer, RecordPayment, VerifyPayment, detectedFrom, recStatus } from '../components/Payments.jsx';
 import '../css/Payments.css';
 
-const when = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—');
 const shortId = (id) => `#${/^[a-f\d]{24}$/i.test(String(id)) ? String(id).slice(-6).toUpperCase() : String(id).replace(/^ord_/, '')}`;
-const VERIFY = [['all', 'Any verification'], ['pending', 'Awaiting verification'], ['confirmed', 'Verified by you'], ['none', 'No payment recorded']];
-const EMPTY = { q: '', status: 'all', method: 'all', verify: 'all', from: '', to: '' };
+const TABS = [['all', 'All'], ['verify', 'To verify'], ['verified', 'Verified']];
+// One list item per payment record (plus an order with no payment yet), each with the single state its action column shows.
+const kindOf = (p) => (p.kind === 'refund' ? 'refund' : p.method === 'cod' && p.status === 'pending' ? 'cod' : { verified: 'verified', rejected: 'rejected' }[recStatus(p)] ?? 'verify');
+const KIND = { verified: 'Verified', rejected: 'Rejected', refund: 'Refunded', cod: 'COD', due: 'Due' };
 
 export default function Payments() {
   const [params, setParams] = useSearchParams();
   const { status, data, error, reload } = useAsync(getPayments);
-  const [f, setF] = useState(EMPTY);
+  const [q, setQ] = useState('');
+  const [tab, setTab] = useState('all');
+  const [verifyId, setVerifyId] = useState(null); // the payment being verified
   const [openId, setOpenId] = useState(null);     // the order whose drawer is open
   const [recording, setRecording] = useState(null); // null | { orderId }
   const [proof, setProof] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [assigning, setAssigning] = useState(null); // a detected payment that has no order yet
+  const [openAct, setOpenAct] = useState(null);    // { id, kind }: open the detail dialog straight into Verify or Reject
+  const pendingPay = useRef(null);
 
   // /payments?record=<orderId> (from Messages) opens the record dialog for that order; ?order=<id> opens its drawer.
   useEffect(() => {
-    const r = params.get('record'); const o = params.get('order');
+    const r = params.get('record'); const o = params.get('order'); const pay = params.get('payment'); const act = params.get('act');
     if (r !== null) setRecording({ orderId: r || null });
     if (o) setOpenId(o);
-    if (r !== null || o) setParams({}, { replace: true });
+    if (pay) pendingPay.current = { id: pay, act: ['confirm', 'reject'].includes(act) ? act : null }; // opened once the ledger has loaded
+    if (r !== null || o || pay) setParams({}, { replace: true });
   }, [params, setParams]);
+  useEffect(() => { // /payments?payment=<id> (from Messages): open the order the payment is on, or the order picker if it has none yet
+    if (!data || !pendingPay.current) return;
+    const { id, act } = pendingPay.current;
+    const p = detectedFrom(data).find((x) => x.id === id) ?? data.rows.flatMap((r) => r.payments).find((x) => x.id === id);
+    pendingPay.current = null;
+    if (p) openDetected(p, act);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = data?.rows ?? [];
-  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const list = useMemo(() => {
+    const out = rows.flatMap((r) => (r.payments.length === 0
+      ? [{ key: `due-${r.orderId}`, row: r, p: null, kind: 'due', amount: r.total }]
+      : r.payments.map((p) => ({ key: p.id, row: r, p, kind: kindOf(p), amount: p.amount }))));
+    for (const p of data ? detectedFrom(data) : []) out.push({ key: p.id, row: { customerName: p.customerName, item: p.item, orderId: null }, p, kind: kindOf(p), amount: p.amount });
+    return out;
+  }, [rows, data]);
   const shown = useMemo(() => {
-    const q = f.q.trim().toLowerCase();
-    const from = f.from ? new Date(`${f.from}T00:00:00`).getTime() : null;
-    const to = f.to ? new Date(`${f.to}T23:59:59`).getTime() : null;
-    return rows.filter((r) => {
-      if (q && !`${r.customerName} ${r.item} ${r.orderId} ${r.payments.map((p) => p.transactionId ?? '').join(' ')}`.toLowerCase().includes(q)) return false;
-      if (f.status !== 'all' && r.status !== f.status) return false;
-      if (f.method !== 'all' && !r.payments.some((p) => p.method === f.method)) return false;
-      if (f.verify === 'pending' && !r.payments.some((p) => p.status === 'pending')) return false;
-      if (f.verify === 'confirmed' && !r.payments.some((p) => p.status === 'confirmed')) return false;
-      if (f.verify === 'none' && r.payments.length > 0) return false;
-      if (from !== null || to !== null) {
-        const hit = r.payments.some((p) => { const t = p.paidAt ? Date.parse(p.paidAt) : null; return t !== null && (from === null || t >= from) && (to === null || t <= to); });
-        if (!hit) return false;
-      }
-      return true;
-    });
-  }, [rows, f]);
-  const filtered = JSON.stringify(f) !== JSON.stringify(EMPTY);
+    const t = q.trim().toLowerCase();
+    return list.filter((i) => (tab === 'all' || (tab === 'verify' ? i.kind === 'verify' : i.kind === 'verified'))
+      && (!t || `${i.row.customerName} ${i.row.item ?? ''} ${i.row.orderId ?? ''} ${i.p?.transactionId ?? ''}`.toLowerCase().includes(t)));
+  }, [list, q, tab]);
+  const verifying = (() => { if (!verifyId) return null; const i = list.find((x) => x.p?.id === verifyId); return i ? { p: i.p, row: i.row } : null; })();
   const selected = rows.find((r) => r.orderId === openId) ?? null;
   const refresh = () => reload();
+  const openDetected = (p, act = null) => { if (!p.orderId) { setAssigning(p); return; } setOpenAct(act ? { id: p.id, kind: act } : null); setOpenId(p.orderId); };
+  const verify = (i) => { if (i.row.orderId) setVerifyId(i.p.id); else setAssigning(i.p); };
 
   return (
     <section className="page payments">
       <header className="pm-head">
         <div>
           <h1>Payments</h1>
-          <p className="pm-sub">What has been paid, what is owed, and what still needs your check.</p>
         </div>
         <div className="pm-head-actions">
           <DemoBadge />
@@ -75,48 +82,45 @@ export default function Payments() {
       {data && (
         <>
           <Kpis kpis={data.kpis} />
-          <div className="pm-filters" role="search">
-            <label className="pm-search"><Search size={16} aria-hidden="true" /><span className="sr-only">Search payments</span><input type="search" placeholder="Search customer, product, order or reference" value={f.q} onChange={set('q')} /></label>
-            <label className="pm-sel"><span className="sr-only">Payment status</span><select value={f.status} onChange={set('status')}><option value="all">All statuses</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-            <label className="pm-sel"><span className="sr-only">Payment method</span><select value={f.method} onChange={set('method')}><option value="all">All methods</option>{Object.entries(METHOD).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-            <label className="pm-sel"><span className="sr-only">Verification</span><select value={f.verify} onChange={set('verify')}>{VERIFY.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-            <label className="pm-date"><span>From</span><input type="date" value={f.from} max={f.to || undefined} onChange={set('from')} /></label>
-            <label className="pm-date"><span>To</span><input type="date" value={f.to} min={f.from || undefined} onChange={set('to')} /></label>
-            {filtered && <button type="button" className="pm-link" onClick={() => setF(EMPTY)}>Clear</button>}
+          <div className="pm-bar" role="search">
+            <div className="pm-tabs" role="tablist" aria-label="Show">
+              {TABS.map(([k, v]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{v}</button>)}
+            </div>
+            <label className="pm-search"><Search size={15} aria-hidden="true" /><span className="sr-only">Search payments</span><input type="search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} /></label>
           </div>
 
           {rows.length === 0 ? <StateMessage message="No orders yet, so there are no payments to show." />
-            : shown.length === 0 ? <StateMessage message="No payments match these filters."><button type="button" className="btn" onClick={() => setF(EMPTY)}>Clear filters</button></StateMessage> : (
-              <div className="pm-ledger" role="table" aria-label="Payment ledger">
-                <div className="pm-row pm-row-head" role="row">
-                  <span role="columnheader">Customer · order</span><span role="columnheader" className="r">Total</span><span role="columnheader" className="r">Paid</span><span role="columnheader" className="r">Balance</span>
-                  <span role="columnheader">Method · reference</span><span role="columnheader">Status</span><span role="columnheader">Paid on</span><span role="columnheader">Proof</span><span role="columnheader">Source</span>
+            : shown.length === 0 ? <StateMessage message="No payments match." /> : (
+              <div className="pm-list" role="table" aria-label="Payments">
+                <div className="pm-li pm-li-head" role="row">
+                  <span role="columnheader">Customer &amp; order</span><span role="columnheader" className="r">Amount</span><span role="columnheader">Method</span><span role="columnheader">Status</span><span role="columnheader" className="r">Action</span>
                 </div>
-                {shown.map((r) => (
-                  <div key={r.orderId} role="row" className={`pm-row${r.status === 'verification_pending' ? ' is-verify' : ''}`} tabIndex={0} onClick={() => setOpenId(r.orderId)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenId(r.orderId); } }} aria-label={`${r.customerName}, ${r.item}, ${STATUS[r.status]}. Open payment details.`}>
-                    <span role="cell" className="pm-who"><b>{r.customerName}{r.isDemo && <i className="demo-tag">Demo</i>}</b><small>{r.item} · {shortId(r.orderId)}</small></span>
-                    <span role="cell" className="r" data-l="Total">{r.total === null ? '—' : formatMoney(r.total)}</span>
-                    <span role="cell" className="r" data-l="Paid">{formatMoney(r.paid)}</span>
-                    <span role="cell" className={`r${(r.balance ?? 0) > 0 ? ' is-owed' : ''}`} data-l="Balance">{r.balance === null ? '—' : formatMoney(r.balance)}</span>
-                    <span role="cell" className="pm-meth" data-l="Method">{r.method ? METHOD[r.method] : r.codDue > 0 ? 'COD' : '—'}<small>{r.reference ?? (r.codDue > 0 ? 'Due on delivery' : '')}</small></span>
-                    <span role="cell"><StatusPill status={r.status} />{r.toVerify > 0 && r.status !== 'verification_pending' && <small className="pm-extra">+{r.toVerify} to verify</small>}</span>
-                    <span role="cell" data-l="Paid on">{when(r.paidAt)}</span>
-                    <span role="cell"><ProofThumb proof={r.payments.find((p) => p.proof)?.proof} onOpen={setProof} /></span>
-                    <span role="cell" className="pm-src" data-l="Source">{r.source ? SOURCE[r.source] : '—'}</span>
+                {shown.map((i) => (
+                  <div key={i.key} role="row" className="pm-li">
+                    <span role="cell" className="pm-who">
+                      {i.row.orderId ? <button type="button" className="pm-name" onClick={() => setOpenId(i.row.orderId)}>{i.row.customerName}</button> : <b>{i.row.customerName}</b>}
+                      <small>{i.row.item ?? 'Not matched to an order'}{i.row.orderId ? ` · ${shortId(i.row.orderId)}` : ''}</small>
+                    </span>
+                    <span role="cell" className="r pm-amt" data-l="Amount">{i.amount === null || i.amount === undefined ? '—' : formatMoney(i.amount)}</span>
+                    <span role="cell" data-l="Method">{i.p ? METHOD[i.p.method] ?? i.p.method : '—'}</span>
+                    <span role="cell" className={`pm-st is-${i.kind}`} data-l="Status">{i.kind === 'verify' ? 'Awaiting verification' : KIND[i.kind]}</span>
+                    <span role="cell" className="r">{i.kind === 'verify' && <button type="button" className="btn btn-primary btn-sm" onClick={() => verify(i)}>Verify</button>}</span>
                   </div>
                 ))}
               </div>
             )}
-          <p className="pm-foot">Confirmation is manual: Conversa records what you checked in your own bank or UPI account, and does not contact a bank. Production status is separate and is never changed by a payment.</p>
+          <p className="pm-foot">Verifying records what you checked in your own bank or UPI account; Conversa never contacts a bank.</p>
         </>
       )}
 
       {selected && (
-        <PaymentModal title={`Payment details for ${selected.customerName}`} onClose={() => setOpenId(null)} refreshing={status === 'loading'}>
-          <PaymentDetail row={selected} refreshing={status === 'loading'} onChanged={refresh} onRecord={(orderId) => { setOpenId(null); setRecording({ orderId }); }} onProof={setProof} />
+        <PaymentModal title={`Payment details for ${selected.customerName}`} onClose={() => { setOpenId(null); setOpenAct(null); }} refreshing={status === 'loading'}>
+          <PaymentDetail row={selected} initialAct={openAct} refreshing={status === 'loading'} onChanged={refresh} onRecord={(orderId) => { setOpenId(null); setRecording({ orderId }); }} onProof={setProof} />
         </PaymentModal>
       )}
       {recording && data && <RecordPayment rows={rows} orderId={recording.orderId} onClose={() => setRecording(null)} onSaved={() => { const o = recording.orderId; setRecording(null); setNotice('Payment saved. Anything not marked as received is waiting for your verification.'); refresh(); if (o) setOpenId(o); }} />}
+      {assigning && data && <AssignPayment payment={assigning} rows={rows} onClose={() => setAssigning(null)} onSaved={(o) => { setAssigning(null); setNotice(o ? 'Payment assigned. It is still waiting for your verification.' : 'Payment rejected.'); refresh(); if (o) setOpenId(o); }} />}
+      {verifying && <VerifyPayment payment={verifying.p} row={verifying.row} onClose={() => setVerifyId(null)} onChanged={() => { setNotice('Payment updated.'); refresh(); }} onProof={setProof} />}
       {proof && <ProofViewer src={proof} onClose={() => setProof(null)} />}
     </section>
   );
