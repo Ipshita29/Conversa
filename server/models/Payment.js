@@ -11,7 +11,8 @@ const historySchema = new mongoose.Schema({
 // One row per payment event. Many per order (deposit, instalments, COD collection, refunds). Unverified extraction results live here
 // as status "pending" and are kept apart from confirmed money by that status alone: only "confirmed" rows count as received.
 const paymentSchema = new mongoose.Schema({
-  order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
+  // null = detected from a message but not yet matched to an order (Pending Review); the owner assigns one.
+  order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null, index: true },
   kind: { type: String, enum: ['payment', 'refund'], default: 'payment' },
   refundOf: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
   amount: { type: Number, required: true, min: 0.01 },
@@ -28,6 +29,8 @@ const paymentSchema = new mongoose.Schema({
   proof: { type: { file: String, contentType: String, size: Number, originalName: String, sha256: String }, default: null, _id: false },
   proofHash: { type: String, default: null }, // SHA-256 of the screenshot: the same image cannot be filed twice, from Inbox or Payments
   extraction: { type: { method: String, confidence: Number, needsReview: Boolean, issues: [String], recipient: String, model: String, extractedAt: Date, edited: Boolean }, default: null, _id: false },
+  // How an automatically detected payment was matched. reviewRequired keeps it in Pending Review; it never affects verification.
+  match: { type: { state: String, by: String, reason: String, candidates: [String], reviewRequired: Boolean, lowConfidence: Boolean, auto: Boolean }, default: null, _id: false },
   review: { type: { by: String, at: Date, note: String, confirmedAmount: Number, mode: String }, default: null, _id: false },
   history: { type: [historySchema], default: [] },
   isDemo: { type: Boolean, default: false },
@@ -37,7 +40,7 @@ const paymentSchema = new mongoose.Schema({
     versionKey: false,
     transform(doc, ret) {
       ret.id = String(ret._id);
-      ret.orderId = String(ret.order);
+      ret.orderId = ret.order ? String(ret.order) : null;
       ret.conversationId = ret.conversation ? String(ret.conversation) : null;
       ret.refundOf = ret.refundOf ? String(ret.refundOf) : null;
       if (ret.proof) ret.proof = { contentType: ret.proof.contentType, size: ret.proof.size };

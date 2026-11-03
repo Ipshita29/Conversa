@@ -17,6 +17,7 @@ r.get('/:id', c.get);
 r.post('/:id/confirm', c.confirm);
 r.post('/:id/reject', c.reject);
 r.post('/:id/refund', c.refund);
+r.post('/:id/assign', c.assign);
 r.post('/:id/proof', image, c.uploadProof);
 r.get('/:id/proof', c.proof);
 export default r;

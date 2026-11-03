@@ -13,6 +13,7 @@ export const create = asyncHandler(async (req, res) => {
 });
 export const confirm = asyncHandler(async (req, res) => res.json(await svc.confirmPayment(req.params.id, req.body)));
 export const reject = asyncHandler(async (req, res) => res.json(await svc.rejectPayment(req.params.id, req.body)));
+export const assign = asyncHandler(async (req, res) => res.json(await svc.assignPayment(req.params.id, req.body)));
 export const refund = asyncHandler(async (req, res) => res.status(201).json(await svc.refundPayment(req.params.id, req.body)));
 
 export const uploadProof = asyncHandler(async (req, res) => {
