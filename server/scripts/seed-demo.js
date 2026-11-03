@@ -1,4 +1,4 @@
-// Seeds the demo story (see demo-data.js): 5 DEMO orders for a home bakery plus 6 DEMO inbox messages (4 read, 1 unread).
+// Seeds the demo story (see demo-data.js): 5 DEMO orders for a home bakery plus 5 DEMO conversations.
 // WhatsApp/Instagram are NOT connected or simulated: the messages are plain stored records flagged isDemo.
 //   npm run seed:demo    (re)creates them, with deadlines placed from the scheduler's own finish times
 //   npm run seed:clear   removes only the demo data
@@ -7,7 +7,7 @@ import mongoose from 'mongoose';
 import { config } from '../config/env.js';
 import Order from '../models/Order.js';
 import Payment from '../models/Payment.js';
-import { DEMO_MESSAGES, DEMO_MARK } from './demo-data.js';
+import { DEMO_CONVERSATIONS, DEMO_MARK } from './demo-data.js';
 import { reseedDemoOrders, reseedDemoMessages, removeDemoMessages } from '../services/demoSeed.js';
 
 const MARK = DEMO_MARK;
@@ -23,6 +23,6 @@ if (process.argv.includes('--clear')) {
   // Real open orders (not demo) are part of the queue too, so the story is built around them.
   const { removed, created } = await reseedDemoOrders(new Date());
   await reseedDemoMessages(created, new Date());
-  console.log(`Replaced ${removed} old demo order(s); created ${created.length} demo orders and ${DEMO_MESSAGES.length} demo messages (4 read, 1 unread).`);
+  console.log(`Replaced ${removed} old demo order(s); created ${created.length} demo orders and ${DEMO_CONVERSATIONS.length} demo conversations (${DEMO_CONVERSATIONS.reduce((n, c) => n + c.messages.length, 0)} messages, 1 unread).`);
 }
 await mongoose.disconnect();
