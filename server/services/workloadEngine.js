@@ -7,7 +7,7 @@
 //  3. Orders missing prepTimeMinutes and/or deadline cannot be scheduled; they are reported as unscheduled, never guessed.
 //  4. Capacity per working day = min(dailyCapacityMinutes, working-window length). Non-working days have 0.
 //     Today's capacity is further limited to the time left in today's window.
-//  5. Scheduling is earliest-deadline-first (ties: shorter job, then id). Work is placed contiguously from the start of
+//  5. Scheduling is earliest-deadline-first (ties: the earlier order, then shorter job, then id). Work is placed contiguously from the start of
 //     each day's window, splitting across days when a day fills up. Breaks are not modelled separately.
 //  6. Risk: high = deadline passed, cannot finish inside the horizon, or finish time is after the deadline;
 //     medium = finish time is less than riskBufferMinutes before the deadline; low = otherwise.
@@ -50,6 +50,7 @@ export function normalizeOrder(o) {
     paymentStatus: o.paymentStatus ?? 'unverified',
     prepTimeMinutes: o.prepTimeMinutes ?? null,
     deadline: o.deadline ? new Date(o.deadline) : null,
+    createdAt: o.createdAt ? new Date(o.createdAt) : null, // only breaks ties between equal deadlines
   };
 }
 
@@ -69,7 +70,8 @@ export function computePlan({ orders, settings, now = new Date(), rangeDays = 7 
     if (noPrep || noDeadline) unscheduledOrders.push({ id: o.id, reason: noPrep && noDeadline ? 'missing_both' : noPrep ? 'missing_prep_time' : 'missing_deadline' });
     else plannable.push(o);
   }
-  plannable.sort((a, b) => a.deadline - b.deadline || a.prepTimeMinutes - b.prepTimeMinutes || a.id.localeCompare(b.id));
+  const placed = (o) => new Date(o.createdAt ?? 0).getTime() || 0; // equal deadlines: whoever ordered first is made first
+  plannable.sort((a, b) => a.deadline - b.deadline || placed(a) - placed(b) || a.prepTimeMinutes - b.prepTimeMinutes || a.id.localeCompare(b.id));
 
   const results = {};
   const schedule = [];
