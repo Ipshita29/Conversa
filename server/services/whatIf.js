@@ -7,12 +7,11 @@
 // separately and the earliest realistic deadline is what helps.
 import { computePlan, simulate } from './workloadEngine.js';
 import { OPEN_STATUSES } from '../utils/validation.js';
-import { DEMO_MARK, demoClock } from '../scripts/demo-data.js';
+import { DEMO_MARK } from '../scripts/demo-data.js';
 
-// 'commitment' = the five seeded demo orders, planned from the moment production starts on the scenario day (scopeNow);
-// 'demo' = the same orders planned from the real clock; anything else = every order loaded for the business.
+// 'commitment' and 'demo' = the five seeded demo orders, planned from the real clock; anything else = every order loaded for the business.
 export const scopeOrders = (orders, scope) => (scope === 'commitment' || scope === 'demo' ? orders.filter((o) => typeof o.notes === 'string' && o.notes.startsWith(DEMO_MARK)) : orders);
-export const scopeNow = (scope, settings, now) => (scope === 'commitment' ? demoClock(settings) : now);
+export const scopeNow = (scope, settings, now) => now; // every scope plans from the real clock, like the Orders and Plan pages
 
 const MIN = 60000;
 const STEP = 15 * MIN; // suggested deadlines are rounded UP to a quarter of an hour: a promise a person can say out loud

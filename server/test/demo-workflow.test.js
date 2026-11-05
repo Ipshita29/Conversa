@@ -104,7 +104,7 @@ test('1. a reference image the customer sent appears in the linked order, served
 
 test('2. customisation instructions appear in the order specification (and nothing the customer did not say)', { skip }, async () => {
   const s = (await convOf('Neha Sharma')).spec;
-  assert.deepEqual(s.fields.map((f) => [f.key, f.value]), [['product', 'Chocolate birthday cake'], ['quantity', '2 kg'], ['cakeMessage', 'Happy Birthday Laddu'], ['icingColour', 'Blue'], ['flavour', 'Dark chocolate ganache'], ['deadline', '12pm today']]);
+  assert.deepEqual(s.fields.map((f) => [f.key, f.value]), [['product', 'Chocolate birthday cake'], ['quantity', '2 kg'], ['cakeMessage', 'Happy Birthday Laddu'], ['icingColour', 'Blue'], ['flavour', 'Dark chocolate ganache'], ['deadline', '12pm']]);
   assert.ok(s.specialRequests.some((r) => /no nuts/i.test(r.value)));
   const k = (await convOf('Kartik Singh')).spec;
   assert.equal(field(k, 'quantity').value, '6'); assert.equal(field(k, 'cakeMessage').value, null); // only what the customer said
@@ -256,15 +256,13 @@ const callApi = async (method, p, body) => { const r = await fetch(base + p, { m
 const hm = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 const demoSnap = async () => JSON.stringify((await Order.find({ notes: /^\[DEMO\]/ }).sort({ customerName: 1 }).lean()).map((o) => [o.customerName, o.item, o.prepTimeMinutes, String(o.deadline), o.status, String(o.updatedAt)]));
 
-test('What if? on 3 November: the scheduler (not the page) puts Kartik first, then Aanya, Rohan, the rush order and Meera, and the day is feasible', { skip }, async () => {
+test('What if? plans the demo orders from the real clock: the overdue order is the only conflict, and every order gets a realistic earliest deadline', { skip }, async () => {
   const before = await demoSnap();
   const ov = (await get('/planner/whatif?scope=commitment')).json;
-  assert.deepEqual(ov.cards.map((c) => [c.customerName, hm(c.start), hm(c.end)]), [
-    ['Kartik Singh', '09:00', '09:30'], ['Aanya Sharma', '09:30', '10:30'], ['Rohan Mehta', '10:30', '11:30'], ['Neha Sharma', '11:30', '12:00'], ['Meera Iyer', '12:00', '13:00']]);
-  assert.equal(ov.feasible, true); assert.equal(ov.conflicts, 0);
-  const by = Object.fromEntries(ov.cards.map((c) => [c.customerName, c]));
-  assert.equal(by['Aanya Sharma'].deadline, by['Kartik Singh'].deadline); // the same requested time
-  assert.deepEqual([by['Kartik Singh'].prepTimeMinutes, by['Aanya Sharma'].prepTimeMinutes], [30, 60]);
+  assert.equal(ov.cards.length, 5);
+  assert.deepEqual(ov.cards.filter((c) => c.kind === 'deadline_passed').map((c) => c.customerName), ['Meera Iyer']); // the one promise that has already passed
+  assert.equal(ov.conflicts, 1); assert.equal(ov.feasible, false);
+  assert.ok(ov.cards.every((c) => c.ordered && Date.parse(c.ordered) < Date.parse(c.deadline))); // placed before it is due, on every card
   assert.ok(ov.cards.every((c) => c.earliest && Date.parse(c.earliest.deadline) > Date.parse(ov.now)));
   assert.equal(await demoSnap(), before); // nothing saved
 });
@@ -274,18 +272,16 @@ test('What if? finds genuinely infeasible changes, never saves a simulation, and
   const ov = (await get('/planner/whatif?scope=commitment')).json;
   const neha = ov.cards.find((c) => c.customerName === 'Neha Sharma');
   const planDeadline = async () => (await get('/planner?days=30')).json.schedule.find((e) => e.orderId === neha.id).deadline;
-  // 10:30 for a third order: 30 + 60 + 30 minutes cannot all finish between 9:00 and 10:30.
-  const tooTight = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: '2026-11-03T05:00:00.000Z' })).json;
-  assert.deepEqual([tooTight.ok, tooTight.after.feasible, tooTight.after.late.length > 0], [true, false, true]);
-  // 11:00 is possible, and it pushes Rohan to finish at 12:00 instead of 11:30.
-  const sim = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: '2026-11-03T05:30:00.000Z' })).json;
-  assert.deepEqual([sim.proposal.status, sim.after.feasible, sim.affected.map((x) => x.customerName)], ['unapplied', true, ['Rohan Mehta']]);
+  // A deadline one minute from now cannot be met by a 30-minute order that is not started.
+  const tooTight = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: new Date(Date.now() + 60000).toISOString() })).json;
+  assert.deepEqual([tooTight.ok, tooTight.after.late.length > 0], [true, true]);
+  // The earliest deadline the scheduler offers is possible: nothing becomes late because of it.
+  const sim = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: neha.earliest.deadline })).json;
+  assert.deepEqual([sim.proposal.status, sim.after.late.length], ['unapplied', 0]);
   assert.equal(await demoSnap(), before); // previewing saved nothing
   assert.equal(await planDeadline(), neha.deadline);
   try {
     assert.equal((await callApi('PATCH', `/orders/${neha.id}`, { deadline: sim.proposal.to })).status, 200);
     assert.equal(await planDeadline(), sim.proposal.to); // the Plan follows the confirmed change
-    const after = (await get('/planner/whatif?scope=commitment')).json;
-    assert.deepEqual(after.cards.map((c) => [c.customerName, hm(c.start), hm(c.end)]).slice(2, 4), [['Neha Sharma', '10:30', '11:00'], ['Rohan Mehta', '11:00', '12:00']]);
   } finally { await callApi('PATCH', `/orders/${neha.id}`, { deadline: neha.deadline }); }
 });

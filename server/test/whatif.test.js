@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { overview, runMove, earliestDeadline, scopeOrders } from '../services/whatIf.js';
-import { buildDemoOrders, demoClock } from '../scripts/demo-data.js';
+import { buildScenarioOrders, demoClock } from '../scripts/demo-data.js';
 import { computePlan } from '../services/workloadEngine.js';
 import { defaultSettings } from '../config/defaults.js';
 
@@ -11,7 +11,7 @@ const TZ = 'Asia/Kolkata';
 const settings = { ...defaultSettings(), timezone: TZ };
 const MON_930 = new Date('2026-11-09T04:00:00Z'); // Monday 9 November, 9:30 in the business timezone
 const NOW = demoClock(settings); // Tuesday 3 November 2026, 9:00 in the business timezone: production starts
-const demo = () => buildDemoOrders(settings, NOW).map((o, i) => ({ ...o, id: `d${i}` }));
+const demo = () => buildScenarioOrders(settings, NOW).map((o, i) => ({ ...o, id: `d${i}` }));
 const idOf = (orders, name) => orders.find((o) => o.customerName === name).id;
 const hm = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 const NAMES = ['Kartik Singh', 'Aanya Sharma', 'Rohan Mehta', 'Neha Sharma', 'Meera Iyer'];

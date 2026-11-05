@@ -1,35 +1,63 @@
-// The demo story: a small home bakery on Tuesday 3 November 2026 with five open orders, two of them promised for the SAME time:
-//   Aanya (60 min) and Kartik (30 min) both want delivery at 10:30, which one baker cannot do twice. The scheduler works out the rest.
-// Nothing here states the schedule. Production starts at 9:00 (the What-if clock) and the engine places the work from each order's own deadline and
-// preparation time: Kartik 9:00-9:30, Aanya 9:30-10:30, Rohan 10:30-11:30, the rush order 11:30-12:00, Meera 12:00-13:00.
+// The demo story: a small home bakery with five open orders that show how Conversa sorts work by urgency:
+//   1 overdue (Meera), 2 upcoming (Neha, Aanya), 2 on track (Rohan, Kartik).
+// All times are relative to "now" (see buildDemoOrders), so the picture and the timeline are consistent whenever it is seeded.
 // Pure functions (no database), so the data can be tested at any time of day.
-//   Aanya  - chocolate cake (2 kg), 10:30, 60 min   payment screenshot
-//   Kartik - 6 cupcakes, 10:30, 30 min              payment screenshot
-//   Rohan  - pineapple cake, 12:00, 60 min          cash on delivery
-//   Neha   - the existing rush order (chocolate cake, 2 kg), 12:00, 30 min   advance screenshot, balance on delivery
-//   Meera  - 4 chocolate pastries, 14:00, 60 min    payment screenshot
-import { zonedTimeToUtc, parseHm } from '../utils/timezone.js';
+//   Aanya  - chocolate cake (2 kg), 60 min      payment screenshot
+//   Kartik - 6 cupcakes, 30 min                 payment screenshot
+//   Rohan  - pineapple cake, 60 min             cash on delivery
+//   Neha   - the rush order (chocolate cake, 2 kg), 30 min   advance screenshot, balance on delivery
+//   Meera  - 4 chocolate pastries, 60 min       payment screenshot
+import { zonedParts, zonedTimeToUtc, addDays, weekdayOf, parseHm } from '../utils/timezone.js';
 
 export const DEMO_MARK = '[DEMO]';
-export const DEMO_DAY = { year: 2026, month: 11, day: 3 }; // the scenario's calendar day
-export const DEMO_START = '09:00'; // production starts here: the clock the What-if page plans from
+export const DEMO_DAY = { year: 2026, month: 11, day: 3 }; // the fixed day of the What-if "10:30 clash" scenario (see buildScenarioOrders)
+export const DEMO_START = '09:00'; // production starts here on that day
 
 const ORDERS = [
-  { customerName: 'Aanya Sharma', source: 'whatsapp', item: 'Chocolate cake (2 kg)', quantity: 1, customisation: 'Name and age in blue icing', prepTimeMinutes: 60, price: 1800, createdHoursAgo: 27, due: '10:30', status: 'confirmed', paymentStatus: 'verified', note: 'wants delivery at 10:30' },
-  { customerName: 'Kartik Singh', source: 'instagram', item: '6 cupcakes', quantity: 6, customisation: 'Pistachio and rose, gold topper', prepTimeMinutes: 30, price: 720, createdHoursAgo: 31, due: '10:30', status: 'confirmed', paymentStatus: 'unverified', note: 'also wants delivery at 10:30, ordered first' },
-  { customerName: 'Rohan Mehta', source: 'instagram', item: 'Pineapple cake', quantity: 1, customisation: 'Handwritten card', prepTimeMinutes: 60, price: 1100, createdHoursAgo: 40, due: '12:00', status: 'confirmed', paymentStatus: 'pending', note: 'cash on delivery' },
-  { customerName: 'Neha Sharma', source: 'whatsapp', item: 'Chocolate birthday cake (2 kg)', quantity: 1, customisation: 'Dark chocolate ganache, no nuts', prepTimeMinutes: 30, price: 2200, createdHoursAgo: 8, due: '12:00', status: 'in_progress', paymentStatus: 'unverified', note: 'the existing rush order' },
-  { customerName: 'Meera Iyer', source: 'whatsapp', item: '4 chocolate pastries', quantity: 4, customisation: null, prepTimeMinutes: 60, price: 640, createdHoursAgo: 120, due: '14:00', status: 'confirmed', paymentStatus: 'unverified', note: 'due early afternoon' },
+  { customerName: 'Aanya Sharma', source: 'whatsapp', item: 'Chocolate cake (2 kg)', quantity: 1, customisation: 'Name and age in blue icing', prepTimeMinutes: 60, price: 1800, createdHoursAgo: 27.3, due: { days: 1, at: '14:00' }, sdue: '10:30', status: 'confirmed', paymentStatus: 'verified', note: 'wants delivery at 10:30' },
+  { customerName: 'Kartik Singh', source: 'instagram', item: '6 cupcakes', quantity: 6, customisation: 'Pistachio and rose, gold topper', prepTimeMinutes: 30, price: 720, createdHoursAgo: 31.5, due: { days: 4, at: '10:30' }, sdue: '10:30', status: 'confirmed', paymentStatus: 'unverified', note: 'also wants delivery at 10:30, ordered first' },
+  { customerName: 'Rohan Mehta', source: 'instagram', item: 'Pineapple cake', quantity: 1, customisation: 'Handwritten card', prepTimeMinutes: 60, price: 1100, createdHoursAgo: 38, due: { days: 2, at: '12:00' }, sdue: '12:00', status: 'confirmed', paymentStatus: 'pending', note: 'cash on delivery' },
+  { customerName: 'Neha Sharma', source: 'whatsapp', item: 'Chocolate birthday cake (2 kg)', quantity: 1, customisation: 'Dark chocolate ganache, no nuts', prepTimeMinutes: 30, price: 2200, createdHoursAgo: 8.8, due: { days: 1, at: '12:00' }, sdue: '12:00', status: 'in_progress', paymentStatus: 'unverified', note: 'the existing rush order' },
+  { customerName: 'Meera Iyer', source: 'whatsapp', item: '4 chocolate pastries', quantity: 4, customisation: null, prepTimeMinutes: 60, price: 640, createdHoursAgo: 123.5, due: { days: -1, at: '14:00' }, sdue: '14:00', status: 'confirmed', paymentStatus: 'unverified', note: 'due early afternoon' },
 ];
 
-// The moment production starts on the scenario day (in the business timezone): the clock the What-if page plans from.
-export const demoClock = (settings) => zonedTimeToUtc({ ...DEMO_DAY, ...parseHm(DEMO_START) }, settings.timezone);
-export const buildAllDemoOrders = (settings, now = new Date()) => buildDemoOrders(settings, now);
+// The Nth working day from today (n < 0: before today), in the business timezone. Days outside settings.workingDays are skipped.
+function workingDay(n, settings, now) {
+  const t = zonedParts(now, settings.timezone);
+  let day = { year: t.year, month: t.month, day: t.day };
+  const step = n < 0 ? -1 : 1;
+  for (let left = Math.abs(n); left > 0;) {
+    day = addDays(day, step);
+    if (settings.workingDays.includes(weekdayOf(day))) left--;
+  }
+  return day;
+}
 
+// THE demo orders. Every timestamp is counted from `now`, so the story is the same whenever it is seeded and a Placed time is always earlier than
+// its Due time: placement is hours BEFORE now, every deadline is on a working day (yesterday's, or at least tomorrow's) at a fixed clock time.
+//   Meera  - promised for the previous working day, not delivered      -> OVERDUE
+//   Neha   - due the next working day, at noon                         -> UPCOMING
+//   Aanya  - due the next working day, mid-afternoon                   -> UPCOMING
+//   Rohan  - due in two working days                                   -> ON TRACK
+//   Kartik - due in four working days                                  -> ON TRACK
+// The labels are not stored: the board derives them from these deadlines, the preparation times and the scheduler (services/boardService.js).
 export function buildDemoOrders(settings, now = new Date()) {
-  return ORDERS.map(({ due, note, createdHoursAgo, ...o }) => ({
+  return ORDERS.map(({ due, sdue, note, createdHoursAgo, ...o }) => ({
     ...o,
-    deadline: zonedTimeToUtc({ ...DEMO_DAY, ...parseHm(due) }, settings.timezone),
+    deadline: zonedTimeToUtc({ ...workingDay(due.days, settings, now), ...parseHm(due.at) }, settings.timezone),
+    createdAt: new Date(now.getTime() - createdHoursAgo * 3600000),
+    notes: `${DEMO_MARK} ${note}`,
+  }));
+}
+export const buildAllDemoOrders = buildDemoOrders;
+
+// The same five orders on ONE fixed day (Tue 3 Nov 2026, production starting at 9:00): Aanya and Kartik both want 10:30, Rohan and Neha both noon.
+// Not the demo that is seeded: a fixed, reproducible scenario for testing the scheduler and the What-if engine at a known clock (demoClock).
+export const demoClock = (settings) => zonedTimeToUtc({ ...DEMO_DAY, ...parseHm(DEMO_START) }, settings.timezone);
+export function buildScenarioOrders(settings, now = demoClock(settings)) {
+  return ORDERS.map(({ due, sdue, note, createdHoursAgo, ...o }) => ({
+    ...o,
+    deadline: zonedTimeToUtc({ ...DEMO_DAY, ...parseHm(sdue) }, settings.timezone),
     createdAt: new Date(now.getTime() - createdHoursAgo * 3600000),
     notes: `${DEMO_MARK} ${note}`,
   }));
@@ -61,13 +89,13 @@ export const DEMO_CONVERSATIONS = [
     b(28.1, 'Lovely choice! A 2 kg chocolate cake is ₹1,800. Would you like a message on it?'),
     { hoursAgo: 27.9, text: 'Please write "Happy Birthday Ria" in blue icing.' },
     b(27.7, 'Done. When do you need it?'),
-    { hoursAgo: 27.5, text: 'Delivery at 10:30 AM on 3 November please. Let\'s go ahead!' },
-    b(27.3, 'Noted, 10:30 AM on 3 November. You can pay the full amount on UPI to sweetcrumbs@upi.'),
+    { hoursAgo: 27.5, text: 'Delivery at 2:00 PM please. Let\'s go ahead!' },
+    b(27.3, 'Noted, 2:00 PM delivery. You can pay the full amount on UPI to sweetcrumbs@upi.'),
     { hoursAgo: 26.6, text: 'Oops, change the message to "Happy Birthday Riya" please.' },
     b(26.4, 'No problem, updated to "Happy Birthday Riya" 🙂'),
     { hoursAgo: 24.1, text: 'Paid ₹1,800 via UPI. UTR 426118830517', image: { file: 'pay-aanya-upi.png', kind: 'payment', ownerConfirmed: true, reading: reading(1800, '426118830517', 24.15, 0.94) } },
     b(24, 'Received, thank you! Your order is confirmed.'),
-    { hoursAgo: 3, text: 'Thank you! See you at 10:30.' },
+    { hoursAgo: 3, text: 'Thank you! See you at 2.' },
   ] },
   { customer: 'Kartik Singh', channel: 'instagram', order: 'Kartik Singh', messages: [
     { hoursAgo: 33.5, text: 'Hi! Do you make cupcakes in small batches?' },
@@ -75,8 +103,8 @@ export const DEMO_CONVERSATIONS = [
     { hoursAgo: 33, text: "I'd like 6 cupcakes, pistachio and rose flavour." },
     { hoursAgo: 32.9, text: 'Something like this please 🙏', image: { file: 'ref-kartik-cupcakes.png', kind: 'reference' } },
     b(32.6, '6 cupcakes like these are ₹720. Anything special on top?'),
-    { hoursAgo: 32.3, text: 'A gold topper on each. And I need them at 10:30 AM on 3 November.' },
-    b(32, 'Gold toppers noted, delivery at 10:30 AM on 3 November. Shall I confirm?'),
+    { hoursAgo: 32.3, text: 'A gold topper on each. And I need them at 10:30 AM.' },
+    b(32, 'Gold toppers noted, delivery at 10:30 AM. Shall I confirm?'),
     { hoursAgo: 31.7, text: 'Yes, confirm it.' },
     b(31.5, 'Please pay ₹720 on UPI to sweetcrumbs@upi and send me the screenshot.'),
     { hoursAgo: 31, text: 'Payment done, thank you!', image: { file: 'pay-kabir-upi.png', kind: 'payment', reading: reading(720, '412398765431', 31.1, 0.82, ['Recipient name is partly hidden in the screenshot.']) } },
@@ -89,8 +117,8 @@ export const DEMO_CONVERSATIONS = [
     b(39.2, 'Lovely! A pineapple cake like this is ₹1,100. Anything else to add?'),
     { hoursAgo: 38.8, text: 'Please add a handwritten card.' },
     b(38.5, 'Of course. When do you need it by?'),
-    { hoursAgo: 38.2, text: 'Delivery by 12:00 noon on 3 November please. Can I pay cash on delivery?' },
-    b(38, 'Yes, cash on delivery is fine. Noon on 3 November it is, ₹1,100 to collect. Your order is confirmed.'),
+    { hoursAgo: 38.2, text: 'Delivery by 12:00 noon please. Can I pay cash on delivery?' },
+    b(38, 'Yes, cash on delivery is fine. Noon it is, ₹1,100 to collect. Your order is confirmed.'),
     { hoursAgo: 9, text: 'Thank you! Noon delivery is perfect.' },
   ] },
   { customer: 'Neha Sharma', channel: 'whatsapp', order: 'Neha Sharma', messages: [
@@ -101,7 +129,7 @@ export const DEMO_CONVERSATIONS = [
     b(10, 'That looks lovely, we can make that! A 2 kg chocolate cake is ₹2,200. Would you like a message or any decorations?'),
     { hoursAgo: 9.8, text: 'Yes please! Write "Happy Birthday Laddu" on it in blue icing.' },
     b(9.7, "Perfect, I'll follow the reference and add the message in blue. When do you need it by?"),
-    { hoursAgo: 9.5, text: 'I need it by 12pm today.' },
+    { hoursAgo: 9.5, text: 'I need it by 12pm.' },
     b(9.4, 'Noon works. I will have it ready for 12.'),
     { hoursAgo: 9.2, text: 'Dark chocolate ganache please, and no nuts. My nephew is allergic.' },
     b(9, "Noted, ganache and no nuts. I'll keep it completely nut-free."),
@@ -117,11 +145,11 @@ export const DEMO_CONVERSATIONS = [
     { hoursAgo: 125, text: 'I need 4 chocolate pastries.' },
     { hoursAgo: 124.9, text: 'Something like this.', image: { file: 'ref-meera-pastries.png', kind: 'reference' } },
     b(124.5, '4 chocolate pastries like these are ₹640. When would you like them?'),
-    { hoursAgo: 124, text: 'Delivery by 2:00 PM on 3 November please.' },
+    { hoursAgo: 124, text: 'Delivery by 2:00 PM please.' },
     b(123.5, 'Done! To confirm, please pay an advance of ₹320 on UPI to sweetcrumbs@upi.'),
     { hoursAgo: 119.5, text: 'Sent the advance.', image: { file: 'pay-meera-advance.png', kind: 'payment', reading: reading(320, null, 119.6, 0.45, ['The image is blurry.', 'The reference line is cropped out.']) } },
     b(119.3, "Thanks Meera! The screenshot is a bit blurry and I can't see the reference number. Could you resend it?"),
-    { hoursAgo: 30, text: 'Hi! Are the 4 pastries still on for 2 PM on the 3rd?' },
+    { hoursAgo: 30, text: 'Hi! Any update on my 4 pastries? I was expecting them by 2:00 PM.' },
   ] },
 ];
 
@@ -145,9 +173,9 @@ export function buildDemoPayments(orders, now = new Date()) {
   const by = Object.fromEntries(orders.map((o) => [o.customerName, o]));
   const out = [];
   const add = (name, p) => by[name] && out.push({ orderId: by[name].id, kind: 'payment', isDemo: true, notes: null, ...p });
-  add('Neha Sharma', { amount: (by['Neha Sharma']?.price ?? 0) / 2, method: 'cod', status: 'pending', transactionId: null, paidAt: null, source: 'manual', notes: 'Demo record. Balance in cash on delivery: collect when handing over the cake.',
+  add('Neha Sharma', { amount: (by['Neha Sharma']?.price ?? 0) / 2, method: 'cod', status: 'pending', transactionId: null, paidAt: null, createdAt: at(8), source: 'manual', notes: 'Demo record. Balance in cash on delivery: collect when handing over the cake.',
     history: [{ at: at(8), action: 'recorded', by: null, note: 'COD: not collected yet.' }] });
-  add('Rohan Mehta', { amount: by['Rohan Mehta']?.price ?? 0, method: 'cod', status: 'pending', transactionId: null, paidAt: null, source: 'manual', notes: 'Demo record. Cash on delivery: collect when handing over the cake.',
-    history: [{ at: at(38), action: 'recorded', by: null, note: 'COD: not collected yet.' }] });
+  add('Rohan Mehta', { amount: by['Rohan Mehta']?.price ?? 0, method: 'cod', status: 'pending', transactionId: null, paidAt: null, createdAt: at(37.9), source: 'manual', notes: 'Demo record. Cash on delivery: collect when handing over the cake.',
+    history: [{ at: at(37.9), action: 'recorded', by: null, note: 'COD: not collected yet.' }] });
   return out;
 }

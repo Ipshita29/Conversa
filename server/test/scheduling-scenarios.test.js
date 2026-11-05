@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computePlan } from '../services/workloadEngine.js';
-import { buildDemoOrders, demoClock } from '../scripts/demo-data.js';
+import { buildScenarioOrders, demoClock } from '../scripts/demo-data.js';
 import { defaultSettings } from '../config/defaults.js';
 
 // Business hours Mon-Sat 09:00-18:00 Asia/Kolkata, 6h of productive preparation per day, 4h "tight" buffer.
@@ -91,7 +91,7 @@ test('a backlog of overdue orders pushes a later order back, and says exactly wh
 
 test('the demo is anchored to 3 November 2026, whenever it is seeded, and planned from 9:00 that day it is feasible', () => {
   const withIds = (os) => os.map((o, i) => ({ ...o, id: `d${i}` }));
-  const a = buildDemoOrders(settings, T('2026-10-21T06:00:00Z')); const b = buildDemoOrders(settings, T('2026-11-20T09:00:00Z'));
+  const a = buildScenarioOrders(settings, T('2026-10-21T06:00:00Z')); const b = buildScenarioOrders(settings, T('2026-11-20T09:00:00Z'));
   assert.deepEqual(a.map((o) => o.deadline.toISOString()), b.map((o) => o.deadline.toISOString())); // the same deadlines either way
   const plan = computePlan({ orders: withIds(a), settings, now: demoClock(settings), rangeDays: 1 });
   assert.equal(plan.schedule.filter((e) => e.risk === 'high').length, 0);
