@@ -174,3 +174,43 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; us
   .oa-body { padding: 0 16px 18px; } .oa-body dl { gap: 0.5rem 1.2rem; } .oa-body dd { white-space: normal; }
   .oa-card.is-on .oa-num { left: 16px; }
 }
+
+/* ---------- Order details: one white card ---------- */
+.modal:has(.odc) { max-width: 740px; }
+.odc { display: grid; gap: 2rem; padding: 2rem; background: #fff; border: 1px solid #E9E5DD; border-radius: 22px; box-shadow: 0 1px 2px rgba(41, 41, 35, 0.04), 0 18px 40px -26px rgba(41, 41, 35, 0.22); }
+.odc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.25rem; }
+.odc-name { min-width: 0; }
+.odc-name h3 { margin: 0; font: 500 1.7rem/1.1 var(--display); letter-spacing: -0.035em; }
+.odc-name p { margin: 0.5rem 0 0; font-size: 1rem; line-height: 1.4; color: var(--muted); }
+.odc-id { margin-left: 0.5rem; font: 500 0.82rem var(--mono, var(--display)); color: var(--faint); white-space: nowrap; }
+.odc-status { flex: none; }
+.odc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem 2.5rem; margin: 0; padding: 1.6rem 0; border-block: 1px solid #F1EEE8; }
+.odc-grid > div, .odc-pay > div { min-width: 0; }
+.odc-grid dt, .odc-pay dt { font: 600 0.62rem/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+.odc-grid dd, .odc-pay dd { margin: 0.5rem 0 0; font: 500 1rem/1.35 var(--display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.odc-grid dd:first-of-type { font-size: 0.95rem; }
+.odc-cols { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 2rem 3rem; align-items: start; }
+.odc-cols section { min-width: 0; }
+.odc-cols h4 { margin: 0 0 1rem; font: 600 0.62rem/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+.odc-thumbs { display: flex; flex-wrap: wrap; gap: 12px; }
+.odc-thumb { padding: 0; border: 1px solid #E4E0D8; border-radius: 14px; overflow: hidden; background: #F7F4ED; cursor: zoom-in; transition: transform 0.2s var(--ease), box-shadow 0.2s; }
+.odc-thumb:hover { transform: translateY(-2px); box-shadow: 0 8px 18px -10px rgba(41, 41, 35, 0.4); }
+.odc-thumb img { display: block; width: 148px; height: 176px; object-fit: cover; }
+.odc-thumbs.is-small { margin-top: 1.25rem; } .odc-thumbs.is-small .odc-thumb { border-radius: 10px; } .odc-thumbs.is-small img { width: 56px; height: 70px; }
+.odc-pay { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 1.25rem 1.75rem; margin: 0; }
+.odc-pay small { font-weight: 400; font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+.odc-pay .pm-pill, .odc-pay .pay-tag { white-space: nowrap; }
+.odc-verify { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem 1.25rem; margin: 1.5rem 0 0; padding: 1rem 1.25rem; background: #FBF7F0; border-radius: 14px; font-size: 0.88rem; line-height: 1.4; color: var(--caramel-ink); }
+.odc-verify span { flex: 1 1 10rem; min-width: 0; }
+.odc-reject { padding: 0.3rem 0.2rem; font: 500 0.86rem var(--display); color: var(--muted); text-decoration: underline; }
+.odc-none { margin: 0; font-size: 0.88rem; color: var(--faint); }
+.odc-add { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0; border: 0; background: none; font: 500 0.86rem var(--display); color: var(--blue-ink); cursor: pointer; text-decoration: underline; }
+.odc-foot { display: flex; justify-content: flex-end; margin-top: 0.25rem; padding-top: 1.25rem; border-top: 1px solid #F1EEE8; }
+@media (max-width: 700px) {
+  .odc { gap: 1.6rem; padding: 1.5rem 1.25rem; }
+  .odc-name h3 { font-size: 1.4rem; }
+  .odc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem 1.5rem; padding-block: 1.3rem; }
+  .odc-cols { grid-template-columns: minmax(0, 1fr); gap: 1.75rem; }
+  .odc-thumb img { width: 128px; height: 152px; }
+}
+@media (max-width: 420px) { .odc-top { flex-wrap: wrap; } }

@@ -91,17 +91,6 @@
 .hero-aside { display: flex; flex-direction: column; align-items: center; gap: 30px; }
 .hero-lede { max-width: 30rem; margin: 0; font-size: 18px; line-height: 1.55; letter-spacing: -0.005em; color: var(--muted); text-wrap: balance; }
 .hero-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-/* Floating order cards from different kinds of small business: one idea, every shop. */
-.hero-orders { display: flex; justify-content: center; gap: 14px; margin: 0; padding: 0; list-style: none; }
-.hero-orders li { display: grid; gap: 2px; width: 172px; padding: 14px 16px 13px; text-align: left; background: #fff; border: 1px solid #ECE8E0; border-radius: 18px; box-shadow: 0 10px 28px rgba(41, 41, 35, 0.07); transform: translateY(var(--lift)) rotate(var(--tilt)); }
-.hero-orders .ho-icon { display: grid; place-items: center; width: 30px; height: 30px; margin-bottom: 8px; border-radius: 50%; background: #E7F0FB; color: var(--primary); }
-.hero-orders .is-caramel .ho-icon { background: #FBEBD9; color: var(--caramel-ink); }
-.hero-orders small { font: 600 0.6rem var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
-.hero-orders b { font: 500 0.95rem/1.25 var(--display); letter-spacing: -0.015em; color: var(--cocoa); }
-.hero-orders .ho-meta { display: flex; flex-direction: column; margin-top: 8px; padding-top: 8px; border-top: 1px solid #F1EEE8; font-size: 0.74rem; color: var(--muted); }
-.hero-orders .ho-meta i { font-style: normal; color: var(--primary); } .hero-orders .is-caramel .ho-meta i { color: var(--caramel-ink); }
-@media (max-width: 900px) { .hero-orders li { width: 150px; } }
-@media (max-width: 640px) { .hero-orders { flex-wrap: wrap; gap: 10px; } .hero-orders li { width: calc(50% - 5px); max-width: 170px; } .hero-orders li:nth-child(n+3) { display: none; } }
 .hero-summary { display: flex; align-items: center; justify-content: center; gap: 0.7rem; flex-wrap: wrap; margin: 0; font-family: var(--mono); font-size: 0.8rem; color: var(--muted); }
 @media (max-width: 1199px) { .hero-sans { font-size: 80px; } .hero-serif { font-size: 88px; } .hero-lede { font-size: 17px; } }
 @media (max-width: 809px) {

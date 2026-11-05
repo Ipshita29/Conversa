@@ -1,4 +1,4 @@
-import { MessageCircle, Camera, PenLine, X, ArrowUpRight, Shirt, Gem, Gift, Package } from 'lucide-react';
+import { MessageCircle, Camera, PenLine, X, ArrowUpRight } from 'lucide-react';
 import { STATUS_LABEL, PAYMENT_LABEL, CHANNEL_LABEL, RISK_LABEL } from '../utils/format.js';
 import { DEMO_MODE } from '../services/api.js';
 import { useEffect, useRef, useLayoutEffect, useState } from 'react';
@@ -230,16 +230,6 @@ export function HeroSection({ stats, attention }) {
           <a href="#product" className="btn btn-primary btn-lg" onClick={go('product')}>Explore Conversa <ArrowUpRight size={16} aria-hidden="true" /></a>
           <a href="#connect" className="btn btn-lg" onClick={go('connect')}>See how it works <ArrowUpRight size={16} aria-hidden="true" /></a>
         </div>
-        <ul className="hero-orders" aria-hidden="true">
-          {[[Shirt, 'Boutique', 'Linen shirt, size M', 'Due Fri', 'Ready to pack', 'is-blue'], [Gem, 'Jewellery', 'Silver hoop earrings', 'Due Sat', 'Awaiting payment', 'is-caramel'], [Package, 'Handmade', 'Stoneware mug set', 'Due Mon', 'In progress', 'is-blue'], [Gift, 'Gift shop', 'Festive hamper', 'Due Tue', 'Confirmed', 'is-caramel']].map(([Icon, kind, item, due, state, tone], i) => (
-            <li key={kind} className={tone} style={{ '--tilt': `${[-3, 2, -2, 3][i]}deg`, '--lift': `${[0, 10, 4, 12][i]}px` }}>
-              <span className="ho-icon"><Icon size={16} /></span>
-              <small>{kind}</small>
-              <b>{item}</b>
-              <span className="ho-meta">{due}<i>{state}</i></span>
-            </li>
-          ))}
-        </ul>
         {(stats || DEMO_MODE) && (
           <p className="hero-summary">
             {stats && <>{stats.total} {DEMO_MODE ? 'demo ' : ''}{stats.total === 1 ? 'order' : 'orders'} · {needs} {needs === 1 ? 'needs' : 'need'} attention</>}

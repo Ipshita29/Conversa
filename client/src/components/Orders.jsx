@@ -5,7 +5,7 @@ import { AlertTriangle, GripVertical, MessageCircle, Camera, PenLine, Pencil, Sp
 import { validateOrder, ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validateOrder.js';
 import { STATUS_LABEL, PAYMENT_LABEL, CHANNEL_LABEL, OPEN, toLocalInput, fromLocalInput, formatInTz, formatDateTime, formatMinutes, formatMoney, isDemoOrder } from '../utils/format.js';
 import { Modal, RiskBadge } from './UI.jsx';
-import { METHOD as METHOD_LABEL, RecPill } from './Payments.jsx';
+import { METHOD as METHOD_LABEL, RecPill, StatusPill } from './Payments.jsx';
 import useAsync from '../hooks/useAsync.js';
 import { needsRecovery, situationOf, proposeRevision, buildMessage, customerFirstName, copyText } from '../utils/recoveryMessage.js';
 import { attachmentSrc, getOrderConversation, getPayments, extractOrder, createOrder, updateConversation, updateOrder, getPlanner, simulatePlanner, DEMO_MODE } from '../services/api.js';
@@ -553,92 +553,62 @@ export function KanbanBoard({ orders, onMove, onOpen }) {
 // with a way to add it: nothing is assumed.
 const SPEC_ALWAYS = ['product', 'quantity', 'deadline'];
 
-export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus, onChanged }) {
-  const open = OPEN.includes(o.status);
+export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus }) {
   const conv = useAsync(() => getOrderConversation(o.id), [o.id]);
   const pays = useAsync(getPayments);
   const [photo, setPhoto] = useState(null);
-  const data = conv.data; const spec = data?.spec;
+  const refs = conv.data?.spec?.referenceImages ?? [];
   const row = pays.data?.rows.find((r) => r.orderId === o.id) ?? null;
   const records = (row?.payments ?? []).filter((p) => p.kind !== 'refund' && p.status !== 'rejected');
-  const proofCount = (row?.payments ?? []).filter((p) => p.proof).length;
-  const add = (label) => <button type="button" className="odm-add" onClick={() => onEdit(o.id)} aria-label={`Add ${label}`}>Add</button>;
-  const fields = (spec?.fields ?? []).filter((f) => SPEC_ALWAYS.includes(f.key) || f.value);
-  const requests = spec?.specialRequests ?? [];
+  const shots = records.filter((p) => p.proof);
+  const waiting = records.filter((p) => p.status === 'pending' && p.method !== 'cod');
+  const total = row ? row.total : o.price ?? null;
+  const shortId = `#${/^[a-f\d]{24}$/i.test(String(o.id)) ? String(o.id).slice(-6).toUpperCase() : String(o.id).replace(/^ord_/, '')}`;
+  const thumb = (src, label, key) => <button key={key} type="button" className="odc-thumb" onClick={() => setPhoto(src)} aria-label={`View ${label} full size`}><img src={attachmentSrc(src)} alt="" loading="lazy" /></button>;
   return (
-    <Modal variant="wide" title={o.customerName} subtitle={o.item} onClose={onClose}>
-      <div className="odm">
-        <section className="odm-left" aria-label="Order information">
-          <dl className="odm-facts">
-            <div><dt>Quantity</dt><dd>{o.quantity}</dd></div>
-            <div><dt>Amount</dt><dd>{o.price == null ? <span className="odm-none">Not provided {add('amount')}</span> : formatMoney(o.price)}</dd></div>
-            <div><dt>Deadline</dt><dd>{o.deadline ? formatDateTime(o.deadline) : <span className="odm-none">Not provided {add('a deadline')}</span>}</dd></div>
-            <div><dt>Preparation</dt><dd>{o.prepTimeMinutes === null ? <span className="odm-none">Not provided {add('preparation time')}</span> : formatMinutes(o.prepTimeMinutes)}</dd></div>
-            <div><dt>Payment</dt><dd><span className={`pay-tag pt-${payTag(o).key}`}>{payTag(o).label}</span></dd></div>
-            <div><dt>Channel</dt><dd>{CHANNEL_LABEL[o.source]}{o.customerContact ? ` · ${o.customerContact}` : ''}</dd></div>
-            <div><dt>Placed</dt><dd>{o.createdAt ? formatDateTime(o.createdAt) : '—'}</dd></div>
-          </dl>
-
-          <div className="odm-row">
-            <label className="od-statuspick"><span>Status</span>
-              <select className={`status-select status-${o.status}`} value={o.status} disabled={busy || LOCKED.includes(o.status)} onChange={(e) => onStatus(o, e.target.value)} aria-label={`Status for ${o.customerName}`}>
-                {ORDER_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-              </select></label>
-            <button type="button" className="btn btn-sm" onClick={() => onEdit(o.id)} aria-label={`Edit ${o.customerName}'s order`}><Pencil size={13} aria-hidden="true" /> Edit</button>
+    <Modal title="Order details" onClose={onClose}>
+      <article className="odc">
+        <header className="odc-top">
+          <div className="odc-name">
+            <h3>{o.customerName}</h3>
+            <p>{o.item}{o.quantity > 1 && !new RegExp(`\\b${o.quantity}\\b`).test(o.item) ? ` × ${o.quantity}` : ''} <span className="odc-id">{shortId}</span></p>
           </div>
+          <label className="od-statuspick odc-status"><span className="sr-only">Status</span>
+            <select className={`status-select status-${o.status}`} value={o.status} disabled={busy || LOCKED.includes(o.status)} onChange={(e) => onStatus(o, e.target.value)} aria-label={`Status for ${o.customerName}`}>
+              {ORDER_STATUSES.map((st) => <option key={st} value={st}>{STATUS_LABEL[st]}</option>)}
+            </select></label>
+        </header>
 
-          <div className="odm-block"><h3>Reference images</h3>
-            {!spec ? <p className="odm-none">{conv.status === 'error' ? 'Couldn’t load.' : 'Loading…'}</p> : spec.referenceImages.length === 0 ? <p className="odm-none">None received.</p> : (
-              <ul className="odm-gallery">{spec.referenceImages.map((r) => (
-                <li key={r.messageId}><button type="button" onClick={() => setPhoto(r)} aria-label="View the reference image full size"><img src={attachmentSrc(r)} alt="Reference picture sent by the customer" loading="lazy" /></button>
-                  <small>{formatDateTime(r.at)}</small></li>))}</ul>)}
-          </div>
+        <dl className="odc-grid">
+          <div><dt>Placed</dt><dd>{o.createdAt ? formatDateTime(o.createdAt) : '—'}</dd></div>
+          <div><dt>Due</dt><dd>{o.deadline ? formatDateTime(o.deadline) : <button type="button" className="odc-add" onClick={() => onEdit(o.id)}>Add a deadline</button>}</dd></div>
+          <div><dt>Amount</dt><dd>{total === null ? <button type="button" className="odc-add" onClick={() => onEdit(o.id)}>Add an amount</button> : formatMoney(total)}</dd></div>
+        </dl>
 
-          <div className="odm-block"><h3>Customer requirements</h3>
-            <dl className="odm-spec">
-              <div><dt>Notes</dt><dd>{o.customisation ?? <span className="odm-none">Not provided {add('customisation')}</span>}</dd></div>
-              {fields.map((f) => (
-                <div key={f.key}><dt>{f.label}</dt><dd>{f.value ? <>{f.value}{f.changed && <span className="od-updated">Updated</span>}</> : <span className="odm-none">Not provided {add(f.label.toLowerCase())}</span>}</dd></div>))}
-              {spec?.decorations.length > 0 && <div><dt>Decorations</dt><dd>{spec.decorations.map((d) => d.value).join(', ')}</dd></div>}
-              {requests.length > 0 && <div><dt>Special requests</dt><dd><ul className="odm-reqs">{requests.map((r) => <li key={r.messageId + r.value}>{r.value}</li>)}</ul></dd></div>}
+        <div className="odc-cols">
+          <section aria-label="Reference image">
+            <h4>Reference</h4>
+            {refs.length > 0 ? <div className="odc-thumbs">{refs.map((r) => thumb(r, 'the reference image', r.messageId))}</div>
+              : <p className="odc-none">{conv.status === 'loading' || (!conv.data && conv.status !== 'error') ? 'Loading…' : 'None received'}</p>}
+          </section>
+          <section aria-label="Payment">
+            <h4>Payment</h4>
+            <dl className="odc-pay">
+              <div><dt>Paid</dt><dd>{row ? formatMoney(row.paid) : '—'}{total !== null && row ? <small> of {formatMoney(total)}</small> : null}</dd></div>
+              <div><dt>Status</dt><dd>{row ? <StatusPill status={row.status} /> : <span className={`pay-tag pt-${payTag(o).key}`}>{payTag(o).label}</span>}</dd></div>
+              <div><dt>Method</dt><dd>{row?.method ? METHOD_LABEL[row.method] ?? row.method : row?.codDue > 0 ? 'Cash on delivery' : '—'}</dd></div>
             </dl>
-          </div>
-          {open && (o.risk === 'high' || o.risk === 'medium') && <RecoveryPanel order={o} onChanged={onChanged} />}
-          {data?.conversation && <p className="odm-viewconv"><Link className="im-link" to={`/inbox?conversation=${data.conversation.id}`} state={{ orderId: o.id }}>View original conversation →</Link></p>}
-        </section>
+            {shots.length > 0 && <div className="odc-thumbs is-small">{shots.map((p) => thumb(p.proof, 'the payment screenshot', p.id))}</div>}
+            {waiting.map((p) => (
+              <p key={p.id} className="odc-verify"><span>{formatMoney(p.amount)} awaiting verification</span>
+                <Link className="btn btn-primary btn-sm" to={`/payments?payment=${p.id}&act=confirm`}>Verify</Link>
+                <Link className="odc-reject" to={`/payments?payment=${p.id}&act=reject`}>Reject</Link></p>))}
+          </section>
+        </div>
 
-        <section className="odm-right" aria-label="From the conversation">
-          <header className="odm-conv-head"><h3>From the conversation</h3>
-            {data?.conversation?.isDemo && <span className="od-conv-demo" title="Sample messages, not a live WhatsApp or Instagram chat">Demo</span>}</header>
-          {conv.status === 'error' && <p className="odm-none">Couldn’t load the conversation. {conv.error.message} <button type="button" className="im-link" onClick={conv.reload}>Try again</button></p>}
-          {!data && conv.status !== 'error' && <p className="odm-none">Loading the conversation…</p>}
-          {data && !data.conversation && <p className="odm-none">No conversation is linked to this order.</p>}
-          {data?.conversation && <div className="odm-block"><h3>Detected automatically <span className="odm-auto">from messages</span></h3>
-            <ul className="odm-detected">
-              <li><b>{spec.referenceImages.length}</b> reference {spec.referenceImages.length === 1 ? 'image' : 'images'}</li>
-              <li><b>{fields.filter((f) => f.value).length + spec.decorations.length + requests.length}</b> requirement details</li>
-              <li><b>{fields.filter((f) => f.changed).length}</b> updated {fields.filter((f) => f.changed).length === 1 ? 'instruction' : 'instructions'}</li>
-            </ul>
-            {fields.filter((f) => f.changed).map((f) => (
-              <div key={f.key} className="odm-change"><b>{f.label}</b>
-                <ul>{f.history.map((h) => <li key={h.messageId} className={h.current ? 'is-now' : ''}>{h.current ? 'Now' : 'Earlier'}: “{h.value}” <time>{formatDateTime(h.at)}</time></li>)}</ul></div>))}
-          </div>}
-
-          <div className="odm-block"><h3>Payment</h3>
-            {row && row.total !== null && <p className="odm-sum">{formatMoney(row.paid)} confirmed of {formatMoney(row.total)}</p>}
-            {records.length === 0 && <p className="odm-none">No payment proof received. <Link className="im-link" to={`/payments?record=${o.id}`}>Add payment proof</Link></p>}
-            {records.length > 0 && (
-              <ul className="odm-pays">{records.map((p) => (
-                <li key={p.id}>
-                  {p.proof && <button type="button" className="odm-shot" onClick={() => setPhoto(p.proof)} aria-label="View the payment screenshot full size"><img src={attachmentSrc(p.proof)} alt="" loading="lazy" /></button>}
-                  <span className="odm-pay-main"><b>{formatMoney(p.amount)}</b> · {METHOD_LABEL[p.method] ?? p.method}{p.transactionId && <small>{p.transactionId}</small>}{!p.proof && <small className="odm-none">No screenshot attached</small>}</span>
-                  <RecPill p={p} />
-                  {p.status === 'pending' && <span className="odm-acts"><Link className="im-link" to={`/payments?payment=${p.id}&act=confirm`}>Verify</Link><Link className="im-link" to={`/payments?payment=${p.id}&act=reject`}>Reject</Link></span>}</li>))}</ul>)}
-            {records.length > 0 && <Link className="im-link" to={`/payments?order=${o.id}`}>All payment records</Link>}
-          </div>
-        </section>
-      </div>
-      {photo && <Modal variant="lightbox" title="Picture from the conversation" onClose={() => setPhoto(null)}><div className="pm-proof-big"><img src={attachmentSrc(photo)} alt="Picture sent by the customer" /></div></Modal>}
+        <footer className="odc-foot"><button type="button" className="odc-add" onClick={() => onEdit(o.id)}><Pencil size={12} aria-hidden="true" /> Edit order</button></footer>
+      </article>
+      {photo && <Modal variant="lightbox" title="Picture" onClose={() => setPhoto(null)}><div className="pm-proof-big"><img src={attachmentSrc(photo)} alt="Picture from the order" /></div></Modal>}
     </Modal>
   );
 }
