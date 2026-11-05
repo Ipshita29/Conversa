@@ -81,6 +81,7 @@ async function messagesByConversation(ids) {
       id: String(m._id), from: m.direction === 'outbound' ? 'business' : 'customer', text: m.text ?? (m.attachment ? null : `[${m.messageType} message — not shown]`), at: m.receivedAt.toISOString(), read: Boolean(m.readAt),
       attachment: m.attachment ? { url: `/conversations/${m.conversation}/messages/${m._id}/attachment`, contentType: m.attachment.contentType } : null,
       scan: scanOf(m),
+      delivery: m.direction === 'outbound' ? (m.delivery ? { mode: m.delivery.mode, state: m.delivery.state } : { mode: 'simulated', state: 'sent' }) : null,
       payment: m.paymentId ? payBy[String(m.paymentId)] ?? null : null,
     });
   }
@@ -162,4 +163,13 @@ export async function orderConversation(orderId) {
   if (!conv) return { conversation: null, messages: [], spec: extractOrderSpec([]) };
   const messages = ((await messagesByConversation([conv._id]))[conv._id] ?? []).map((m) => ({ ...m, kind: imageKind(m) }));
   return { conversation: { id: String(conv._id), channel: conv.channel, customerName: conv.customerName, isDemo: Boolean(conv.isDemo) }, messages, spec: extractOrderSpec(messages) };
+}
+
+// For the reply tools: a conversation and its messages in the same shape the list uses.
+export async function conversationWithMessages(id) {
+  if (!ID.test(String(id))) throw notFound('Conversation', id);
+  const conv = await Conversation.findById(id).lean();
+  if (!conv) throw notFound('Conversation', id);
+  const by = await messagesByConversation([conv._id]);
+  return { conv, messages: by[conv._id] ?? [] };
 }

@@ -14,6 +14,8 @@ const messageSchema = new mongoose.Schema({
   paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
   // Automatic payment detection for an image: processing -> filed | review | duplicate | not_payment | failed. claimedAt makes sure one worker handles it.
   paymentScan: { type: { state: String, reason: String, at: Date, claimedAt: { type: Date, default: null } }, default: null, _id: false },
+  // How an outbound message left Conversa: 'real' = sent through the channel's API; 'simulated' = stored only (demo conversation, or the channel is not connected).
+  delivery: { type: { mode: String, state: String, sentAt: Date }, default: null, _id: false },
   readAt: { type: Date, default: null }, // null = unread
   isDemo: { type: Boolean, default: false },
 }, { timestamps: true });

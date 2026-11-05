@@ -1,7 +1,7 @@
 // Instagram messaging (Instagram API with Instagram Login). Reports 'connected' ONLY after a successful credential check.
 // Requires an Instagram professional account and Meta app permissions/review; none of that is automated here.
 import { config } from '../../config/env.js';
-import { graphGet } from './graph.js';
+import { graphGet, graphPost } from './graph.js';
 
 export const CHANNEL = 'instagram';
 
@@ -45,4 +45,13 @@ export function parseWebhook(body) {
     }
   }
   return out;
+}
+
+// Sends a plain text message to an Instagram-scoped user id (only possible inside Meta's messaging window for that customer).
+export async function sendText(to, text, deps = {}, cfg = config) {
+  const missing = missingConfig(cfg);
+  if (missing.length) return { ok: false, reason: `Not configured. Missing environment variables: ${missing.join(', ')}.` };
+  const r = await graphPost(`https://graph.instagram.com/${config.meta.graphVersion}/me/messages`, cfg.meta.instagram.accessToken, { recipient: { id: to }, message: { text } }, deps);
+  if (r.ok) return { ok: true, externalId: r.body?.message_id ?? null };
+  return { ok: false, reason: r.status ? `Instagram refused the message${r.body?.error?.message ? `: ${r.body.error.message}` : ` (HTTP ${r.status})`}.` : `Could not reach Instagram (${r.error}).` };
 }

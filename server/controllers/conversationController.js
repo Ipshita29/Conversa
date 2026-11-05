@@ -4,6 +4,7 @@ import { asyncHandler, notFound, validationError } from '../utils/errors.js';
 import { isPlainObject } from '../utils/validation.js';
 import { ApiError } from '../utils/errors.js';
 import { checkImage } from '../services/proofStore.js';
+import { sendReply, suggestReplies, summariseOrder, suggestFromContext } from '../services/replyService.js';
 import { addAttachment, extractMessagePayment, getAttachmentFile, listConversations, updateConversation } from '../services/messageService.js';
 
 const ID = /^[a-f\d]{24}$/i;
@@ -43,4 +44,18 @@ export const attachment = asyncHandler(async (req, res) => {
 export const extractPayment = asyncHandler(async (req, res) => {
   const r = await extractMessagePayment(req.params.id, req.params.mid);
   res.status(r.existing ? 200 : 201).json(r);
+});
+
+const orderIdOf = (v) => (typeof v === 'string' && v ? v : undefined);
+// POST /api/conversations/:id/suggestions  { orderId? } -> { source: 'ai' | 'rules', suggestions: [{ id, text }], orderId, candidates }. Nothing is sent.
+export const suggestions = asyncHandler(async (req, res) => res.json(await suggestReplies(req.params.id, orderIdOf(req.body?.orderId))));
+// GET /api/conversations/:id/order-summary?orderId=  -> the drafted text for the owner to preview. Nothing is sent.
+export const orderSummary = asyncHandler(async (req, res) => res.json(await summariseOrder(req.params.id, orderIdOf(req.query.orderId))));
+// POST /api/conversations/:id/messages  { text } -> sends exactly that text (only ever called after the owner chose to send it).
+export const sendMessage = asyncHandler(async (req, res) => res.status(201).json(await sendReply(req.params.id, req.body?.text)));
+// POST /api/ai/suggest-replies  { context } -> the same generator on a context the browser built (used by the demo, whose chats are not in the database).
+export const suggestFromBody = asyncHandler(async (req, res) => {
+  const c = req.body?.context;
+  if (!isPlainObject(c) || !Array.isArray(c.recent)) throw validationError([{ field: 'context', message: 'Send the conversation context.' }]);
+  res.json(await suggestFromContext({ customer: c.customer ?? null, channel: c.channel ?? null, recent: c.recent.slice(-8), order: c.order ?? null }));
 });

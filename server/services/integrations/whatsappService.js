@@ -1,7 +1,7 @@
 // WhatsApp Cloud API. Reports 'connected' ONLY after a successful credential check against the Graph API.
 // There is no OAuth/Embedded Signup flow here: credentials are supplied via environment variables.
 import { config } from '../../config/env.js';
-import { graphGet, graphBase } from './graph.js';
+import { graphGet, graphPost, graphBase } from './graph.js';
 
 export const CHANNEL = 'whatsapp';
 
@@ -76,4 +76,13 @@ export async function downloadMedia(mediaId, { fetchImpl = fetch, timeoutMs = 10
     const buf = Buffer.from(await res.arrayBuffer());
     return buf.length > 0 && buf.length <= maxBytes ? buf : null;
   } catch { return null; } finally { clearTimeout(timer); }
+}
+
+// Sends a plain text message (WhatsApp Cloud API). Meta only accepts free-form text within 24 hours of the customer's last message.
+export async function sendText(to, text, deps = {}, cfg = config) {
+  const missing = missingConfig(cfg);
+  if (missing.length) return { ok: false, reason: `Not configured. Missing environment variables: ${missing.join(', ')}.` };
+  const r = await graphPost(`${graphBase()}/${encodeURIComponent(cfg.meta.whatsapp.phoneNumberId)}/messages`, cfg.meta.whatsapp.accessToken, { messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }, deps);
+  if (r.ok) return { ok: true, externalId: r.body?.messages?.[0]?.id ?? null };
+  return { ok: false, reason: r.status ? `WhatsApp refused the message${r.body?.error?.message ? `: ${r.body.error.message}` : ` (HTTP ${r.status})`}.` : `Could not reach WhatsApp (${r.error}).` };
 }
