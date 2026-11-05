@@ -27,7 +27,7 @@ export const seedConversations = () => DEMO_CONVERSATIONS.map((c, i) => {
   const id = `conv_${i + 1}`;
   const messages = c.messages.map((m, j) => {
     const mid = `m${i + 1}_${j + 1}`;
-    if (m.image) demoMessageMeta.set(mid, { file: m.image.file, reading: m.image.reading ?? null });
+    if (m.image) demoMessageMeta.set(mid, { file: m.image.file, reading: m.image.reading ?? null, hoursAgo: m.hoursAgo });
     if (m.image?.ownerConfirmed) demoMessageMeta.set(mid, { ...demoMessageMeta.get(mid), ownerConfirmed: true });
     return {
       id: mid, from: m.from ?? 'customer', text: m.text, at: at(-m.hoursAgo), read: !m.unread,

@@ -51,7 +51,7 @@ export function createMockPayments(getOrders, getConversations = () => []) {
       if (!meta?.reading) continue;
       const dupe = list.find((p) => p.proofHash === meta.file && p.status !== 'rejected'); // the same picture again
       if (dupe) { msg.scan = { state: 'duplicate', reason: 'This screenshot was already recorded.' }; msg.payment = short(dupe); continue; }
-      const v = demoVision(meta.reading, new Date(msg.at));
+      const v = demoVision(meta.reading, new Date(Date.parse(msg.at) + (meta.hoursAgo ?? 0) * 3600000)); // the payment's time is counted from the same "now" as the message's (hoursAgo), so it stays after the order was placed
       const orders = getOrders().map((o) => ({ id: o.id, customerName: o.customerName, customerContact: o.customerContact ?? null, status: o.status, balance: summarize(o, list.filter((p) => p.orderId === o.id)).balance }));
       const d = decideDetectedPayment({ x: toReading(v), succeeded: true, conv: { orderId: conv.orderId, customerName: conv.customerName, contactId: conv.id }, orders, existing: list, receivedAt: new Date(msg.at), now: new Date(msg.at) });
       msg.scan = { state: d.state, reason: d.reason };
