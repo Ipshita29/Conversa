@@ -1,14 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check } from 'lucide-react';
-import { attachmentSrc, extractMessagePayment, extractPaymentText, getConversations, getIntegrations, getPayments, listOrders, updateConversation, uploadConversationImage, DEMO_MODE } from '../services/api.js';
+import { AlertTriangle, ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check, FileText } from 'lucide-react';
+import { attachmentSrc, extractMessagePayment, extractPaymentText, getConversations, getIntegrations, getPayments, listOrders, sendConversationMessage, updateConversation, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { CHANNEL_LABEL, STATUS_LABEL } from '../utils/format.js';
-import { Drawer, Modal, StateMessage, StatusBadge } from '../components/UI.jsx';
-import { METHOD as PAY_METHOD, REC_STATUS, StatusPill, recStatus } from '../components/Payments.jsx';
+import { Drawer, Modal, StateMessage } from '../components/UI.jsx';
+import { REC_STATUS, recStatus } from '../components/Payments.jsx';
 import { DraftOrder } from '../components/Orders.jsx';
 import { parsePaymentText } from '../../../server/services/paymentExtraction.js';
 import { formatMoney } from '../utils/format.js';
+import { OrderSummaryModal, SmartReplies } from '../components/Replies.jsx';
 import '../css/Workspace.css';
 
 const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp'], ['instagram', 'Instagram']];
@@ -66,7 +67,10 @@ export default function Inbox() {
   const [markError, setMarkError] = useState(null);
   const [payNote, setPayNote] = useState(null); // result of reading a message or screenshot as a payment: { convId, ok, text }
   const [payBusy, setPayBusy] = useState(null);
-  const shotRef = useRef(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [sendState, setSendState] = useState({ status: 'idle', error: null }); // the message box: idle | sending | failed
+  const boxRef = useRef(null);
   const scrollRef = useRef(null);
   const stick = useRef(true); // true while the reader is at (or near) the bottom, so new messages may scroll into view
 
@@ -81,7 +85,16 @@ export default function Inbox() {
   const linked = selected?.orderId ? orderOf(selected.orderId) : null;
   const channelInfo = (integrations.data?.items ?? []).find((i) => i.channel === selected?.channel);
 
-  useEffect(() => { setDrafting(false); setPayNote(null); }, [selected?.id]);
+  useEffect(() => { setDrafting(false); setPayNote(null); setDraft(''); setSendState({ status: 'idle', error: null }); setSummaryOpen(false); }, [selected?.id]);
+
+  // Typed messages are sent only by the owner's own press of Send (or Enter). Real when the channel is connected, otherwise a clearly marked simulation.
+  const simulated = !selected || selected.isDemo || channelInfo?.status !== 'connected';
+  async function sendDraft() {
+    const text = draft.trim(); if (!text || sendState.status === 'sending') return;
+    setSendState({ status: 'sending', error: null });
+    try { await sendConversationMessage(selected.id, text); setDraft(''); setSendState({ status: 'idle', error: null }); conv.reload(); }
+    catch (e) { setSendState({ status: 'failed', error: e.message }); }
+  }
 
   // Pictures are checked for a payment in the background. While any is still being read, look again every few seconds.
   const scanning = convs.some((c) => c.messages.some((m) => m.scan?.state === 'processing'));
@@ -100,18 +113,7 @@ export default function Inbox() {
         : { convId: selected.id, ok: false, text: r.reason, orderId: selected.orderId, fallback: true });
     } catch (e) { setPayNote({ convId: selected.id, ok: false, text: e.message, orderId: selected.orderId, fallback: e.status !== 409 }); } finally { setPayBusy(null); }
   }
-  // 1. Save the screenshot the customer sent into this chat, so it can be seen alongside their messages.
-  async function addScreenshot(e) {
-    const file = e.target.files?.[0]; e.target.value = '';
-    if (!file || !selected) return;
-    setPayBusy('shot'); setPayNote(null);
-    try {
-      await uploadConversationImage(selected.id, file);
-      conv.reload();
-      setPayNote({ convId: selected.id, ok: true, text: 'Screenshot added to the chat. Use “Extract payment details” under it to read it. Nothing is saved as a payment until you do. (Pictures your customers send on WhatsApp are read automatically.)', orderId: selected.orderId, plain: true });
-    } catch (er) { setPayNote({ convId: selected.id, ok: false, text: er.message, orderId: selected.orderId }); } finally { setPayBusy(null); }
-  }
-  // 2. Read it (server-side Groq vision) and file it as Verification pending on the chat's order. Asking twice returns the same record.
+  // Read a picture in the chat (server-side Groq vision) and file it as Verification pending on the chat's order. Asking twice returns the same record.
   async function readPicture(m) {
     setPayBusy(m.id); setPayNote(null);
     try {
@@ -140,9 +142,9 @@ export default function Inbox() {
   const groups = [];
   selected?.messages.forEach((m) => { const k = dayKey(m.at); const g = groups[groups.length - 1]; if (g?.key === k) g.items.push(m); else groups.push({ key: k, at: m.at, items: [m] }); });
   const last = selected ? lastOf(selected) : null;
-  const sendNote = !selected ? '' : channelInfo?.status === 'connected'
-    ? `Sending replies from Conversa isn't available yet. Reply to ${selected.customerName} in ${CHANNEL_LABEL[selected.channel]} directly.`
-    : `${CHANNEL_LABEL[selected.channel]} ${channelInfo?.status === 'demo' ? 'is demo only' : "isn't connected"}, so replies can't be sent from here.`;
+  const sendNote = !selected ? '' : simulated
+    ? `Demo mode: sends are simulated. Messages appear here and nothing reaches ${selected.customerName} on ${CHANNEL_LABEL[selected.channel]}.`
+    : `Messages are sent to ${selected.customerName} through ${CHANNEL_LABEL[selected.channel]}.`;
 
   return (
     <section className="page inbox-page">
@@ -204,8 +206,7 @@ export default function Inbox() {
                   {linked ? <Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}><ExternalLink size={14} aria-hidden="true" /> Open order</Link>
                     : !selected.orderId && <button type="button" className="btn btn-sm btn-primary" onClick={() => setDrafting(true)} disabled={drafting}><Sparkles size={14} aria-hidden="true" /> Extract order</button>}
                   {selected && <>
-                    <input ref={shotRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={addScreenshot} />
-                    <button type="button" className="btn btn-sm" onClick={() => shotRef.current?.click()} disabled={payBusy === 'shot'} title="Save a screenshot the customer sent into this chat"><Camera size={14} aria-hidden="true" /> {payBusy === 'shot' ? 'Adding…' : 'Add screenshot'}</button>
+                    <button type="button" className="btn btn-sm" onClick={() => setSummaryOpen(true)} title="Draft the order's details as a message you can edit and send"><FileText size={14} aria-hidden="true" /> Send order summary</button>
                   </>}
                 </div>
               </header>
@@ -238,6 +239,7 @@ export default function Inbox() {
                                 {selected.orderId ? <button type="button" className="im-link" onClick={() => readAsPayment(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Reading…' : 'Read as payment'}</button> : <small>Link an order to file it</small>}</span>) : null; })()}
                           </div>
                           {m.text && <CopyButton text={m.text} />}
+                          {mine && m.delivery && <small className={`im-sent${m.delivery.mode === 'simulated' ? ' is-sim' : ''}`}>{m.delivery.mode === 'simulated' ? 'Simulated · not sent to the customer' : 'Sent'}</small>}
                         </div>
                       );
                     })}
@@ -249,23 +251,6 @@ export default function Inbox() {
                     {payNote.ok ? (!payNote.plain && <Link to={`/payments?order=${payNote.orderId}`}>Review in Payments</Link>) : payNote.fallback && <Link to={`/payments?record=${payNote.orderId}`}>Record it by hand</Link>}</div>
                 )}
                 {createdFor?.convId === selected.id && <div className="notice ok" role="status">Order created for {createdFor.customerName} and linked to this chat.</div>}
-                {linked && (
-                  <div className="im-linked">
-                    <div className="im-linked-top">
-                      <div className="im-linked-main"><p className="im-linked-label">Linked order</p><div className="im-linked-title"><strong>{linked.item}</strong> <StatusBadge status={linked.status} /></div></div>
-                      <Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}>Open order</Link>
-                    </div>
-                    {(() => { const r = paymentsQ.data?.rows.find((x) => x.orderId === linked.id); return r ? (
-                      <dl className="im-linked-pay">
-                        <div><dt>Payment</dt><dd><StatusPill status={r.status} /></dd></div>
-                        {r.method && <div><dt>Method</dt><dd>{PAY_METHOD[r.method] ?? r.method}</dd></div>}
-                        {r.balance !== null && <div><dt>Received</dt><dd>{formatMoney(r.paid)}</dd></div>}
-                        {r.balance !== null && <div><dt>Order total</dt><dd>{formatMoney(r.total)}</dd></div>}
-                        <div className="im-linked-go"><Link to={`/payments?order=${linked.id}`}>View in Payments</Link></div>
-                      </dl>) : null; })()}
-                  </div>
-                )}
-                {!linked && selected.orderId && <p className="muted im-note">This chat is linked to an order that could not be loaded.</p>}
                 {!selected.orderId && drafting && (
                   <div className="im-draft"><h3>Draft an order from this chat</h3>
                     <DraftOrder key={selected.id} autoStart message={last.text} source={selected.channel} customerName={selected.customerName} conversationId={selected.id}
@@ -275,18 +260,23 @@ export default function Inbox() {
                 {!selected.orderId && !drafting && <p className="im-hint">The AI can read the latest message and draft an order. You review and confirm it before anything is saved.</p>}
               </div>
 
+              <SmartReplies conv={selected} onSent={() => conv.reload()} onEdit={(t) => { setDraft(t); setTimeout(() => boxRef.current?.focus(), 0); }} />
               <footer className="im-composer">
-                <p className="im-composer-note" role="status"><i className="im-led is-off" />{sendNote}</p>
+                <p className="im-composer-note" role="status"><i className={`im-led ${simulated ? 'is-off' : 'is-connected'}`} />{sendNote}</p>
+                {sendState.status === 'failed' && <p className="rp-state is-error" role="alert">Not sent: {sendState.error}</p>}
                 <div className="im-composer-row">
                   <button type="button" className="im-icon-btn" disabled aria-label="Attach a file (not available)" title="Attachments aren't supported yet"><Paperclip size={18} aria-hidden="true" /></button>
-                  <textarea rows={1} placeholder="Type a message..." disabled aria-label="Message" />
-                  <button type="button" className="im-send" disabled aria-label="Send (not available)"><SendHorizontal size={18} aria-hidden="true" /></button>
+                  <textarea ref={boxRef} rows={1} placeholder="Type a message..." aria-label="Message" value={draft} onChange={(e) => { setDraft(e.target.value); if (sendState.status === 'failed') setSendState({ status: 'idle', error: null }); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDraft(); } }} disabled={sendState.status === 'sending'} />
+                  <button type="button" className="im-send" onClick={sendDraft} disabled={!draft.trim() || sendState.status === 'sending'} aria-label={sendState.status === 'sending' ? 'Sending' : 'Send message'}><SendHorizontal size={18} aria-hidden="true" /></button>
                 </div>
               </footer>
             </>
           )}
         </section>
       </div>
+
+      {summaryOpen && selected && <OrderSummaryModal conv={selected} simulated={simulated} onClose={() => setSummaryOpen(false)} onSent={() => conv.reload()} />}
 
       {viewer && (
         <Modal variant="lightbox" title={viewer.m.payment || ['filed', 'review', 'duplicate'].includes(viewer.m.scan?.state) ? 'Payment screenshot' : 'Reference picture'} onClose={() => setViewer(null)}>

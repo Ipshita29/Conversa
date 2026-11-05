@@ -134,3 +134,18 @@ export const connectIntegration = (channel) => request('POST', `/integrations/${
 export const getConversations = () => request('GET', '/conversations');
 // patch: { read: true } and/or { orderId: string | null }
 export const updateConversation = (id, patch) => request('PATCH', `/conversations/${encodeURIComponent(id)}`, patch);
+
+// ---- Reply tools: smart replies and the order summary --------------------------------------------------------------------------
+// Nothing here sends on its own: suggestions and summaries are only drafted; sendConversationMessage runs only when the owner presses send.
+// Live: the server drafts (AI first, rules as the fallback) and sends through WhatsApp/Instagram when connected, otherwise it records a simulated send.
+// Demo: the chats live in the browser, so the browser builds the context and the same rules the server falls back to write the suggestions
+// (deterministic, so the demo always shows the same replies).
+export async function getReplySuggestions(conversationId, orderId = null) {
+  const path = `/conversations/${encodeURIComponent(conversationId)}/suggestions`;
+  if (!DEMO_MODE) return request('POST', path, orderId ? { orderId } : {});
+  const base = await request('POST', path, orderId ? { orderId } : {});
+  const { ruleSuggestions } = await import('../../../server/services/replyLogic.js');
+  return { source: 'rules', suggestions: ruleSuggestions(base.context), orderId: base.orderId, candidates: base.candidates };
+}
+export const getOrderSummary = (conversationId, orderId = null) => request('GET', `/conversations/${encodeURIComponent(conversationId)}/order-summary${orderId ? `?orderId=${encodeURIComponent(orderId)}` : ''}`);
+export const sendConversationMessage = (conversationId, text, extra = {}) => request('POST', `/conversations/${encodeURIComponent(conversationId)}/messages`, { text, ...extra });
