@@ -51,6 +51,9 @@ export function buildDemoOrders(settings, now = new Date()) {
 }
 export const buildAllDemoOrders = buildDemoOrders;
 
+// The requested delivery time of each demo order in the What-if "commitment" scenario (a single production day; see services/whatIf.js).
+export const SCENARIO_DUE = Object.fromEntries(ORDERS.map((o) => [o.customerName, o.sdue]));
+
 // The same five orders on ONE fixed day (Tue 3 Nov 2026, production starting at 9:00): Aanya and Kartik both want 10:30, Rohan and Neha both noon.
 // Not the demo that is seeded: a fixed, reproducible scenario for testing the scheduler and the What-if engine at a known clock (demoClock).
 export const demoClock = (settings) => zonedTimeToUtc({ ...DEMO_DAY, ...parseHm(DEMO_START) }, settings.timezone);

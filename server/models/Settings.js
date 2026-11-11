@@ -18,6 +18,7 @@ const settingsSchema = new mongoose.Schema({
   riskBufferMinutes: Number,
   customisationMinutes: Number,
   prepRules: [ruleSchema],
+  commitmentStart: { type: Date, default: null }, // production start of the What-if commitment the owner applied to the Plan (null = none)
 }, { timestamps: true });
 
 export default mongoose.models.Settings || mongoose.model('Settings', settingsSchema);

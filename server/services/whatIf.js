@@ -7,11 +7,44 @@
 // separately and the earliest realistic deadline is what helps.
 import { computePlan, simulate } from './workloadEngine.js';
 import { OPEN_STATUSES } from '../utils/validation.js';
-import { DEMO_MARK } from '../scripts/demo-data.js';
+import { DEMO_MARK, DEMO_START, SCENARIO_DUE } from '../scripts/demo-data.js';
+import { zonedParts, zonedTimeToUtc, addDays, weekdayOf, parseHm } from '../utils/timezone.js';
 
-// 'commitment' and 'demo' = the five seeded demo orders, planned from the real clock; anything else = every order loaded for the business.
-export const scopeOrders = (orders, scope) => (scope === 'commitment' || scope === 'demo' ? orders.filter((o) => typeof o.notes === 'string' && o.notes.startsWith(DEMO_MARK)) : orders);
-export const scopeNow = (scope, settings, now) => now; // every scope plans from the real clock, like the Orders and Plan pages
+// 'demo' = the five seeded demo orders, planned from the real clock; anything else = every order loaded for the business.
+export const scopeOrders = (orders, scope) => (scope === 'demo' || scope === 'commitment' ? orders.filter((o) => typeof o.notes === 'string' && o.notes.startsWith(DEMO_MARK)) : orders);
+export const scopeNow = (scope, settings, now) => now;
+
+// 'commitment' = the What-if scenario: the same five demo orders (same customers, products and preparation times) with their requested delivery times
+// placed on ONE production day, the next working morning (today when it is still before production starts). Aanya and Kartik both ask for 10:30,
+// Rohan and the rush order for noon, Meera for 14:00. These are COPIES with moved deadlines: no order is changed, and the schedule is still worked out
+// by the engine, from 9:00 that day. The day moves with the calendar, so the scenario never goes stale.
+export function scopeInputs(orders, scope, settings, now) {
+  const picked = scopeOrders(orders, scope);
+  if (scope !== 'commitment') return { orders: picked, now: scopeNow(scope, settings, now) };
+  const tz = settings.timezone; const t = zonedParts(now, tz);
+  let day = { year: t.year, month: t.month, day: t.day };
+  const at = (d, hm) => zonedTimeToUtc({ ...d, ...parseHm(hm) }, tz);
+  while (!settings.workingDays.includes(weekdayOf(day)) || at(day, DEMO_START) < now) day = addDays(day, 1);
+  return {
+    orders: picked.map((o) => (SCENARIO_DUE[o.customerName] ? { ...o, deadline: at(day, SCENARIO_DUE[o.customerName]) } : o)),
+    now: at(day, DEMO_START),
+  };
+}
+
+// ---- Apply to Plan ------------------------------------------------------------------------------------------------------------------------
+// The schedule itself is never stored (the engine works it out from the orders, so it cannot go stale). What an approved scenario persists is the
+// COMMITMENT behind it: the delivery deadlines it asked for, and the moment production starts. These two helpers are shared by the server and the demo.
+const time = (d) => new Date(d).getTime();
+const idOf = (o) => String(o.id ?? o._id);
+// The open orders whose stored deadline differs from the scenario's: the only thing applying changes (never status, payment, pictures or messages).
+export function commitmentChanges(orders, scenarioOrders) {
+  const stored = Object.fromEntries(orders.map((o) => [idOf(o), o]));
+  return scenarioOrders.filter((s) => isOpen(s) && stored[idOf(s)] && time(stored[idOf(s)].deadline) !== time(s.deadline)).map((s) => ({ id: idOf(s), customerName: s.customerName, from: stored[idOf(s)].deadline ?? null, to: iso(s.deadline) }));
+}
+// Is this scenario already the plan? The stored production start is the scenario's, and every deadline already matches.
+export const commitmentApplied = ({ orders, scenario, storedStart }) => Boolean(storedStart) && time(storedStart) === scenario.now.getTime() && commitmentChanges(orders, scenario.orders).length === 0;
+// The moment the Plan is worked out from: now, or the applied commitment's production start while that is still ahead.
+export const planNow = (now, storedStart) => (storedStart && time(storedStart) > now.getTime() ? new Date(storedStart) : now);
 
 const MIN = 60000;
 const STEP = 15 * MIN; // suggested deadlines are rounded UP to a quarter of an hour: a promise a person can say out loud

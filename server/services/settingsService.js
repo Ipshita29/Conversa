@@ -57,3 +57,13 @@ export async function updateSettings(body) {
   const doc = await Settings.findOneAndUpdate({ key: 'default' }, { $set: value }, { upsert: true, new: true, setDefaultsOnInsert: true });
   return pickSettings(doc);
 }
+
+// The production start of the commitment applied to the Plan. Kept outside the editable settings, so PATCH /settings can never change it.
+export async function getCommitmentStart() {
+  const d = await Settings.findOne({ key: 'default' }).select('commitmentStart').lean();
+  return d?.commitmentStart ?? null;
+}
+export async function setCommitmentStart(date) {
+  // No setDefaultsOnInsert: Mongoose would create empty working days. A first-time insert gets the real defaults instead.
+  await Settings.findOneAndUpdate({ key: 'default' }, { $set: { commitmentStart: date }, $setOnInsert: defaultSettings() }, { upsert: true });
+}
