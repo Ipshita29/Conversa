@@ -6,7 +6,7 @@ import { seedOrders, seedConversations, seedIntegrations, demoSettings as baseSe
 // The offline demo runs the SAME scheduler as the server, in the browser, so every page agrees with every other page.
 import { computePlan, publicPlan, suggestScenario } from '../../../server/services/workloadEngine.js';
 import { createMockPayments } from './mockPayments.js';
-import { scopeOrders, scopeNow, overview, runMove } from '../../../server/services/whatIf.js';
+import { scopeInputs, overview, runMove, commitmentChanges, commitmentApplied, planNow } from '../../../server/services/whatIf.js';
 import { extractOrderSpec, imageKind } from '../../../server/services/orderSpec.js';
 import { orderSummary, replyContext, ruleSuggestions, shortId } from '../../../server/services/replyLogic.js';
 import { buildDashboard as serverDashboard } from '../../../server/services/dashboardService.js';
@@ -16,6 +16,18 @@ const demoSettings = () => baseSettings();
 const conversations = seedConversations();
 const payments = createMockPayments(() => orders, () => conversations);
 const integrations = seedIntegrations();
+
+// The What-if commitment the owner applied to the Plan (the server keeps it in the database). It is kept in this browser, so a refresh keeps it, and it
+// lapses with the production day it was made for: { start, deadlines: { orderId: ISO } }.
+const COMMIT_KEY = 'conversa.commitment';
+let commitmentStart = null;
+try {
+  const c = JSON.parse(localStorage.getItem(COMMIT_KEY));
+  if (c && Date.parse(c.start) + 10 * 3600000 > Date.now()) {
+    for (const [id, deadline] of Object.entries(c.deadlines ?? {})) { const o = orders.find((x) => x.id === id); if (o) o.deadline = deadline; }
+    commitmentStart = new Date(c.start);
+  } else if (c) localStorage.removeItem(COMMIT_KEY);
+} catch { /* no storage: the commitment lasts until the page is reloaded */ }
 
 const wait = (ms = 350) => new Promise((r) => setTimeout(r, ms));
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -192,13 +204,23 @@ export async function handleMockRequest(method, path, body = {}) {
   if (method === 'GET' && p === '/planner') {
     const days = Number(q.get('days') || 7);
     if (!Number.isInteger(days) || days < 1 || days > 30) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'days', message: 'Must be between 1 and 30.' }]);
-    const now = new Date();
+    const now = planNow(new Date(), commitmentStart); // an applied What-if commitment starts production at its own morning
     return clone({ ...publicPlan(computePlan({ orders, settings: demoSettings(), now, rangeDays: days })), suggestedScenario: suggestScenario({ orders, settings: demoSettings(), now, rangeDays: days }) });
+  }
+  if (method === 'POST' && p === '/planner/whatif/apply') { // the owner's approval: persist the scenario's deadlines and production start (deadlines only; nothing else on an order changes)
+    if (body?.scope !== 'commitment') throw invalid([{ field: 'scope', message: "Only the 'commitment' scenario can be applied to the Plan." }]);
+    const input = { ...scopeInputs(clone(orders), 'commitment', demoSettings(), new Date()), settings: demoSettings() };
+    if (!overview(input).feasible) throw new ApiError(409, 'CONFLICT', 'This schedule is not feasible, so it cannot be applied to the Plan.');
+    const changed = commitmentChanges(orders, input.orders);
+    for (const c of changed) { const o = orders.find((x) => x.id === c.id); o.deadline = c.to; o.updatedAt = new Date().toISOString(); }
+    commitmentStart = input.now;
+    try { localStorage.setItem(COMMIT_KEY, JSON.stringify({ start: input.now.toISOString(), deadlines: Object.fromEntries(orders.filter((o) => input.orders.some((s) => s.id === o.id)).map((o) => [o.id, o.deadline instanceof Date ? o.deadline.toISOString() : o.deadline])) })); } catch { /* no storage */ }
+    return clone({ applied: true, productionStart: input.now.toISOString(), changed });
   }
   if (p === '/planner/whatif' || p === '/planner/whatif/move') { // the What-if page: the same engine module as the server, on the loaded orders, read-only
     const asked = method === 'GET' ? q.get('scope') : body?.scope; const scope = asked === 'all' || asked === 'commitment' ? asked : 'demo';
-    const input = { orders: scopeOrders(clone(orders), scope), settings: demoSettings(), now: scopeNow(scope, demoSettings(), new Date()) };
-    if (p === '/planner/whatif') return clone(overview(input));
+    const input = { ...scopeInputs(clone(orders), scope, demoSettings(), new Date()), settings: demoSettings() };
+    if (p === '/planner/whatif') return clone({ ...overview(input), applied: scope === 'commitment' && commitmentApplied({ orders: clone(orders), scenario: input, storedStart: commitmentStart }) });
     return clone(runMove({ ...input, orderId: body?.orderId, deadline: body?.deadline }));
   }
   if (method === 'POST' && p === '/planner/simulate') return simulateWithRealEngine(body);

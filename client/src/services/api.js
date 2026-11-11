@@ -65,6 +65,8 @@ export const getPlanner = (params) => request('GET', `/planner${qs(params)}`);
 // an ordinary updateOrder().
 export const getWhatIf = (scope) => request('GET', `/planner/whatif?scope=${scope}`);
 export const simulateMove = (scope, body) => request('POST', '/planner/whatif/move', { scope, ...body });
+// Apply to Plan: the owner's explicit approval of the What-if scenario (the only call that changes anything; simulating never does).
+export const applyWhatIf = (scope) => request('POST', '/planner/whatif/apply', { scope });
 export const simulatePlanner = (payload) => request('POST', '/planner/simulate', payload);
 
 // Payments. Nothing here marks money as received on its own: records start as "pending" until the owner confirms them.
@@ -90,7 +92,7 @@ async function sendImage(method, path, file, { live = false } = {}) {
 }
 export async function recordPayment(payment, file) {
   const rec = await request('POST', '/payments', DEMO_MODE ? { payment, file } : payment);
-  if (file && !DEMO_MODE) { try { return await sendImage('POST', `/payments/${rec.id}/proof`, file); } catch (e) { e.message = `The payment was saved, but the screenshot could not be attached: ${e.message}`; e.saved = rec; throw e; } }
+  if (file && !DEMO_MODE && !rec.proof && rec.reconciled !== 'already_recorded') { try { return { ...(await sendImage('POST', `/payments/${rec.id}/proof`, file)), ...(rec.reconciled ? { reconciled: rec.reconciled } : {}) }; } catch (e) { e.message = `The payment was saved, but the screenshot could not be attached: ${e.message}`; e.saved = rec; throw e; } }
   return rec;
 }
 export const uploadPaymentProof = (id, file) => sendImage('POST', `/payments/${encodeURIComponent(id)}/proof`, file);

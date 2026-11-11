@@ -1,7 +1,7 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, ChevronDown, FlaskConical, Pencil, Info, PenLine, Clock, Plus, RotateCcw } from 'lucide-react';
 import useAsync from '../hooks/useAsync.js';
-import { getConversations, getWhatIf, simulateMove, updateOrder, createOrder, simulatePlanner } from '../services/api.js';
+import { getConversations, getWhatIf, simulateMove, applyWhatIf, updateOrder, createOrder, simulatePlanner } from '../services/api.js';
 import { summarise } from '../utils/homeSummary.js';
 import { formatDayInTz, formatInTz, formatMinutes, formatTimeInTz, isDemoOrder, STATUS_LABEL, formatLongInTz, fromLocalInput, toLocalInput } from '../utils/format.js';
 import { useId, useState, useEffect, useRef } from 'react';
@@ -681,7 +681,7 @@ export function WhatIfPage({ scope }) {
       <section className="wx" aria-label="What if">
         <header className="wx-head"><h1>What <em>if?</em></h1><p>Conversa doesn't just accept orders. It understands whether you can keep your promises.</p></header>
         {d.cards.length === 0 ? <StateMessage message="There are no open orders with a deadline and a preparation time to check yet." />
-          : <Commitment d={d} scope={scope} />}
+          : <Commitment d={d} scope={scope} onApplied={q.reload} />}
         {d.needsDetails.length > 0 && <p className="wx-none" role="status">{d.needsDetails.length} {d.needsDetails.length === 1 ? 'order has' : 'orders have'} no deadline or preparation time and {d.needsDetails.length === 1 ? 'is' : 'are'} not included.</p>}
       </section>
     </>
@@ -731,7 +731,9 @@ function ConflictBrief({ cards, after, tz, T }) {
 
 // What if? Run simulation asks the scheduler (through the same Move a deadline simulation, with the deadline left as it is) for the production sequence of
 // the real orders. Nothing is saved: the simulation runs on copies.
-function Commitment({ d, scope }) {
+function Commitment({ d, scope, onApplied }) {
+  const navigate = useNavigate();
+  const [applying, setApplying] = useState(false); const [applyErr, setApplyErr] = useState(null); const [justApplied, setJustApplied] = useState(false);
   const tz = d.timezone; const T = (iso) => stamp(iso, tz);
   const group = conflictGroup(d.cards); const target = group?.[0] ?? d.cards[0];
   const [res, setRes] = useState(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
@@ -740,6 +742,12 @@ function Commitment({ d, scope }) {
     try { setRes(await simulateMove(scope, { orderId: target.id, deadline: target.deadline })); } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const ok = res?.ok ? res : null;
+  const applied = d.applied || justApplied; // this scenario is already the Plan (persisted), or was applied a moment ago
+  // The owner's approval: the only thing on this page that changes anything. Simulating never does.
+  const apply = async () => {
+    setApplying(true); setApplyErr(null);
+    try { await applyWhatIf(scope); setJustApplied(true); onApplied?.(); } catch (e) { setApplyErr(e.message); } finally { setApplying(false); }
+  };
   const after = ok?.after.cards ?? null;
   const inGroup = (c) => group?.some((g) => g.id === c.id);
   const others = after ? after.filter((c) => !inGroup(c)) : [];
@@ -764,6 +772,7 @@ function Commitment({ d, scope }) {
         <button type="button" className="btn btn-primary btn-run" onClick={run} disabled={busy || Boolean(ok)}>{busy ? 'Simulating…' : ok ? 'Simulation complete' : <>Run simulation <ArrowRight size={16} aria-hidden="true" /></>}</button>
         {ok && <button type="button" className="btn" onClick={() => setRes(null)}>Start over</button>}
       </div>
+      {applied && !ok && <p className="wx-applied" role="status"><b>This commitment is applied to your Plan.</b> <button type="button" className="wx-link" onClick={() => navigate('/plan')}>Open Plan →</button></p>}
       {res && !res.ok && <p className="wx-none" role="alert">{res.message}</p>}
       {err && <p className="wx-none" role="alert">{err}</p>}
       <AnimatePresence>
@@ -778,8 +787,16 @@ function Commitment({ d, scope }) {
                 <p>{others.some((c) => c.risk === 'high') ? `${others.filter((c) => c.risk === 'high').map((c) => c.customerName).join(', ')} would be late.` : `${others.map((c) => c.customerName).join(', ')} stay on schedule.`}</p></article>
               <article className={`wxs-ans is-${withEarliest ? 'warn' : 'ok'}`}><h3>Earliest realistic delivery</h3>
                 {withEarliest ? <><b>{T(withEarliest.earliest.deadline)}</b><p>For {withEarliest.customerName}, from the actual production schedule.</p></> : <><b>No change needed</b><p>Every requested delivery time can be kept.</p></>}</article>
-              <article className={`wxs-ans is-${ok.after.feasible ? 'ok' : 'bad'}`}><h3>Is the schedule feasible?</h3><b>{ok.after.feasible ? 'Yes' : 'No'}</b><p>{ok.after.feasible ? 'Nothing was changed: this is a proposal, not your saved plan.' : `${ok.after.conflicts} ${ok.after.conflicts === 1 ? 'order still misses' : 'orders still miss'} its deadline.`}</p></article>
+              <article className={`wxs-ans is-${ok.after.feasible ? 'ok' : 'bad'}`}><h3>Is the schedule feasible?</h3><b>{ok.after.feasible ? 'Yes' : 'No'}</b><p>{ok.after.feasible ? (applied ? 'Applied: this is now your production plan.' : 'Nothing was changed: this is a proposal, not your saved plan.') : `${ok.after.conflicts} ${ok.after.conflicts === 1 ? 'order still misses' : 'orders still miss'} its deadline.`}</p></article>
             </div>
+            {ok.after.feasible && (
+              <div className={`wx-apply${applied ? ' is-done' : ''}`}>
+                {applied ? <><p><b>Applied to your Plan.</b> The Plan now follows this sequence, and the delivery times above are your orders' deadlines.</p><button type="button" className="btn btn-primary" onClick={() => navigate('/plan')}>Open Plan <ArrowRight size={16} aria-hidden="true" /></button></>
+                  : <><p><b>Make this your plan?</b> This is only a proposal. Apply to Plan sets these delivery times on the orders and makes this sequence your production plan. Nothing else about the orders changes.</p>
+                    <button type="button" className="btn btn-primary" onClick={apply} disabled={applying}>{applying ? 'Applying…' : 'Apply to Plan'}</button></>}
+                {applyErr && <p className="wx-none" role="alert">{applyErr}</p>}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
