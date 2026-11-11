@@ -118,7 +118,9 @@ export default function Payments() {
           <PaymentDetail row={selected} initialAct={openAct} refreshing={status === 'loading'} onChanged={refresh} onRecord={(orderId) => { setOpenId(null); setRecording({ orderId }); }} onProof={setProof} />
         </PaymentModal>
       )}
-      {recording && data && <RecordPayment rows={rows} orderId={recording.orderId} onClose={() => setRecording(null)} onSaved={() => { const o = recording.orderId; setRecording(null); setNotice('Payment saved. Anything not marked as received is waiting for your verification.'); refresh(); if (o) setOpenId(o); }} />}
+      {recording && data && <RecordPayment rows={rows} orderId={recording.orderId} onClose={() => setRecording(null)} onSaved={(rec) => { const o = rec?.orderId ?? recording.orderId; setRecording(null);
+        setNotice(rec?.reconciled === 'already_recorded' ? 'This transaction was already recorded, so no new payment was added.' : rec?.reconciled ? 'This transaction was already recorded. The existing payment was updated with your screenshot instead of adding a second one.'
+          : 'Payment saved. Anything not marked as received is waiting for your verification.'); refresh(); if (o) setOpenId(o); }} />}
       {assigning && data && <AssignPayment payment={assigning} rows={rows} onClose={() => setAssigning(null)} onSaved={(o) => { setAssigning(null); setNotice(o ? 'Payment assigned. It is still waiting for your verification.' : 'Payment rejected.'); refresh(); if (o) setOpenId(o); }} />}
       {verifying && <VerifyPayment payment={verifying.p} row={verifying.row} onClose={() => setVerifyId(null)} onChanged={() => { setNotice('Payment updated.'); refresh(); }} onProof={setProof} />}
       {proof && <ProofViewer src={proof} onClose={() => setProof(null)} />}

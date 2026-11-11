@@ -399,7 +399,7 @@ export function RecordPayment({ rows, orderId, onClose, onSaved }) {
     if (file && file.size > 5 * 1024 * 1024) x.file = 'The image is larger than 5 MB.';
     setErr(x); if (Object.keys(x).length) return;
     setBusy(true);
-    try { if (f.received && !x0) saveReviewer(f.reviewer.trim()); await recordPayment(body, file); onSaved(); }
+    try { if (f.received && !x0) saveReviewer(f.reviewer.trim()); const rec = await recordPayment(body, file); onSaved(rec); }
     catch (er) { if (er.saved) { onSaved(); return; } const m = {}; (er.details ?? []).forEach((d) => { m[d.field] = d.message; }); setErr(m); setFail(er); setBusy(false); }
   }
   const fe = (k) => err[k] && <span className="field-note error" role="alert">{err[k]}</span>;

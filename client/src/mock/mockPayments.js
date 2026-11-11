@@ -5,7 +5,7 @@ import { buildDemoPayments, demoVision, demoOwnerReview, DEMO_OWNER } from '../.
 import { demoMessageMeta } from './data.js';
 import {
   buildLedger, summarize, orderPaymentStatus, toPublic, txnKey, findDuplicate, duplicateError,
-  validatePaymentInput, validateConfirm, validateReject, validateRefund, findDuplicateProof, duplicateProofError, decideDetectedPayment,
+  validatePaymentInput, findSameTransaction, reconcilePatch, validateConfirm, validateReject, validateRefund, findDuplicateProof, duplicateProofError, decideDetectedPayment,
 } from '../../../server/services/paymentLogic.js';
 import { parsePaymentText, toReading } from '../../../server/services/paymentExtraction.js';
 
@@ -75,17 +75,33 @@ export function createMockPayments(getOrders, getConversations = () => []) {
   };
   const withUrl = (p) => (p.proof ? { ...p, proof: { ...p.proof, url: p.proof.url ?? proofs.get(p.id) } } : p);
   const pub = (p) => toPublic(withUrl(p));
+  const finish = (rec) => { const mode = rec.__mode; delete rec.__mode; delete rec.__attach; return { ...pub(rec), ...(mode ? { reconciled: mode } : {}) }; }; // a record updated in place says so
   const detail = (p) => { const o = orderOf(p.orderId); return { payment: pub(p), order: { id: o.id, customerName: o.customerName, item: o.item, quantity: o.quantity, price: o.price ?? null, status: o.status }, summary: summarize(o, ofOrder(o.id)) }; };
 
   function create(body, { source = 'manual', extra = {}, proofHash = null } = {}) {
     const { value, details } = validatePaymentInput(body);
     if (details.length) throw invalid(details);
     if (value.extraction && source === 'manual') { source = 'screenshot_upload'; extra = { extraction: { ...value.extraction, extractedAt: iso(new Date()) }, ...extra }; }
-    const dupProof = findDuplicateProof(list, proofHash);
-    if (dupProof) throw duplicateProofError(dupProof);
     const order = need(value.orderId);
     if (order.status === 'cancelled') throw new ApiError(409, 'CONFLICT', 'This order is cancelled, so no payment can be recorded against it.');
     const key = txnKey(value.transactionId);
+    // The same rule as the server: a screenshot of a transaction already on this order updates that record instead of adding a second one.
+    const evidence = Boolean(value.extraction || proofHash || source !== 'manual');
+    const same = evidence ? findSameTransaction(ofOrder(order.id), { key, amount: value.amount, method: value.method, paidAt: value.paidAt }, order) : null;
+    const dupProof = findDuplicateProof(list, proofHash);
+    if (dupProof && (!same || dupProof.id !== same.id)) throw duplicateProofError(dupProof);
+    if (same) {
+      const ownImage = Boolean(dupProof);
+      const patch = reconcilePatch(same, { amount: value.amount, transactionId: value.transactionId, paidAt: iso(value.paidAt), extraction: extra.extraction, hasProof: Boolean(proofHash) && !ownImage });
+      Object.assign(same, patch.set);
+      same.history.push(hist(ownImage || patch.mode === 'already_recorded' ? 'duplicate_ignored' : patch.attachProof ? 'proof_added' : 'updated', null, ownImage ? 'The same screenshot was uploaded again; no new record was made.' : patch.note));
+      if (patch.attachProof) same.proofHash = proofHash;
+      if (!same.conversationId && extra.conversationId) same.conversationId = extra.conversationId;
+      if (!same.messageId && extra.messageId) same.messageId = extra.messageId;
+      sync(order.id);
+      same.__attach = patch.attachProof; same.__mode = ownImage ? 'already_recorded' : patch.mode;
+      return same;
+    }
     const dup = findDuplicate(list, key);
     if (dup) throw duplicateError(dup);
     const sum = summarize(order, ofOrder(order.id));
@@ -124,8 +140,8 @@ export function createMockPayments(getOrders, getConversations = () => []) {
     const paid = x.paymentDate && new Date(x.paymentDate) <= new Date() ? x.paymentDate : undefined;
     const rec = create({ orderId: body.orderId, amount: x.amount, method: x.paymentMethod ?? 'other', transactionId: x.transactionId ?? undefined, paidAt: paid, notes: 'Read from a screenshot. Not yet verified.' },
       { source: 'chat_screenshot', proofHash: hash, extra: { conversationId: body.conversationId ?? null, messageId: body.messageId ?? null, extraction: { method: 'vision', confidence: x.extractionConfidence, needsReview: true, issues: x.warnings ?? [], recipient: x.recipientDetails ?? null, model: x.model ?? null, extractedAt: iso(new Date()) } } });
-    proofs.set(rec.id, await dataUrl(body.file)); rec.proof = { contentType: body.file.type, size: body.file.size }; rec.history.push(hist('proof_added', null, 'Screenshot kept as received.'));
-    return { payment: pub(rec), extraction: x };
+    if (rec.__attach !== false) { proofs.set(rec.id, await dataUrl(body.file)); rec.proof = { contentType: body.file.type, size: body.file.size }; if (rec.__mode === undefined) rec.history.push(hist('proof_added', null, 'Screenshot kept as received.')); }
+    return { payment: finish(rec), extraction: x };
   }
 
   return async function handle(method, p, body = {}) {
@@ -139,8 +155,8 @@ export function createMockPayments(getOrders, getConversations = () => []) {
       if (body.file) checkFile(body.file);
       const hash = body.file ? await sha256(body.file) : null;
       const rec = create(body.payment ?? body, { proofHash: hash });
-      if (body.file) { proofs.set(rec.id, await dataUrl(body.file)); rec.proof = { contentType: body.file.type, size: body.file.size }; rec.history.push(hist('proof_added', null, 'Screenshot attached.')); }
-      return pub(rec);
+      if (body.file && rec.__attach !== false) { proofs.set(rec.id, await dataUrl(body.file)); rec.proof = { contentType: body.file.type, size: body.file.size }; if (rec.__mode === undefined) rec.history.push(hist('proof_added', null, 'Screenshot attached.')); }
+      return finish(rec);
     }
     if (method === 'POST' && p === '/payments/check-proof') { // demo mode: is this exact image already filed in the browser's demo data?
       checkFile(body.file);
