@@ -249,7 +249,8 @@ test('chat text becomes a pending record linked to the chat\'s order; non-paymen
   assert.equal(r.json.payment.extraction.needsReview, true); assert.equal(r.json.payment.transactionId, '612398765431');
   assert.equal((await orderOf(o.id)).paymentStatus, 'pending'); // a claim: the order is NOT paid
   const again = await call('POST', '/payments/extract', { message: 'Paid ₹1000 via GPay, UPI Ref No: 612398765431', orderId: o.id });
-  assert.equal(again.status, 409); // the same screenshot text twice is the same transaction
+  assert.equal(again.status, 200); assert.equal(again.json.payment.id, r.json.payment.id); assert.ok(again.json.payment.reconciled); // the same transaction twice is ONE record, not an error and not a second one
+  assert.equal((await call('GET', `/payments/${r.json.payment.id}`)).status, 200); assert.equal((await call('GET', '/payments')).json.rows.find((x) => x.orderId === o.id).payments.length, 1);
   const no = await call('POST', '/payments/extract', { message: 'Can you make it taller?', orderId: o.id });
   assert.equal(no.status, 200); assert.equal(no.json.payment, null);
   const unlinked = await call('POST', '/payments/extract', { message: 'Paid ₹500 UPI Ref 712398765431' });
@@ -461,4 +462,50 @@ test('CORS: both local Vite origins pass preflight with the headers uploads need
     const real = await fetch(url, { method: 'POST', headers: { Origin: 'http://localhost:5174', 'Content-Type': 'image/png' }, body: Buffer.alloc(8) });
     assert.equal(real.headers.get('access-control-allow-origin'), 'http://localhost:5174'); // error responses carry it too, so the browser can show them
   } finally { srv.close(); }
+});
+
+// ---- One real transaction, one payment record -------------------------------------------------------------------------------------------
+import { findSameTransaction, reconcilePatch } from '../services/paymentLogic.js';
+const aanya = { id: 'o1', price: 1800 };
+const T0 = '2026-11-04T05:00:00.000Z';
+const existing = (o = {}) => pay({ id: 'p1', amount: 1800, method: 'upi', status: 'confirmed', transactionId: '426118830517', paidAt: T0, proof: { contentType: 'image/png' }, ...o });
+const into = (payments, i, order = aanya) => findSameTransaction(payments, { key: txnKey(i.transactionId), amount: i.amount, method: i.method ?? 'upi', paidAt: i.paidAt ?? T0 }, order)?.id ?? null;
+
+test('same transaction reference = the same payment, whatever else the screenshot says', () => {
+  assert.equal(into([existing()], { transactionId: '4261 1883 0517', amount: 1800 }), 'p1');
+  assert.equal(into([existing()], { transactionId: '426118830517', amount: 1750 }), 'p1');
+});
+
+test('different references are separate transactions and are never merged, even for the same amount', () => {
+  assert.equal(into([existing()], { transactionId: '999000111222', amount: 1800 }), null);
+  assert.equal(into([existing({ status: 'pending', proof: null })], { transactionId: '999000111222', amount: 1800 }), null);
+});
+
+test('a screenshot with no readable reference joins the existing payment when a second one could not be real', () => {
+  // Aanya's order is 1800 and 1800 is already recorded: another 1800 would overpay it, so it is the same payment.
+  assert.equal(into([existing()], { transactionId: null, amount: 1800 }), 'p1');
+  assert.equal(into([existing({ transactionId: null })], { transactionId: null, amount: 1800 }), 'p1');
+});
+
+test('a genuinely separate instalment is NOT merged: same amount, but the order is not yet fully paid and the first already has its screenshot', () => {
+  assert.equal(into([existing({ amount: 1800 })], { transactionId: null, amount: 1800 }, { id: 'o1', price: 4000 }), null);
+  assert.equal(into([existing()], { transactionId: null, amount: 900 }), null); // another amount
+  assert.equal(into([existing({ method: 'bank_transfer' })], { transactionId: null, amount: 1800, method: 'upi' }), null); // another method
+  assert.equal(into([existing()], { transactionId: null, amount: 1800, paidAt: '2026-11-07T05:00:00.000Z' }), null); // days apart
+  assert.equal(into([existing({ status: 'rejected' })], { transactionId: null, amount: 1800 }), null); // a rejected claim is not a payment
+});
+
+test('a pending payment that has no screenshot yet takes the first one, even when the order is not fully paid', () => {
+  assert.equal(into([existing({ status: 'pending', proof: null, transactionId: null })], { transactionId: null, amount: 1800 }, { id: 'o1', price: 4000 }), 'p1');
+});
+
+test('reconcile: a confirmed payment only gains the screenshot; a pending one takes the newer reading and stays pending', () => {
+  const c = reconcilePatch(existing({ proof: null }), { amount: 1750, transactionId: '426118830517', hasProof: true, extraction: { confidence: 0.9 } });
+  assert.deepEqual([c.mode, c.attachProof, c.set], ['proof_added', true, {}]); // amount and status of a confirmed payment never move
+  const c2 = reconcilePatch(existing({ transactionId: null }), { amount: 1800, transactionId: '426118830517', hasProof: false });
+  assert.equal(c2.set.transactionId, '426118830517'); assert.equal(c2.mode, 'proof_added'); // a reference it lacked is filled in
+  const p = reconcilePatch(existing({ status: 'pending', amount: 1700, proof: null }), { amount: 1800, transactionId: '426118830517', hasProof: true, extraction: { confidence: 0.9 }, paidAt: T0 });
+  assert.deepEqual([p.mode, p.set.amount, p.set.transactionId, 'status' in p.set], ['updated', 1800, '426118830517', false]);
+  const again = reconcilePatch(existing(), { amount: 1800, transactionId: '426118830517', hasProof: true });
+  assert.deepEqual([again.mode, again.attachProof], ['already_recorded', false]); // it already has a screenshot: nothing to add
 });

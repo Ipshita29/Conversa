@@ -126,3 +126,57 @@ test('3 November: the order of the slots comes from the data, not the page: swap
   assert.deepEqual(ov.cards.slice(0, 2).map((c) => [c.customerName, hm(c.start), hm(c.end)]), [['Aanya Sharma', '09:00', '10:00'], ['Kartik Singh', '10:00', '10:30']]);
   assert.equal(ov.feasible, true);
 });
+
+// ---- The "commitment" scenario: the five demo orders with their requested times on one production day, on copies --------------------------------
+import { scopeInputs } from '../services/whatIf.js';
+import { zonedParts } from '../utils/timezone.js';
+
+test('commitment scenario: the same sequence at every hour of two weeks and in several timezones, on a working day, with the orders untouched', () => {
+  const t0 = Date.parse('2026-10-19T00:00:00Z');
+  for (const timezone of ['Asia/Kolkata', 'America/New_York', 'Pacific/Auckland']) {
+    const s = { ...settings, timezone };
+    for (let i = 0; i < 24 * 14; i += 3) {
+      const now = new Date(t0 + i * 3600000);
+      const live = buildScenarioOrders(s, now).map((o, k) => ({ ...o, id: `d${k}` })); // orders as the app holds them (any deadlines)
+      const snapshot = JSON.stringify(live);
+      const input = scopeInputs(live, 'commitment', s, now);
+      const ov = overview({ ...input, settings: s });
+      const label = `${now.toISOString()} ${timezone}`;
+      assert.ok(input.now >= now, `planning starts in the future: ${label}`);
+      const p = zonedParts(input.now, timezone);
+      assert.deepEqual([p.hour, p.minute], [9, 0], label);
+      assert.ok(s.workingDays.includes(new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()), `working day ${label}`);
+      assert.deepEqual(ov.cards.map((c) => c.customerName), ['Kartik Singh', 'Aanya Sharma', 'Rohan Mehta', 'Neha Sharma', 'Meera Iyer'], label);
+      assert.deepEqual(ov.cards.map((c) => c.prepTimeMinutes), [30, 60, 60, 30, 60]);
+      assert.equal(ov.cards[0].deadline, ov.cards[1].deadline, `Aanya and Kartik share a deadline ${label}`);
+      assert.equal(ov.feasible, true, label);
+      assert.equal(JSON.stringify(live), snapshot, 'the orders were not modified');
+    }
+  }
+});
+
+test('the other scopes are unchanged: demo = the five orders on the real clock, all = everything', () => {
+  const orders = demo(); const real = { id: 'r', customerName: 'Real', item: 'x', notes: null, status: 'pending' };
+  const now = new Date('2026-11-05T05:00:00Z');
+  const d = scopeInputs([...orders, real], 'demo', settings, now); const all = scopeInputs([...orders, real], 'all', settings, now);
+  assert.equal(d.orders.length, 5); assert.equal(all.orders.length, 6); assert.equal(d.now, now); assert.equal(all.now, now);
+});
+
+import { commitmentChanges, commitmentApplied, planNow } from '../services/whatIf.js';
+
+test('Apply to Plan helpers: only deadlines differ, applied is recognised, and the plan starts at the applied morning while it is ahead', () => {
+  const s = { ...settings, timezone: 'Asia/Kolkata' };
+  const now = new Date('2026-11-11T12:30:00Z'); // 18:00 IST on a Wednesday: the scenario is for Thursday morning
+  const stored = demo().map((o) => ({ ...o, deadline: new Date(now.getTime() + 40 * 3600000) })); // whatever the orders hold today
+  const scenario = scopeInputs(stored, 'commitment', s, now);
+  const changes = commitmentChanges(stored, scenario.orders);
+  assert.equal(changes.length, 5); assert.ok(changes.every((c) => Object.keys(c).sort().join() === 'customerName,from,id,to'));
+  assert.equal(commitmentApplied({ orders: stored, scenario, storedStart: null }), false);
+  const applied = stored.map((o) => ({ ...o, deadline: scenario.orders.find((x) => x.id === o.id).deadline }));
+  assert.equal(commitmentApplied({ orders: applied, scenario, storedStart: scenario.now }), true);
+  assert.equal(commitmentApplied({ orders: applied, scenario, storedStart: new Date(scenario.now.getTime() + 86400000) }), false); // another day's commitment
+  assert.equal(commitmentChanges(applied, scenario.orders).length, 0);
+  assert.equal(planNow(now, scenario.now).getTime(), scenario.now.getTime()); // production starts at the applied morning
+  assert.equal(planNow(new Date(scenario.now.getTime() + 60000), scenario.now).getTime(), scenario.now.getTime() + 60000); // once it has passed, the real clock
+  assert.equal(planNow(now, null), now);
+});

@@ -256,32 +256,122 @@ const callApi = async (method, p, body) => { const r = await fetch(base + p, { m
 const hm = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 const demoSnap = async () => JSON.stringify((await Order.find({ notes: /^\[DEMO\]/ }).sort({ customerName: 1 }).lean()).map((o) => [o.customerName, o.item, o.prepTimeMinutes, String(o.deadline), o.status, String(o.updatedAt)]));
 
-test('What if? plans the demo orders from the real clock: the overdue order is the only conflict, and every order gets a realistic earliest deadline', { skip }, async () => {
+test('What if? on the production day: the scheduler (not the page) puts Kartik first, then Aanya, Rohan, the rush order and Meera, and the day is feasible', { skip }, async () => {
   const before = await demoSnap();
   const ov = (await get('/planner/whatif?scope=commitment')).json;
-  assert.equal(ov.cards.length, 5);
-  assert.deepEqual(ov.cards.filter((c) => c.kind === 'deadline_passed').map((c) => c.customerName), ['Meera Iyer']); // the one promise that has already passed
-  assert.equal(ov.conflicts, 1); assert.equal(ov.feasible, false);
-  assert.ok(ov.cards.every((c) => c.ordered && Date.parse(c.ordered) < Date.parse(c.deadline))); // placed before it is due, on every card
+  assert.deepEqual(ov.cards.map((c) => [c.customerName, hm(c.start), hm(c.end)]), [
+    ['Kartik Singh', '09:00', '09:30'], ['Aanya Sharma', '09:30', '10:30'], ['Rohan Mehta', '10:30', '11:30'], ['Neha Sharma', '11:30', '12:00'], ['Meera Iyer', '12:00', '13:00']]);
+  assert.equal(ov.feasible, true); assert.equal(ov.conflicts, 0);
+  const by = Object.fromEntries(ov.cards.map((c) => [c.customerName, c]));
+  assert.equal(by['Aanya Sharma'].deadline, by['Kartik Singh'].deadline); // the same requested time
+  assert.deepEqual([by['Kartik Singh'].prepTimeMinutes, by['Aanya Sharma'].prepTimeMinutes], [30, 60]);
+  assert.deepEqual([hm(by['Aanya Sharma'].deadline), hm(by['Meera Iyer'].deadline)], ['10:30', '14:00']);
+  assert.ok(ov.cards.every((c) => c.ordered && Date.parse(c.ordered) < Date.parse(c.deadline)));
   assert.ok(ov.cards.every((c) => c.earliest && Date.parse(c.earliest.deadline) > Date.parse(ov.now)));
-  assert.equal(await demoSnap(), before); // nothing saved
+  assert.equal(await demoSnap(), before); // nothing saved: the scenario deadlines live on copies
 });
 
-test('What if? finds genuinely infeasible changes, never saves a simulation, and Apply changes the record and the Plan', { skip }, async () => {
+test('What if? Run simulation keeps both 10:30 promises; infeasible changes are caught, simulations are never saved, and Apply changes the record', { skip }, async () => {
   const before = await demoSnap();
   const ov = (await get('/planner/whatif?scope=commitment')).json;
-  const neha = ov.cards.find((c) => c.customerName === 'Neha Sharma');
-  const planDeadline = async () => (await get('/planner?days=30')).json.schedule.find((e) => e.orderId === neha.id).deadline;
-  // A deadline one minute from now cannot be met by a 30-minute order that is not started.
-  const tooTight = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: new Date(Date.now() + 60000).toISOString() })).json;
-  assert.deepEqual([tooTight.ok, tooTight.after.late.length > 0], [true, true]);
-  // The earliest deadline the scheduler offers is possible: nothing becomes late because of it.
-  const sim = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: neha.earliest.deadline })).json;
-  assert.deepEqual([sim.proposal.status, sim.after.late.length], ['unapplied', 0]);
+  const neha = ov.cards.find((c) => c.customerName === 'Neha Sharma'); const aanya = ov.cards.find((c) => c.customerName === 'Aanya Sharma');
+  const run = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: aanya.id, deadline: aanya.deadline })).json; // Run simulation: the deadline left as it is
+  assert.deepEqual([run.ok, run.after.feasible, run.after.late.length, run.affected.length], [true, true, 0, 0]);
+  const shift = (c, minutes) => new Date(Date.parse(c.deadline) + minutes * 60000).toISOString();
+  // The rush order due at 10:30 as a third request: 30 + 60 + 30 minutes cannot all finish between 9:00 and 10:30.
+  const tooTight = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: shift(neha, -90) })).json;
+  assert.deepEqual([tooTight.ok, tooTight.after.feasible, tooTight.after.late.length > 0], [true, false, true]);
+  // 11:00 is possible, and it pushes Rohan to finish at 12:00 instead of 11:30.
+  const sim = (await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: neha.id, deadline: shift(neha, -60) })).json;
+  assert.deepEqual([sim.proposal.status, sim.after.feasible, sim.affected.map((x) => x.customerName)], ['unapplied', true, ['Rohan Mehta']]);
   assert.equal(await demoSnap(), before); // previewing saved nothing
-  assert.equal(await planDeadline(), neha.deadline);
+  const planned = async () => (await get('/planner?days=30')).json.schedule.find((e) => e.orderId === neha.id).deadline;
+  const original = await planned();
   try {
     assert.equal((await callApi('PATCH', `/orders/${neha.id}`, { deadline: sim.proposal.to })).status, 200);
-    assert.equal(await planDeadline(), sim.proposal.to); // the Plan follows the confirmed change
-  } finally { await callApi('PATCH', `/orders/${neha.id}`, { deadline: neha.deadline }); }
+    assert.equal(await planned(), sim.proposal.to); // the Plan follows the confirmed change
+  } finally { await callApi('PATCH', `/orders/${neha.id}`, { deadline: original }); }
+});
+
+// ---- What-if -> Plan: the owner's approval is the only thing that changes the plan --------------------------------------------------------------
+import Settings from '../models/Settings.js';
+const planSeq = async () => (await get('/planner?days=30')).json.days.flatMap((d) => d.orders).sort((a, b) => Date.parse(a.start) - Date.parse(b.start)).map((e) => [e.customerName, hm(e.start), hm(e.end)]); // the plan as the Plan page reads it
+const snapshotOf = async () => JSON.stringify({
+  orders: (await Order.find({ notes: /^\[DEMO\]/ }).sort({ customerName: 1 }).lean()).map((o) => [o.customerName, o.item, o.quantity, o.price, o.status, o.paymentStatus, o.prepTimeMinutes, o.customisation]),
+  payments: (await Payment.find().sort({ _id: 1 }).lean()).map((p) => [String(p.order), p.amount, p.status, p.method, p.transactionId, p.proof?.file ?? null]),
+  messages: await Message.countDocuments(),
+});
+
+test('Apply to Plan: simulating changes nothing; applying makes the scenario the persisted plan; payments, orders and messages stay as they were', { skip }, async () => {
+  const deadlines = async () => JSON.stringify((await Order.find({ notes: /^\[DEMO\]/ }).sort({ customerName: 1 }).lean()).map((o) => [o.customerName, String(o.deadline)]));
+  const before = { plan: await planSeq(), deadlines: await deadlines(), rest: await snapshotOf() };
+  try {
+    // 1. Running simulations (any number) never touches the plan.
+    const ov = (await get('/planner/whatif?scope=commitment')).json;
+    assert.equal(ov.applied, false);
+    const aanya = ov.cards.find((c) => c.customerName === 'Aanya Sharma');
+    await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: aanya.id, deadline: aanya.deadline });
+    await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: aanya.id, deadline: aanya.deadline });
+    assert.deepEqual(await planSeq(), before.plan); assert.equal(await deadlines(), before.deadlines);
+    assert.equal(await Settings.countDocuments({ commitmentStart: { $ne: null } }), 0);
+    // 2. Only the explicit scope is accepted.
+    assert.equal((await callApi('POST', '/planner/whatif/apply', { scope: 'demo' })).status, 422);
+    // 3. Apply to Plan: the plan is now the scenario's sequence, from the persisted records.
+    const r = await callApi('POST', '/planner/whatif/apply', { scope: 'commitment' });
+    assert.equal(r.status, 200); assert.equal(r.json.applied, true); assert.ok(r.json.changed.length > 0);
+    const expected = [['Kartik Singh', '09:00', '09:30'], ['Aanya Sharma', '09:30', '10:30'], ['Rohan Mehta', '10:30', '11:30'], ['Neha Sharma', '11:30', '12:00'], ['Meera Iyer', '12:00', '13:00']];
+    assert.deepEqual((await planSeq()).slice(0, 5), expected);
+    assert.equal((await get('/planner/whatif?scope=commitment')).json.applied, true);
+    assert.equal((await Settings.findOne({ key: 'default' }).lean()).commitmentStart.toISOString(), r.json.productionStart);
+    // 4. Everything except the deadlines (and the stored production start) is exactly as it was.
+    assert.equal(await snapshotOf(), before.rest);
+    // 5. A new simulation after applying proposes, and does not move the plan; applying again is a no-op.
+    await callApi('POST', '/planner/whatif/move', { scope: 'commitment', orderId: aanya.id, deadline: new Date(Date.parse(aanya.deadline) + 3600000).toISOString() });
+    assert.deepEqual((await planSeq()).slice(0, 5), expected);
+    assert.equal((await callApi('POST', '/planner/whatif/apply', { scope: 'commitment' })).json.changed.length, 0);
+  } finally {
+    for (const o of await Order.find({ notes: /^\[DEMO\]/ })) { const was = JSON.parse(before.deadlines).find(([n]) => n === o.customerName); if (was) await Order.updateOne({ _id: o._id }, { $set: { deadline: new Date(was[1]) } }); }
+    await Settings.updateOne({ key: 'default' }, { $set: { commitmentStart: null } });
+  }
+  assert.deepEqual(await planSeq(), before.plan); // restored
+});
+
+// ---- Aanya's screenshot, uploaded again: her payment is updated, never duplicated ----------------------------------------------------------------
+import * as paySvc from '../services/paymentService.js';
+const aanyaPayments = async () => { const o = await Order.findOne({ customerName: 'Aanya Sharma', notes: /^\[DEMO\]/ }); return { order: o, list: await Payment.find({ order: o._id }).lean() }; };
+const shot = (name) => fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'assets', 'demo', name));
+
+test('Aanya (order #1001): the same or another screenshot of her payment updates her record; a genuinely different payment is its own record', { skip }, async () => {
+  const { order, list: before } = await aanyaPayments();
+  const mine = before.filter((p) => p.kind !== 'refund' && p.status !== 'rejected');
+  assert.equal(mine.length, 1); const original = mine[0]; // the demo gives her exactly one payment
+  const count = async () => (await aanyaPayments()).list.length;
+  const input = (over = {}) => ({ orderId: String(order._id), amount: 1800, method: 'upi', transactionId: '426118830517', ...over });
+  const png = shot('pay-aanya-upi.png');
+  const variant = Buffer.concat([png, Buffer.from('\0\0')]); // a different file (re-saved screenshot): another hash, same picture
+  try {
+    // 1. The very same screenshot again: nothing new, the existing record comes back.
+    const same = await paySvc.createPayment(input(), { source: 'screenshot_upload', proofBuffer: png });
+    assert.equal(same.id, String(original._id)); assert.equal(same.reconciled, 'already_recorded'); assert.equal(await count(), 1);
+    // 2. A re-saved screenshot whose reference could not be read: same payment (it would overpay the order), screenshot already there, so nothing changes but history.
+    const blurry = await paySvc.createPayment(input({ transactionId: undefined }), { source: 'screenshot_upload', proofBuffer: variant });
+    assert.equal(blurry.id, String(original._id)); assert.equal(blurry.reconciled, 'already_recorded'); assert.equal(await count(), 1);
+    // 3. Her record keeps its id, order, amount, reference, screenshot and (owner-verified) status.
+    const now = (await aanyaPayments()).list[0];
+    assert.deepEqual([String(now._id), String(now.order), now.amount, now.transactionId, now.status, now.proof.file], [String(original._id), String(order._id), original.amount, original.transactionId, original.status, original.proof.file]);
+    // 4. A different transaction reference is a separate transaction: it gets its own record (still only a claim) and hers is untouched.
+    const other = await paySvc.createPayment(input({ transactionId: '555000999111' }), { source: 'screenshot_upload', proofBuffer: Buffer.concat([png, Buffer.from('\0\0\0')]) });
+    assert.notEqual(other.id, String(original._id)); assert.equal(other.reconciled, undefined); assert.equal(other.status, 'pending'); assert.equal(await count(), 2);
+    assert.equal((await Payment.findById(original._id).lean()).status, original.status);
+    // 5. Another amount with no readable reference is not hers either (it would not overpay and her first payment already has its screenshot).
+    const part = await paySvc.createPayment(input({ transactionId: undefined, amount: 900 }), { source: 'screenshot_upload', proofBuffer: Buffer.concat([png, Buffer.from('\0\0\0\0')]) });
+    assert.notEqual(part.id, String(original._id)); assert.equal(await count(), 3);
+    // 6. Uploading that other transaction's screenshot again updates ITS record, still without touching hers.
+    const again = await paySvc.createPayment(input({ transactionId: '555000999111' }), { source: 'screenshot_upload', proofBuffer: Buffer.concat([png, Buffer.from('\0\0\0\0\0')]) });
+    assert.equal(again.id, other.id); assert.ok(again.reconciled); assert.equal(await count(), 3);
+  } finally {
+    await Payment.deleteMany({ order: order._id, _id: { $ne: original._id } });
+    await paySvc.syncOrder(String(order._id));
+  }
+  assert.equal(await count(), 1);
 });
