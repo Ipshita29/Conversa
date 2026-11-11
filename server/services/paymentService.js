@@ -11,7 +11,7 @@ import Message from '../models/Message.js';
 import { saveProof, readProof, deleteProof, checkImage, hashImage } from './proofStore.js';
 import { parsePaymentText, validateVisionOutput, toReading as pureReading, VISION_PROMPT } from './paymentExtraction.js';
 import {
-  buildLedger, summarize, orderPaymentStatus, toPublic, txnKey, findDuplicate, duplicateError,
+  buildLedger, summarize, orderPaymentStatus, toPublic, txnKey, findDuplicate, duplicateError, findSameTransaction, reconcilePatch,
   validatePaymentInput, validateConfirm, validateReject, validateRefund, duplicateProofError,
 } from './paymentLogic.js';
 
@@ -99,6 +99,11 @@ export async function createPayment(body, { source = 'manual', proofBuffer = nul
   if (order.status === 'cancelled') throw new ApiError(409, 'CONFLICT', 'This order is cancelled, so no payment can be recorded against it.');
   const existing = await paymentsOf(order.id);
   const key = txnKey(value.transactionId);
+  // A screenshot (or a payment read from one) of a transaction already on this order updates that record instead of adding a second one.
+  // Typing the same reference in by hand, with nothing to add to the record, is still refused as a duplicate.
+  const evidence = Boolean(value.extraction || proofBuffer || proofMeta || source !== 'manual');
+  const same = evidence ? findSameTransaction(existing, { key, amount: value.amount, method: value.method, paidAt: value.paidAt }, order.toJSON()) : null;
+  if (same) return reconcileInto(same, order, { value, key, proofBuffer, proofMeta, proofName, extra });
   const dup = findDuplicate(existing, key);
   if (dup) throw duplicateError(dup);
   const sum = summarize(order.toJSON(), existing);
@@ -124,6 +129,25 @@ export async function createPayment(body, { source = 'manual', proofBuffer = nul
     await syncOrder(order.id);
     return toPublic(forLogic(plain(doc)));
   } catch (e) { if (proof && !proofMeta) await deleteProof(proof); throw e; }
+}
+
+// The screenshot describes a payment that is already on the order: update that record (same id, same order) and say so. Never creates a record.
+async function reconcileInto(same, order, { value, key, proofBuffer, proofMeta, proofName, extra }) {
+  const doc = await loadPayment(same.id);
+  const hash = proofMeta?.sha256 ?? (proofBuffer ? hashImage(proofBuffer) : null);
+  const owner = hash ? await existingByHash(hash) : null;
+  if (owner && owner.id !== same.id) throw duplicateProofError(owner); // that picture belongs to a different payment
+  const ownImage = Boolean(hash) && doc.proofHash === hash; // the very same picture again: nothing to add
+  const patch = reconcilePatch(same, { amount: value.amount, transactionId: value.transactionId, paidAt: value.paidAt, extraction: value.extraction ? { ...value.extraction, extractedAt: new Date() } : extra.extraction, hasProof: Boolean(proofBuffer || proofMeta) && !ownImage });
+  const note = ownImage ? 'The same screenshot was uploaded again; no new record was made.' : patch.note;
+  const mode = ownImage ? 'already_recorded' : patch.mode;
+  const set = { ...patch.set };
+  if (patch.attachProof) { const proof = proofMeta ?? await saveProof(proofBuffer, proofName); Object.assign(set, { proof, proofHash: proof.sha256 }); }
+  if (!doc.conversation && extra.conversation) set.conversation = extra.conversation;
+  if (!doc.messageId && extra.messageId) set.messageId = extra.messageId;
+  await Payment.updateOne({ _id: doc._id }, { $set: set, $push: { history: historyEntry(mode === 'already_recorded' ? 'duplicate_ignored' : patch.attachProof ? 'proof_added' : 'updated', null, note) } });
+  await syncOrder(order.id);
+  return { ...toPublic(forLogic(plain(await loadPayment(same.id)))), reconciled: mode };
 }
 
 export async function attachProof(id, buf, name) {

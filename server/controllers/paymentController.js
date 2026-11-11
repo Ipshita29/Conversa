@@ -9,7 +9,7 @@ export const ledger = asyncHandler(async (req, res) => res.json(await svc.getLed
 export const get = asyncHandler(async (req, res) => res.json(await svc.getPayment(req.params.id)));
 export const create = asyncHandler(async (req, res) => {
   const payment = await svc.createPayment(req.body);
-  res.status(201).location(`/api/payments/${payment.id}`).json(payment);
+  res.status(payment.reconciled ? 200 : 201).location(`/api/payments/${payment.id}`).json(payment); // 200: it was already on file and was updated, not created
 });
 export const confirm = asyncHandler(async (req, res) => res.json(await svc.confirmPayment(req.params.id, req.body)));
 export const reject = asyncHandler(async (req, res) => res.json(await svc.rejectPayment(req.params.id, req.body)));
@@ -33,14 +33,14 @@ export const proof = asyncHandler(async (req, res) => {
 export const extractText = asyncHandler(async (req, res) => {
   if (!isPlainObject(req.body)) throw validationError([{ field: 'body', message: 'Request body must be a JSON object.' }]);
   const r = await svc.extractFromText(req.body);
-  res.status(r.payment ? 201 : 200).json(r);
+  res.status(r.payment && !r.payment.reconciled ? 201 : 200).json(r);
 });
 
 export const extractImage = asyncHandler(async (req, res) => {
   const buf = body(req);
   if (!buf) throw new ApiError(415, 'UNSUPPORTED_MEDIA', 'Send the screenshot as the request body (Content-Type image/png, image/jpeg or image/webp).');
   const r = await svc.extractFromImage({ buffer: buf, orderId: req.query.orderId, conversationId: req.query.conversationId, fileName: req.get('X-File-Name') });
-  res.status(201).json(r);
+  res.status(r.payment?.reconciled ? 200 : 201).json(r);
 });
 
 // Reading only (nothing is saved or stored); used when the orders live in the browser's demo data rather than in this database.

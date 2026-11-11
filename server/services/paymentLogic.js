@@ -174,6 +174,53 @@ export function findDuplicate(payments, key, exceptId = null) {
 }
 export const duplicateError = (dup) => new ApiError(409, 'DUPLICATE_TRANSACTION', `Transaction ${dup.transactionId} is already recorded${dup.orderId ? ` (payment ${dup.id})` : ''}. Open that payment instead of adding it twice.`, [{ field: 'transactionId', message: 'This transaction ID has already been recorded.' }]);
 
+// ---- One real transaction, one payment record ------------------------------------------------------------------------------------------
+// A screenshot (or a payment read from one) that describes a transaction already on the order must not become a second record. These two pure
+// functions decide that, and describe the update; the server and the browser demo both use them.
+const SAME_PAYMENT_WINDOW_MS = 24 * 3600000; // two payments of the same amount and method this close together, with no reference to tell them apart
+
+// The existing payment of `order` that `incoming` ({ key, amount, method, paidAt }) is the SAME transaction as, or null.
+//   Same transaction reference                    -> the same transaction, always.
+//   Different references                          -> separate transactions, always (never merged, whatever the amounts).
+//   A reference missing on either side            -> the same transaction only when the amount and method match, the times are close, AND
+//                                                    the existing record can still use the evidence (it has no screenshot, or it is still pending),
+//                                                    or a second payment of that amount could not be real (it would pay the order more than its total).
+export function findSameTransaction(payments, { key = null, amount, method, paidAt = null }, order = null) {
+  const live = payments.filter((p) => p.status !== 'rejected' && p.kind !== 'refund');
+  if (key) { const hit = live.find((p) => txnKey(p.transactionId) === key); if (hit) return hit; }
+  const total = typeof order?.price === 'number' ? order.price : null;
+  const committed = round2(live.filter((p) => p.method !== 'cod' || p.status === 'confirmed').reduce((n, p) => n + p.amount, 0));
+  const overpays = total !== null && committed + amount - total > EPS;
+  return live.find((p) => {
+    const theirs = txnKey(p.transactionId);
+    if (key && theirs) return false; // both have a reference and they differ
+    if (Math.abs(p.amount - amount) >= EPS || p.method !== method) return false;
+    if (p.paidAt && paidAt && Math.abs(new Date(p.paidAt) - new Date(paidAt)) > SAME_PAYMENT_WINDOW_MS) return false;
+    return !p.proof || p.status === 'pending' || overpays;
+  }) ?? null;
+}
+
+// What a screenshot of an already-recorded transaction changes on that record. The owner's confirmation is never undone and a confirmed amount is
+// never rewritten: a confirmed payment only gains the screenshot (and a reference it lacked). A pending one takes the newer reading and stays pending,
+// since only the owner verifies. Returns { set, mode, note, attachProof }; `mode` is what the owner is told.
+export function reconcilePatch(existing, incoming) {
+  const confirmed = existing.status === 'confirmed';
+  const wantsProof = Boolean(incoming.hasProof) && !existing.proof;
+  const set = {};
+  if (!existing.transactionId && incoming.transactionId) Object.assign(set, { transactionId: incoming.transactionId, transactionKey: txnKey(incoming.transactionId) });
+  if (!confirmed) {
+    if (incoming.transactionId) Object.assign(set, { transactionId: incoming.transactionId, transactionKey: txnKey(incoming.transactionId) });
+    if (incoming.amount !== undefined && Math.abs(existing.amount - incoming.amount) >= EPS) set.amount = round2(incoming.amount);
+    if (incoming.paidAt && !existing.paidAt) set.paidAt = incoming.paidAt;
+    if (incoming.extraction) set.extraction = incoming.extraction;
+  }
+  const changed = Object.keys(set).length > 0;
+  const mode = wantsProof || changed ? (confirmed ? 'proof_added' : 'updated') : 'already_recorded';
+  const note = mode === 'already_recorded' ? 'The same transaction was uploaded again; no new record was made.'
+    : confirmed ? 'The screenshot was added to this payment. Nothing about the confirmation changed.' : 'Updated from a screenshot of the same transaction. Still waiting for the owner to verify.';
+  return { set, mode, note, attachProof: wantsProof };
+}
+
 // Confirm: the owner has checked their account and says this money arrived. Nothing is verified with a bank.
 export function validateConfirm(body, payment, summary) {
   const details = [];
