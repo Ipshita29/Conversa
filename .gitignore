@@ -4,3 +4,8 @@ dist/
 build/
 .DS_Store
 *.log
+.env.*
+!.env.example
+*.local
+server/storage/
+.vercel

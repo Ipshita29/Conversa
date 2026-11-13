@@ -65,3 +65,8 @@ React + Vite · Express · MongoDB · Groq (AI drafting) · Lenis (smooth scroll
 - Completion times aren't recorded, so on-time delivery rate can't be measured yet.
 
 More detail: [`docs/project-summary.md`](docs/project-summary.md) (pitch and demo script) · [`docs/api-contract.md`](docs/api-contract.md) (API)
+
+
+## Going live with WhatsApp and Instagram
+
+See [docs/production-setup.md](docs/production-setup.md): hosting, the Meta setup only you can do, environment variables, webhook URLs and the verification checklist. Without Meta credentials the app runs in demo mode and nothing needs configuring.
