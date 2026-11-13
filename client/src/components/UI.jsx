@@ -84,11 +84,12 @@ function DepthBackdrop({ leaving }) {
 const openModals = []; // newest last: Escape closes only the top one, so a picture opened over an order closes alone
 export function Modal({ title, subtitle, onClose, children, variant }) {
   const wide = variant === 'wide';
+  const glass = variant === 'glass'; // the translucent order-details overlay: it fades out like the wide one
   const reduced = usePrefersReducedMotion();
   const [leaving, setLeaving] = useState(false);
   const closeRef = useRef(onClose); closeRef.current = onClose; // the stack position is kept when the parent re-renders with a new onClose
   const close = useRef(() => {});
-  close.current = () => { if (!wide || reduced) { closeRef.current(); return; } if (!leaving) { setLeaving(true); setTimeout(() => closeRef.current(), 220); } };
+  close.current = () => { if (!(wide || glass) || reduced) { closeRef.current(); return; } if (!leaving) { setLeaving(true); setTimeout(() => closeRef.current(), 220); } };
   useEffect(() => {
     const me = {};
     openModals.push(me);
@@ -98,7 +99,7 @@ export function Modal({ title, subtitle, onClose, children, variant }) {
   }, []);
 
   return (
-    <div className={`modal-backdrop${variant === 'lightbox' ? ' is-lightbox' : ''}${wide ? ' is-wide' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
+    <div className={`modal-backdrop${variant === 'lightbox' ? ' is-lightbox' : ''}${wide ? ' is-wide' : ''}${glass ? ' is-glass' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
       {wide && !reduced && <DepthBackdrop leaving={leaving} />}
       <div className="modal" data-lenis-prevent role="dialog" aria-modal="true" aria-label={title}>
         <header className="modal-header">
