@@ -5,14 +5,16 @@ import { getPayments } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { formatMoney } from '../utils/format.js';
 import { DemoBadge, StateMessage } from '../components/UI.jsx';
-import { PaymentModal, AssignPayment, Kpis, METHOD, PaymentDetail, ProofViewer, RecordPayment, VerifyPayment, detectedFrom, recStatus } from '../components/Payments.jsx';
+import { PaymentModal, AssignPayment, METHOD, PaymentDetail, ProofThumb, ProofViewer, RecordPayment, VerifyPayment, detectedFrom } from '../components/Payments.jsx';
 import '../css/Payments.css';
 
 const shortId = (id) => `#${/^[a-f\d]{24}$/i.test(String(id)) ? String(id).slice(-6).toUpperCase() : String(id).replace(/^ord_/, '')}`;
 const TABS = [['all', 'All'], ['verify', 'To verify'], ['verified', 'Verified']];
-// One list item per payment record (plus an order with no payment yet), each with the single state its action column shows.
-const kindOf = (p) => (p.kind === 'refund' ? 'refund' : p.method === 'cod' && p.status === 'pending' ? 'cod' : { verified: 'verified', rejected: 'rejected' }[recStatus(p)] ?? 'verify');
-const KIND = { verified: 'Verified', rejected: 'Rejected', refund: 'Refunded', cod: 'COD', due: 'Due' };
+// What the owner is told about an order's money. One row per ORDER: the payments inside it (an advance by UPI and the balance on delivery, say) are
+// the parts of one story, not separate rows.
+const STATE = { paid: ['Paid', 'is-paid'], partial: ['Partly paid', 'is-partial'], verification_pending: ['Awaiting verification', 'is-pending'], cod: ['Cash on delivery', 'is-cod'], due: ['Due', 'is-due'] };
+const live = (r) => r.payments.filter((p) => p.kind !== 'refund' && p.status !== 'rejected');
+const toVerifyOf = (r) => r.payments.find((p) => p.status === 'pending' && p.kind !== 'refund' && p.method !== 'cod') ?? null; // the claim waiting for the owner (cash on delivery is confirmed when collected)
 
 export default function Payments() {
   const [params, setParams] = useSearchParams();
@@ -46,32 +48,34 @@ export default function Payments() {
 
   const rows = data?.rows ?? [];
   const list = useMemo(() => {
-    const out = rows.flatMap((r) => (r.payments.length === 0
-      ? [{ key: `due-${r.orderId}`, row: r, p: null, kind: 'due', amount: r.total }]
-      : r.payments.map((p) => ({ key: p.id, row: r, p, kind: kindOf(p), amount: p.amount }))));
-    for (const p of data ? detectedFrom(data) : []) out.push({ key: p.id, row: { customerName: p.customerName, item: p.item, orderId: null }, p, kind: kindOf(p), amount: p.amount });
+    const out = rows.map((r) => ({ key: r.orderId, row: r, pending: toVerifyOf(r), shot: (toVerifyOf(r) ?? r.payments.find((p) => p.proof) ?? {}).proof ?? null }));
+    for (const p of data ? detectedFrom(data) : []) out.push({ key: p.id, unmatched: p, row: { customerName: p.customerName, orderId: null, payments: [p] }, shot: p.proof ?? null }); // a screenshot that could not be matched to an order: flagged, never attached to a guess
     return out;
   }, [rows, data]);
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return list.filter((i) => (tab === 'all' || (tab === 'verify' ? i.kind === 'verify' : i.kind === 'verified'))
-      && (!t || `${i.row.customerName} ${i.row.item ?? ''} ${i.row.orderId ?? ''} ${i.p?.transactionId ?? ''}`.toLowerCase().includes(t)));
+    return list.filter((i) => (tab === 'all' || (tab === 'verify' ? Boolean(i.pending || i.unmatched) : i.row.paid > 0))
+      && (!t || `${i.row.customerName} ${i.row.item ?? ''} ${i.row.orderId ?? ''} ${i.row.payments.map((p) => p.transactionId ?? '').join(' ')}`.toLowerCase().includes(t)));
   }, [list, q, tab]);
-  const verifying = (() => { if (!verifyId) return null; const i = list.find((x) => x.p?.id === verifyId); return i ? { p: i.p, row: i.row } : null; })();
+  const verifying = (() => { if (!verifyId) return null; const r = rows.find((x) => x.payments.some((p) => p.id === verifyId)); const p = r?.payments.find((x) => x.id === verifyId); return p ? { p, row: r } : null; })();
   const selected = rows.find((r) => r.orderId === openId) ?? null;
   const refresh = () => reload();
-  const openDetected = (p, act = null) => { if (!p.orderId) { setAssigning(p); return; } setOpenAct(act ? { id: p.id, kind: act } : null); setOpenId(p.orderId); };
-  const verify = (i) => { if (i.row.orderId) setVerifyId(i.p.id); else setAssigning(i.p); };
+  const openDetected = (p, act = null) => {
+    if (!p.orderId) { setAssigning(p); return; }
+    if (p.status === 'pending' && p.method !== 'cod' && p.kind !== 'refund') { setVerifyId(p.id); return; } // a claim to check: straight to the screenshot and Verify / Reject
+    setOpenAct(act ? { id: p.id, kind: act } : null); setOpenId(p.orderId);
+  };
+  // Clicking a row opens what needs deciding: the claim to verify, the unmatched screenshot, or the order's payments.
+  const openRow = (i) => { if (i.unmatched) setAssigning(i.unmatched); else if (i.pending) setVerifyId(i.pending.id); else setOpenId(i.row.orderId); };
 
+  const k = data?.kpis;
   return (
     <section className="page payments">
-      <header className="pm-head">
-        <div>
-          <h1>Payments</h1>
-        </div>
-        <div className="pm-head-actions">
+      <header className="pmx-head">
+        <div><h1>Payments</h1><p>Keep track of what your customers have paid.</p></div>
+        <div className="pmx-head-actions">
           <DemoBadge />
-          <button type="button" className="btn btn-primary pm-add" onClick={() => setRecording({ orderId: null })} disabled={!data}><Plus size={16} aria-hidden="true" /> Record payment</button>
+          <button type="button" className="btn btn-primary pmx-add" onClick={() => setRecording({ orderId: null })} disabled={!data}><Plus size={16} aria-hidden="true" /> Record payment</button>
         </div>
       </header>
 
@@ -81,33 +85,43 @@ export default function Payments() {
 
       {data && (
         <>
-          <Kpis kpis={data.kpis} />
-          <div className="pm-bar" role="search">
-            <div className="pm-tabs" role="tablist" aria-label="Show">
-              {TABS.map(([k, v]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'is-on' : ''} onClick={() => setTab(k)}>{v}</button>)}
+          <dl className="pmx-overview" aria-label="Payment overview">
+            <div><dt>Total received</dt><dd>{formatMoney(k.totalReceived)}</dd><small>Confirmed by you</small></div>
+            <div className={k.toVerify ? 'is-amber' : ''}><dt>Awaiting verification</dt><dd>{formatMoney(k.toVerifyAmount)}</dd><small>{k.toVerify ? `${k.toVerify} ${k.toVerify === 1 ? 'payment' : 'payments'} to check` : 'Nothing waiting'}</small></div>
+            <div><dt>Outstanding balance</dt><dd>{formatMoney(k.outstanding)}</dd><small>{k.outstandingOrders} {k.outstandingOrders === 1 ? 'order' : 'orders'}{k.codDue > 0 ? ` · ${formatMoney(k.codDue)} on delivery` : ''}</small></div>
+          </dl>
+
+          <div className="pmx-bar" role="search">
+            <div className="pmx-tabs" role="tablist" aria-label="Show">
+              {TABS.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'is-on' : ''} onClick={() => setTab(key)}>{label}</button>)}
             </div>
-            <label className="pm-search"><Search size={15} aria-hidden="true" /><span className="sr-only">Search payments</span><input type="search" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} /></label>
+            <label className="pmx-search"><Search size={15} aria-hidden="true" /><span className="sr-only">Search payments</span><input type="search" placeholder="Search customer, order or reference" value={q} onChange={(e) => setQ(e.target.value)} /></label>
           </div>
 
           {rows.length === 0 ? <StateMessage message="No orders yet, so there are no payments to show." />
-            : shown.length === 0 ? <StateMessage message="No payments match." /> : (
-              <div className="pm-list" role="table" aria-label="Payments">
-                <div className="pm-li pm-li-head" role="row">
-                  <span role="columnheader">Customer &amp; order</span><span role="columnheader" className="r">Amount</span><span role="columnheader">Method</span><span role="columnheader">Status</span><span role="columnheader" className="r">Action</span>
-                </div>
-                {shown.map((i) => (
-                  <div key={i.key} role="row" className="pm-li">
-                    <span role="cell" className="pm-who">
-                      {i.row.orderId ? <button type="button" className="pm-name" onClick={() => setOpenId(i.row.orderId)}>{i.row.customerName}</button> : <b>{i.row.customerName}</b>}
-                      <small>{i.row.item ?? 'Not matched to an order'}{i.row.orderId ? ` · ${shortId(i.row.orderId)}` : ''}</small>
-                    </span>
-                    <span role="cell" className="r pm-amt" data-l="Amount">{i.amount === null || i.amount === undefined ? '—' : formatMoney(i.amount)}</span>
-                    <span role="cell" data-l="Method">{i.p ? METHOD[i.p.method] ?? i.p.method : '—'}</span>
-                    <span role="cell" className={`pm-st is-${i.kind}`} data-l="Status">{i.kind === 'verify' ? 'Awaiting verification' : KIND[i.kind]}</span>
-                    <span role="cell" className="r">{i.kind === 'verify' && <button type="button" className="btn btn-primary btn-sm" onClick={() => verify(i)}>Verify</button>}</span>
-                  </div>
-                ))}
-              </div>
+            : shown.length === 0 ? <StateMessage message={tab === 'all' && !q ? 'No payments yet.' : 'No payments match.'} /> : (
+              <ul className="pmx-list" aria-label="Payments">
+                {shown.map((i) => {
+                  const r = i.row; const money = live(r);
+                  const methods = [...new Set(money.map((p) => METHOD[p.method] ?? p.method))];
+                  const [label, tone] = i.unmatched ? ['Needs review', 'is-pending'] : (i.pending ? STATE.verification_pending : STATE[r.status] ?? [r.status, '']);
+                  const parts = i.unmatched ? [`${formatMoney(i.unmatched.amount)} claimed`] : [r.paid > 0 && `${formatMoney(r.paid)} received`, r.pending > 0 && `${formatMoney(r.pending)} awaiting verification`, r.codDue > 0 && `${formatMoney(r.codDue)} on delivery`].filter(Boolean);
+                  return (
+                    <li key={i.key} className="pmx-row">
+                      <button type="button" className="pmx-main" onClick={() => openRow(i)} aria-label={`${r.customerName}${r.orderId ? `, order ${shortId(r.orderId)}` : ''}`}>
+                        <span className="pmx-who"><b>{r.customerName}</b><small>{r.orderId ? <>{shortId(r.orderId)} · {r.item}{r.quantity > 1 && !new RegExp(`\\b${r.quantity}\\b`).test(r.item) ? ` × ${r.quantity}` : ''}</> : 'Not matched to an order yet'}</small></span>
+                        <span className="pmx-money"><b>{i.unmatched ? formatMoney(i.unmatched.amount) : r.total === null ? '—' : formatMoney(r.total)}</b><small>{parts.join(' · ') || (r.total === null ? 'Not priced' : 'Nothing paid yet')}</small></span>
+                        <span className="pmx-method">{methods.length ? methods.join(' · ') : '—'}</span>
+                        <span className={`pmx-status ${tone}`}>{label}</span>
+                      </button>
+                      <span className="pmx-side">
+                        {i.shot ? <ProofThumb proof={i.shot} onOpen={setProof} /> : <span className="pmx-noshot" title="No screenshot">—</span>}
+                        {(i.pending || i.unmatched) ? <button type="button" className="btn btn-primary btn-sm" onClick={() => openRow(i)}>{i.unmatched ? 'Match' : 'Verify'}</button> : <span className="pmx-spacer" />}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           <p className="pm-foot">Verifying records what you checked in your own bank or UPI account; Conversa never contacts a bank.</p>
         </>
@@ -122,7 +136,7 @@ export default function Payments() {
         setNotice(rec?.reconciled === 'already_recorded' ? 'This transaction was already recorded, so no new payment was added.' : rec?.reconciled ? 'This transaction was already recorded. The existing payment was updated with your screenshot instead of adding a second one.'
           : 'Payment saved. Anything not marked as received is waiting for your verification.'); refresh(); if (o) setOpenId(o); }} />}
       {assigning && data && <AssignPayment payment={assigning} rows={rows} onClose={() => setAssigning(null)} onSaved={(o) => { setAssigning(null); setNotice(o ? 'Payment assigned. It is still waiting for your verification.' : 'Payment rejected.'); refresh(); if (o) setOpenId(o); }} />}
-      {verifying && <VerifyPayment payment={verifying.p} row={verifying.row} onClose={() => setVerifyId(null)} onChanged={() => { setNotice('Payment updated.'); refresh(); }} onProof={setProof} />}
+      {verifying && <VerifyPayment payment={verifying.p} row={verifying.row} onDetails={() => { setVerifyId(null); setOpenId(verifying.row.orderId); }} onClose={() => setVerifyId(null)} onChanged={() => { setNotice('Payment updated.'); refresh(); }} onProof={setProof} />}
       {proof && <ProofViewer src={proof} onClose={() => setProof(null)} />}
     </section>
   );

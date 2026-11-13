@@ -560,7 +560,7 @@ export function ActionList({ items, onAct }) {
 
 // ---- Verify payment: the one compact view behind the single Verify button --------------------------------------------------
 // Shows what was claimed and the screenshot large; nothing is recorded until Confirm or Reject is submitted in the form below.
-export function VerifyPayment({ payment: p, row, onClose, onChanged, onProof }) {
+export function VerifyPayment({ payment: p, row, onClose, onChanged, onProof, onDetails }) {
   const [act, setAct] = useState(null); // null | 'confirm' | 'reject'
   const src = proofSrc(p.proof);
   const done = () => { onChanged(); onClose(); };
@@ -577,6 +577,7 @@ export function VerifyPayment({ payment: p, row, onClose, onChanged, onProof }) 
           <div><dt>Method</dt><dd>{METHOD[p.method] ?? p.method}</dd></div>
           <div><dt>Transaction ID</dt><dd>{p.transactionId ?? '—'}</dd></div>
           <div><dt>Payment date</dt><dd>{p.paidAt ? when(p.paidAt) : '—'}</dd></div>
+          <div><dt>Status</dt><dd>{p.status === 'confirmed' ? 'Verified' : p.status === 'rejected' ? 'Rejected' : 'Awaiting verification'}</dd></div>
         </dl>
         {!act && (
           <div className="form-actions">
@@ -584,6 +585,7 @@ export function VerifyPayment({ payment: p, row, onClose, onChanged, onProof }) 
             <button type="button" className="btn btn-primary" onClick={() => setAct('confirm')}>Confirm payment</button>
           </div>
         )}
+        {!act && onDetails && <p className="pm-fine"><button type="button" className="pm-link" onClick={onDetails}>All payments on this order</button></p>}
         {act === 'confirm' && <ConfirmPanel payment={p} row={row} onProof={onProof} onCancel={() => setAct(null)} onDone={done} />}
         {act === 'reject' && <RejectPanel payment={p} onCancel={() => setAct(null)} onDone={done} />}
       </div>
