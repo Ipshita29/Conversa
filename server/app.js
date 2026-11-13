@@ -28,11 +28,15 @@ export function createApp() {
     exposedHeaders: ['Location', 'Retry-After'],
     maxAge: 600,
   };
+  if (config.nodeEnv === 'production') { // HTTPS is terminated by the host; tell browsers to keep using it
+    app.use((req, res, next) => { res.set({ 'Strict-Transport-Security': 'max-age=15552000; includeSubDomains', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' }); next(); });
+  }
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
   // The raw body is kept for webhook signature verification.
   app.use(express.json({ limit: '256kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 
+  // Health check for the host / uptime monitor. No secrets, no customer data: only whether the pieces are up.
   app.get('/api/health', (req, res) => res.json({ status: 'ok', database: isDbReady() ? 'connected' : 'disconnected' }));
   app.use('/api/dashboard', dashboard);
   app.use('/api/analytics', analytics);
