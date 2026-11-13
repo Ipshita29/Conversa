@@ -375,3 +375,39 @@ test('Aanya (order #1001): the same or another screenshot of her payment updates
   }
   assert.equal(await count(), 1);
 });
+
+// ---- Payments page: one row per order, the screenshot is the one from Messages, verify / reject update in place ----------------------------------------
+test('Payments: one ledger row per order, every screenshot is the exact file from its Messages conversation, and nothing is left unmatched', { skip }, async () => {
+  const led = await ledger(); const orders = await Order.find({ notes: /^\[DEMO\]/ }).lean();
+  assert.equal(led.rows.length, await Order.countDocuments()); // an order is never listed twice, whatever payments it holds
+  assert.equal(new Set(led.rows.map((r) => r.orderId)).size, led.rows.length);
+  assert.deepEqual(led.rows.filter((r) => r.customerName === 'Neha Sharma').map((r) => r.orderId).length, 1); // her advance and her balance are two payments inside ONE order
+  assert.equal(orders.length, 5);
+  for (const p of await Payment.find({ messageId: { $ne: null }, 'proof.file': { $ne: null } }).lean()) {
+    const msg = await Message.findById(p.messageId).lean();
+    assert.equal(p.proof.file, msg.attachment.file, `${p.messageId}: the payment shows the very file the customer sent`); // same stored file, no copy, no stand-in image
+    assert.equal(p.proof.sha256, msg.attachment.sha256);
+  }
+});
+
+test('Payments: verifying and rejecting update the existing record (same id, same count), never add one', { skip }, async () => {
+  const waiting = (await Payment.find({ status: 'pending', kind: 'payment', method: { $ne: 'cod' }, order: { $ne: null } }).sort({ _id: 1 }).lean()).map((p) => ({ id: String(p._id), orderId: String(p.order), amount: p.amount, transactionId: p.transactionId }));
+  assert.ok(waiting.length >= 2, 'the demo has claims waiting for the owner');
+  const [kartik, meera] = waiting;
+  const countOf = async () => Payment.countDocuments();
+  const before = await countOf(); const snap = async (id) => JSON.stringify(await Payment.findById(id).lean());
+  const kBefore = await Payment.findById(kartik.id).lean(); const mBefore = await Payment.findById(meera.id).lean();
+  try {
+    const ok = await post(`/payments/${kartik.id}/confirm`, { amount: kartik.amount, transactionId: kartik.transactionId, reviewer: 'Owner', acknowledged: true });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json)); assert.equal(ok.json.id ?? ok.json.payment?.id, kartik.id);
+    assert.equal((await Payment.findById(kartik.id).lean()).status, 'confirmed'); assert.equal(await countOf(), before);
+    assert.equal((await ledger()).rows.find((r) => r.orderId === kartik.orderId).paid >= kartik.amount, true);
+    const no = await post(`/payments/${meera.id}/reject`, { mode: 'reject', note: 'Screenshot is unreadable', reviewer: 'Owner' });
+    assert.equal(no.status, 200); assert.equal((await Payment.findById(meera.id).lean()).status, 'rejected'); assert.equal(await countOf(), before);
+    assert.equal((await ledger()).rows.length, await Order.countDocuments()); // still one row per order
+  } finally {
+    for (const [b, id] of [[kBefore, kartik.id], [mBefore, meera.id]]) await Payment.replaceOne({ _id: id }, b);
+    for (const r of [kartik, meera]) await paySvc.syncOrder(String(r.orderId));
+  }
+  assert.equal(await snap(kartik.id), JSON.stringify(kBefore)); assert.equal(await countOf(), before);
+});
