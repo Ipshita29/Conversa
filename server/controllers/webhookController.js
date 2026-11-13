@@ -2,7 +2,8 @@ import { asyncHandler, ApiError } from '../utils/errors.js';
 import { config } from '../config/env.js';
 import { channels } from '../services/integrations/index.js';
 import { verifyMetaSignature } from '../utils/signature.js';
-import { ingest } from '../services/messageService.js';
+import { ingest, applyStatuses } from '../services/messageService.js';
+import { log } from '../utils/log.js';
 
 const svcFor = (req) => channels[req.params.channel];
 
@@ -22,5 +23,7 @@ export const receive = asyncHandler(async (req, res) => {
   if (!config.meta.appSecret) throw new ApiError(503, 'INTEGRATION_UNAVAILABLE', 'META_APP_SECRET is not configured; webhooks are disabled.');
   if (!verifyMetaSignature(req.rawBody, req.get('X-Hub-Signature-256'), config.meta.appSecret)) throw new ApiError(401, 'INVALID_SIGNATURE', 'Invalid webhook signature.');
   const result = await ingest(svc.parseWebhook(req.body)); // DB errors -> 5xx so Meta retries; duplicates are skipped
-  res.status(200).json({ received: true, ...result });
+  const statuses = svc.parseStatuses ? await applyStatuses(svc.parseStatuses(req.body)) : 0; // delivery / read receipts for messages we sent
+  if (result.stored || statuses) log.info('webhook', `${req.params.channel}: ${result.stored} stored, ${result.duplicates} duplicate, ${statuses} status updates`);
+  res.status(200).json({ received: true, ...result, statuses });
 });

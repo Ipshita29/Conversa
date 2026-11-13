@@ -3,14 +3,16 @@ import Order from '../models/Order.js';
 import { asyncHandler, notFound, validationError } from '../utils/errors.js';
 import { isPlainObject } from '../utils/validation.js';
 import { ApiError } from '../utils/errors.js';
+import { datasetOf } from '../utils/dataset.js';
 import { checkImage } from '../services/proofStore.js';
+import { draftFromConversation, createOrderForConversation } from '../services/orderDraftService.js';
 import { sendReply, suggestReplies, summariseOrder, suggestFromContext } from '../services/replyService.js';
 import { addAttachment, extractMessagePayment, getAttachmentFile, listConversations, updateConversation } from '../services/messageService.js';
 
 const ID = /^[a-f\d]{24}$/i;
 
 // Proposed addition (not yet in docs/api-contract.md): conversations stored from webhooks (or the demo seed).
-export const list = asyncHandler(async (req, res) => res.json({ items: await listConversations() }));
+export const list = asyncHandler(async (req, res) => res.json({ items: await listConversations(50, datasetOf(req.query.dataset)) }));
 
 // PATCH /api/conversations/:id  body: { read?: true, orderId?: string|null }
 export const patch = asyncHandler(async (req, res) => {
@@ -58,4 +60,12 @@ export const suggestFromBody = asyncHandler(async (req, res) => {
   const c = req.body?.context;
   if (!isPlainObject(c) || !Array.isArray(c.recent)) throw validationError([{ field: 'context', message: 'Send the conversation context.' }]);
   res.json(await suggestFromContext({ customer: c.customer ?? null, channel: c.channel ?? null, recent: c.recent.slice(-8), order: c.order ?? null }));
+});
+
+// POST /api/conversations/:id/draft-order -> the customer's messages read together into ONE editable draft (+ intent, missing fields). Saves nothing.
+export const draftOrder = asyncHandler(async (req, res) => res.json(await draftFromConversation(req.params.id)));
+// POST /api/conversations/:id/orders -> the owner's confirmation: creates the order and links it, once. 409 ORDER_EXISTS returns the existing id.
+export const createOrder = asyncHandler(async (req, res) => {
+  try { res.status(201).json(await createOrderForConversation(req.params.id, req.body ?? {})); }
+  catch (e) { if (e.code === 'ORDER_EXISTS') return res.status(409).json({ error: { code: e.code, message: e.message, details: e.details }, existingOrderId: e.existingOrderId }); throw e; }
 });

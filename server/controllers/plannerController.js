@@ -4,6 +4,7 @@ import { getCommitmentStart, getSettings, setCommitmentStart } from '../services
 import { computePlan, publicPlan, simulate, suggestScenario } from '../services/workloadEngine.js';
 import { zonedTimeToUtc } from '../utils/timezone.js';
 import { isPlainObject } from '../utils/validation.js';
+import { datasetOf, orderFilter } from '../utils/dataset.js';
 import { scopeInputs, overview, runMove, commitmentChanges, commitmentApplied, planNow } from '../services/whatIf.js';
 
 // `from` (YYYY-MM-DD, business timezone) may move the planning start into the future; past dates mean "now".
@@ -26,7 +27,8 @@ function parseRange(src, fail) {
 
 export const getPlanner = asyncHandler(async (req, res) => {
   const { days, from } = parseRange(req.query, badQuery);
-  const [orders, settings] = await Promise.all([Order.find().limit(5000), getSettings()]);
+  const dataset = datasetOf(req.query.dataset); // the Plan shows one data set: demo orders never take capacity from real ones
+  const [orders, settings] = await Promise.all([Order.find(orderFilter(dataset)).limit(5000), getSettings()]);
   const now = planNow(planningStart(from, settings.timezone), await getCommitmentStart()); // an applied What-if commitment starts production at its own morning
   res.json({ ...publicPlan(computePlan({ orders, settings, now, rangeDays: days })), suggestedScenario: suggestScenario({ orders, settings, now, rangeDays: days }) });
 });

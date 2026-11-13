@@ -8,6 +8,9 @@ import { draftFromIncoming, extractFromImage, publicPayment } from './paymentSer
 import { saveProof, readProof } from './proofStore.js';
 import { queueScan, retryScan } from './paymentAutoDetect.js';
 import { downloadMedia } from './integrations/whatsappService.js';
+import { downloadMediaUrl, fetchProfile } from './integrations/instagramService.js';
+import { resolveConfig } from './integrations/credentials.js';
+import { log } from '../utils/log.js';
 import { ApiError, notFound } from '../utils/errors.js';
 
 // Stores normalised inbound messages. The unique (channel, externalId) index makes webhook retries idempotent.
@@ -18,6 +21,10 @@ export async function ingest(messages) {
   for (const m of messages) {
     const conv = await upsertConversation(m);
     try {
+      if (!conv.customerName && m.channel === 'instagram') { // Instagram sends no name with a message: ask for the profile once, where permitted
+        const prof = await fetchProfile(m.contactId, {}, await resolveConfig()).catch(() => null);
+        if (prof?.name) { await Conversation.updateOne({ _id: conv._id, customerName: null }, { $set: { customerName: prof.name } }); conv.customerName = prof.name; }
+      }
       const attachment = await fetchAttachment(m);
       // Every image is checked for a payment in the background. If the picture could not be downloaded, say so instead of staying silent.
       const paymentScan = m.messageType !== 'image' ? null : attachment ? { state: 'processing', at: new Date() } : { state: 'failed', reason: 'The picture could not be downloaded, so it was not checked for a payment.', at: new Date() };
@@ -34,15 +41,17 @@ export async function ingest(messages) {
   return { stored, duplicates };
 }
 
-// A customer's picture (WhatsApp): downloaded with the server's own token and kept like a payment proof. Never fatal.
+// A customer's picture: downloaded with the connected account's own token (WhatsApp media id, or an Instagram CDN link) and kept like a payment proof.
+// Never fatal: the message is stored either way, just without its picture.
 async function fetchAttachment(m) {
   try {
-    if (m.channel !== 'whatsapp' || m.messageType !== 'image' || !m.mediaId) return null;
-    const buf = await downloadMedia(m.mediaId);
+    if (m.messageType !== 'image') return null;
+    const buf = m.channel === 'whatsapp' && m.mediaId ? await downloadMedia(m.mediaId, {}, await resolveConfig())
+      : m.channel === 'instagram' && m.mediaUrl ? await downloadMediaUrl(m.mediaUrl) : null;
     if (!buf) return null;
     const { file, contentType, size, sha256 } = await saveProof(buf, null);
     return { file, contentType, size, sha256 };
-  } catch { return null; }
+  } catch (e) { log.warn('messages', `Could not store a customer's picture: ${e.message}`); return null; }
 }
 
 async function upsertConversation(m, retry = true) {
@@ -59,6 +68,7 @@ const shape = (c, msgs) => ({
   id: String(c._id), channel: c.channel, customerName: c.customerName || `Unknown (${c.contactId})`,
   ...(c.channel === 'whatsapp' ? { phone: c.isDemo ? null : c.contactId } : { handle: c.isDemo ? null : c.contactId }),
   orderId: c.orderId ? String(c.orderId) : null, isDemo: Boolean(c.isDemo),
+  lastInboundAt: [...msgs].reverse().find((m) => m.from === 'customer')?.at ?? null, // Meta only allows free-form replies for 24 hours after this
   unread: msgs.filter((m) => !m.read).length, messages: msgs.slice(-30),
 });
 
@@ -81,15 +91,15 @@ async function messagesByConversation(ids) {
       id: String(m._id), from: m.direction === 'outbound' ? 'business' : 'customer', text: m.text ?? (m.attachment ? null : `[${m.messageType} message — not shown]`), at: m.receivedAt.toISOString(), read: Boolean(m.readAt),
       attachment: m.attachment ? { url: `/conversations/${m.conversation}/messages/${m._id}/attachment`, contentType: m.attachment.contentType } : null,
       scan: scanOf(m),
-      delivery: m.direction === 'outbound' ? (m.delivery ? { mode: m.delivery.mode, state: m.delivery.state } : { mode: 'simulated', state: 'sent' }) : null,
+      delivery: m.direction === 'outbound' ? (m.delivery ? { mode: m.delivery.mode, state: m.delivery.state, error: m.delivery.error ?? null } : { mode: 'simulated', state: 'sent', error: null }) : null,
       payment: m.paymentId ? payBy[String(m.paymentId)] ?? null : null,
     });
   }
   return by;
 }
 
-export async function listConversations(limit = 50) {
-  const convs = await Conversation.find().sort({ lastMessageAt: -1 }).limit(limit).lean();
+export async function listConversations(limit = 50, dataset = 'all') {
+  const convs = await Conversation.find(dataset === 'all' ? {} : { isDemo: dataset === 'demo' ? true : { $ne: true } }).sort({ lastMessageAt: -1 }).limit(limit).lean();
   const by = await messagesByConversation(convs.map((c) => c._id));
   return convs.map((c) => shape(c, by[c._id] ?? []));
 }
@@ -172,4 +182,20 @@ export async function conversationWithMessages(id) {
   if (!conv) throw notFound('Conversation', id);
   const by = await messagesByConversation([conv._id]);
   return { conv, messages: by[conv._id] ?? [] };
+}
+
+// Delivery receipts for messages we sent (WhatsApp statuses, Instagram "seen"). A message only ever moves forward (sent -> delivered -> read); a
+// "failed" receipt is kept unless the customer has already read it. Receipts for messages we do not know (sent elsewhere) are ignored.
+const RANK = { sent: 1, delivered: 2, read: 3 };
+export async function applyStatuses(statuses) {
+  let updated = 0;
+  for (const st of statuses) {
+    const msg = await Message.findOne({ channel: st.channel, externalId: st.externalId, direction: 'outbound' });
+    if (!msg?.delivery) continue;
+    const cur = msg.delivery.state;
+    if (st.status === 'failed' ? cur === 'read' : (RANK[st.status] ?? 0) <= (RANK[cur] ?? 0)) continue;
+    await Message.updateOne({ _id: msg._id }, { $set: { 'delivery.state': st.status, 'delivery.error': st.status === 'failed' ? st.error ?? 'Meta could not deliver this message.' : null, ...(st.status === 'read' ? { readAt: st.at } : {}) } });
+    updated++;
+  }
+  return updated;
 }

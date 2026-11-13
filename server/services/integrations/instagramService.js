@@ -29,7 +29,8 @@ export function verifyChallenge(query, cfg = config) {
   return { ok: false, status: 403 };
 }
 
-// Payload: entry[].messaging[] = { sender:{id}, recipient:{id}, timestamp, message:{mid,text,is_echo?} }.
+// Payload: entry[].messaging[] = { sender:{id}, recipient:{id}, timestamp, message:{mid,text,attachments[],is_echo?} }.
+// A picture arrives as attachments[{ type: 'image', payload: { url } }]; the URL is short-lived and is downloaded on receipt.
 export function parseWebhook(body) {
   const out = [];
   if (!body || body.object !== 'instagram' || !Array.isArray(body.entry)) return out;
@@ -37,14 +38,46 @@ export function parseWebhook(body) {
     for (const ev of entry.messaging ?? []) {
       const m = ev.message;
       if (!m?.mid || !ev.sender?.id || m.is_echo) continue; // ignore our own outgoing messages
+      const image = (m.attachments ?? []).find((a) => a?.type === 'image' && typeof a.payload?.url === 'string');
       out.push({
         channel: CHANNEL, externalId: String(m.mid), contactId: String(ev.sender.id), contactName: null,
-        messageType: m.text !== undefined ? 'text' : 'unsupported', text: m.text ?? null,
+        messageType: image ? 'image' : m.text !== undefined ? 'text' : m.attachments?.length ? String(m.attachments[0]?.type ?? 'unsupported') : 'unsupported', text: m.text ?? null,
+        ...(image ? { mediaUrl: image.payload.url } : {}),
         receivedAt: ev.timestamp ? new Date(Number(ev.timestamp)) : new Date(),
       });
     }
   }
   return out;
+}
+
+// The customer has seen a message we sent: entry[].messaging[].read = { mid }.
+export function parseStatuses(body) {
+  const out = [];
+  if (!body || body.object !== 'instagram' || !Array.isArray(body.entry)) return out;
+  for (const entry of body.entry) for (const ev of entry.messaging ?? []) {
+    if (ev.read?.mid) out.push({ channel: CHANNEL, externalId: String(ev.read.mid), status: 'read', at: ev.timestamp ? new Date(Number(ev.timestamp)) : new Date(), error: null });
+  }
+  return out;
+}
+
+// The customer's name and handle, where Meta permits it (the user must have messaged us). Null on any problem: the conversation works without it.
+export async function fetchProfile(igsid, deps = {}, cfg = config) {
+  const token = cfg.meta.instagram.accessToken;
+  if (!token || !/^\d{5,25}$/.test(String(igsid))) return null;
+  const r = await graphGet(`https://graph.instagram.com/${cfg.meta.graphVersion}/${igsid}?fields=name,username`, token, deps);
+  return r.ok ? { name: r.body?.name ?? (r.body?.username ? `@${r.body.username}` : null), username: r.body?.username ?? null } : null;
+}
+
+// Downloads a picture a customer sent in a DM from Meta's CDN (https only, Meta hosts only, size-capped). Null on any problem.
+export async function downloadMediaUrl(url, { fetchImpl = fetch, timeoutMs = 10000, maxBytes = 5 * 1024 * 1024 } = {}) {
+  if (typeof url !== 'string' || !/^https:\/\/[a-z0-9.-]*(facebook|fbcdn|fbsbx|cdninstagram|instagram)\.(com|net)\//i.test(url)) return null;
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url, { signal: ctrl.signal });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length > 0 && buf.length <= maxBytes ? buf : null;
+  } catch { return null; } finally { clearTimeout(timer); }
 }
 
 // Sends a plain text message to an Instagram-scoped user id (only possible inside Meta's messaging window for that customer).

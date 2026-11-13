@@ -8,11 +8,13 @@ import { conversationWithMessages } from './messageService.js';
 import { extractOrderSpec, imageKind } from './orderSpec.js';
 import { groqJson } from './groqClient.js';
 import { channels, listStatuses } from './integrations/index.js';
+import { refreshInstagramIfDue, resolveConfig } from './integrations/credentials.js';
 import { REPLY_SYSTEM, cleanSuggestions, orderSummary, replyContext, replyPrompt, ruleSuggestions, shortId } from './replyLogic.js';
 import { ApiError, notFound, validationError } from '../utils/errors.js';
 
 const ID = /^[a-f\d]{24}$/i;
 const MAX_TEXT = 1000;
+const WINDOW_MS = 24 * 3600000; // Meta's customer-service window
 
 // The orders a chat can be about: the one it is linked to; otherwise the customer's other open orders with the same name.
 // With more than one candidate and none chosen, nothing is assumed: the caller shows the choice to the owner.
@@ -77,8 +79,15 @@ export async function sendReply(convId, text) {
 
   const status = (await listStatuses()).find((s) => s.channel === conv.channel);
   let mode = 'simulated'; let externalId = `out-${crypto.randomBytes(8).toString('hex')}`;
-  if (!conv.isDemo && status?.status === 'connected') {
-    const r = await channels[conv.channel].sendText(conv.contactId, clean);
+  if (!conv.isDemo && status?.state === 'connected') {
+    // Meta only accepts a free-form reply within 24 hours of the customer's last message. Outside that window a pre-approved WhatsApp message template
+    // is required, which this app does not send: refuse clearly instead of letting Meta reject it.
+    const lastIn = await Message.findOne({ conversation: conv._id, direction: 'inbound' }).sort({ receivedAt: -1 }).select('receivedAt').lean();
+    if (!lastIn || Date.now() - new Date(lastIn.receivedAt).getTime() > WINDOW_MS) {
+      throw new ApiError(409, 'WINDOW_CLOSED', `${conv.customerName ?? 'This customer'} last wrote more than 24 hours ago. ${conv.channel === 'whatsapp' ? 'WhatsApp only allows a free-form reply within 24 hours of the customer’s last message; after that an approved message template is required.' : 'Instagram only allows a reply within 24 hours of the customer’s last message.'} Reply once they write again.`);
+    }
+    if (conv.channel === 'instagram') await refreshInstagramIfDue(); // a token close to expiry is renewed before it is used
+    const r = await channels[conv.channel].sendText(conv.contactId, clean, {}, await resolveConfig());
     if (!r.ok) throw new ApiError(502, 'SEND_FAILED', r.reason);
     mode = 'real'; if (r.externalId) externalId = r.externalId;
   }

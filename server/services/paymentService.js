@@ -4,6 +4,7 @@ import Order from '../models/Order.js';
 import Payment from '../models/Payment.js';
 import Conversation from '../models/Conversation.js';
 import { ApiError, notFound, validationError } from '../utils/errors.js';
+import { orderFilter } from '../utils/dataset.js';
 import { config } from '../config/env.js';
 import { groqJson } from './groqClient.js';
 import { isDbReady } from '../config/db.js';
@@ -55,8 +56,11 @@ async function sourceMessages(payments) {
   }));
 }
 
-export async function getLedger() {
-  const [orders, payments] = await Promise.all([Order.find().limit(5000), Payment.find().limit(20000)]);
+export async function getLedger(dataset = 'all') {
+  const [orders0, payments0] = await Promise.all([Order.find(orderFilter(dataset)).limit(5000), Payment.find().limit(20000)]);
+  const ids = new Set(orders0.map((o) => String(o._id)));
+  const orders = orders0; // payments follow their order; a payment with no order yet follows its own demo flag
+  const payments = dataset === 'all' ? payments0 : payments0.filter((p) => (p.order ? ids.has(String(p.order)) : (dataset === 'demo') === Boolean(p.isDemo)));
   const ledger = buildLedger(orders.map(plain), payments.map(plain).map(forLogic));
   const src = await sourceMessages(payments);
   const attach = (p) => (p.messageId && src[p.messageId] ? { ...p, sourceMessage: src[p.messageId] } : p);

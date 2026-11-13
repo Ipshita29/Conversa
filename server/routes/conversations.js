@@ -2,7 +2,7 @@ import { Router, raw } from 'express';
 import { rateLimit } from '../utils/rateLimit.js';
 import { config } from '../config/env.js';
 import { requireDb } from '../middleware/requireDb.js';
-import { list, patch, suggestions, orderSummary, sendMessage, uploadAttachment, attachment, extractPayment } from '../controllers/conversationController.js';
+import { list, patch, draftOrder, createOrder, suggestions, orderSummary, sendMessage, uploadAttachment, attachment, extractPayment } from '../controllers/conversationController.js';
 
 const r = Router();
 r.use(requireDb);
@@ -15,4 +15,6 @@ r.post('/:id/messages/:mid/extract-payment', rateLimit({ max: config.aiRateLimit
 r.post('/:id/suggestions', rateLimit({ max: config.aiRateLimitPerMinute }), suggestions);
 r.get('/:id/order-summary', orderSummary);
 r.post('/:id/messages', sendMessage);
+r.post('/:id/draft-order', rateLimit({ max: config.aiRateLimitPerMinute }), draftOrder);
+r.post('/:id/orders', createOrder);
 export default r;

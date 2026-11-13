@@ -38,6 +38,24 @@ export function verifyChallenge(query, cfg = config) {
   return { ok: false, status: 403 };
 }
 
+// What the customer wrote, whatever the kind of message: the text, the caption of a picture or file, or the label of a button / list option they tapped.
+const textOf = (m) => (m.type === 'text' ? m.text?.body ?? null : ['image', 'document', 'video'].includes(m.type) ? m[m.type]?.caption ?? null
+  : m.type === 'button' ? m.button?.text ?? null : m.type === 'interactive' ? m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? null : null);
+
+// Delivery receipts for messages WE sent: entry[].changes[].value.statuses[] = { id, status: sent|delivered|read|failed, timestamp, errors? }.
+export function parseStatuses(body) {
+  const out = [];
+  if (!body || body.object !== 'whatsapp_business_account' || !Array.isArray(body.entry)) return out;
+  for (const entry of body.entry) for (const change of entry.changes ?? []) {
+    if (change.field !== 'messages') continue;
+    for (const st of change.value?.statuses ?? []) {
+      if (!st?.id || !['sent', 'delivered', 'read', 'failed'].includes(st.status)) continue;
+      out.push({ channel: CHANNEL, externalId: String(st.id), status: st.status, at: st.timestamp ? new Date(Number(st.timestamp) * 1000) : new Date(), error: st.errors?.[0]?.title ?? st.errors?.[0]?.message ?? null });
+    }
+  }
+  return out;
+}
+
 // Payload: entry[].changes[].value.{contacts[], messages[]} (WhatsApp Cloud API webhooks).
 export function parseWebhook(body) {
   const out = [];
@@ -51,7 +69,7 @@ export function parseWebhook(body) {
         if (!m?.id || !m?.from) continue;
         out.push({
           channel: CHANNEL, externalId: String(m.id), contactId: String(m.from), contactName: names[m.from] ?? null,
-          messageType: m.type ?? 'unknown', text: m.type === 'text' ? m.text?.body ?? null : m.type === 'image' ? m.image?.caption ?? null : null,
+          messageType: m.type ?? 'unknown', text: textOf(m),
           ...(m.type === 'image' && m.image?.id ? { mediaId: String(m.image.id) } : {}),
           receivedAt: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(),
         });

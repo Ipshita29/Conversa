@@ -15,10 +15,12 @@ const messageSchema = new mongoose.Schema({
   // Automatic payment detection for an image: processing -> filed | review | duplicate | not_payment | failed. claimedAt makes sure one worker handles it.
   paymentScan: { type: { state: String, reason: String, at: Date, claimedAt: { type: Date, default: null } }, default: null, _id: false },
   // How an outbound message left Conversa: 'real' = sent through the channel's API; 'simulated' = stored only (demo conversation, or the channel is not connected).
-  delivery: { type: { mode: String, state: String, sentAt: Date }, default: null, _id: false },
+  delivery: { type: { mode: String, state: String, sentAt: Date, error: String }, default: null, _id: false }, // state: sent | delivered | read | failed
   readAt: { type: Date, default: null }, // null = unread
   isDemo: { type: Boolean, default: false },
 }, { timestamps: true });
 messageSchema.index({ channel: 1, externalId: 1 }, { unique: true });
+messageSchema.index({ conversation: 1, receivedAt: 1 }); // a conversation's history, in order
+messageSchema.index({ paymentId: 1 }, { sparse: true });
 
 export default mongoose.models.Message || mongoose.model('Message', messageSchema);

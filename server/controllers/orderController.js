@@ -4,6 +4,7 @@ import { validateOrderInput, validateEvidenceInput, ORDER_STATUSES, PAYMENT_STAT
 import { getSettings } from '../services/settingsService.js';
 import { riskMap, withRisk } from '../services/orderService.js';
 import { orderConversation } from '../services/messageService.js';
+import { datasetOf, orderFilter } from '../utils/dataset.js';
 
 const TERMINAL = ['completed', 'cancelled'];
 const SORTS = { deadline: 1, '-deadline': -1, createdAt: 1, '-createdAt': -1 };
@@ -30,6 +31,7 @@ export const list = asyncHandler(async (req, res) => {
   if (q.status) filter.status = { $in: enumList(q.status, ORDER_STATUSES, 'status', details) };
   if (q.paymentStatus) filter.paymentStatus = { $in: enumList(q.paymentStatus, PAYMENT_STATUSES, 'paymentStatus', details) };
   if (q.source) filter.source = { $in: enumList(q.source, SOURCES, 'source', details) };
+  Object.assign(filter, orderFilter(datasetOf(q.dataset)));
   const page = q.page === undefined ? 1 : Number(q.page);
   const pageSize = q.pageSize === undefined ? 20 : Number(q.pageSize);
   if (!Number.isInteger(page) || page < 1) details.push({ field: 'page', message: 'Must be a positive integer.' });

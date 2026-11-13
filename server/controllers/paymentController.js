@@ -1,11 +1,12 @@
 import { asyncHandler, ApiError, validationError } from '../utils/errors.js';
 import { isPlainObject } from '../utils/validation.js';
 import * as svc from '../services/paymentService.js';
+import { datasetOf } from '../utils/dataset.js';
 import { checkImage } from '../services/proofStore.js';
 
 const body = (req) => (Buffer.isBuffer(req.body) && req.body.length ? req.body : null);
 
-export const ledger = asyncHandler(async (req, res) => res.json(await svc.getLedger()));
+export const ledger = asyncHandler(async (req, res) => res.json(await svc.getLedger(datasetOf(req.query.dataset))));
 export const get = asyncHandler(async (req, res) => res.json(await svc.getPayment(req.params.id)));
 export const create = asyncHandler(async (req, res) => {
   const payment = await svc.createPayment(req.body);
