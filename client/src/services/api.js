@@ -2,7 +2,9 @@
 // Demo mode (VITE_DEMO_MODE, default on) routes every call to the in-memory mock backend in src/mock/.
 // A failed live request is ALWAYS thrown as an ApiError — it is never replaced with mock data.
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== 'false';
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// The API address comes from VITE_API_BASE_URL. Only the local dev server falls back to localhost; a production build without it uses the same origin
+// ("/api", e.g. behind a reverse proxy or a Vercel rewrite), never localhost.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api');
 
 export class ApiError extends Error {
   constructor(status, code, message, details) {
@@ -70,7 +72,7 @@ export const applyWhatIf = (scope) => request('POST', '/planner/whatif/apply', {
 export const simulatePlanner = (payload) => request('POST', '/planner/simulate', payload);
 
 // Payments. Nothing here marks money as received on its own: records start as "pending" until the owner confirms them.
-export const getPayments = () => request('GET', '/payments');
+export const getPayments = (dataset) => request('GET', `/payments${qs({ dataset })}`);
 export const getPayment = (id) => request('GET', `/payments/${encodeURIComponent(id)}`);
 export const confirmPayment = (id, body) => request('POST', `/payments/${encodeURIComponent(id)}/confirm`, body);
 export const rejectPayment = (id, body) => request('POST', `/payments/${encodeURIComponent(id)}/reject`, body);
@@ -129,11 +131,22 @@ export const proofSrc = (proof) => (!proof?.url ? null : /^(data:|https?:|\/asse
 export const attachmentSrc = proofSrc;
 
 export const getIntegrations = () => request('GET', '/integrations');
+// Connecting accounts the official way. Instagram: the server returns Meta's login URL and Meta sends the browser back to the server, which returns to
+// Settings. WhatsApp: Embedded Signup runs in the browser (Facebook JS SDK); its result is forwarded to the server, which exchanges the code. No token is
+// ever typed in or visible here.
+export const startInstagramOAuth = () => request('POST', '/integrations/instagram/oauth/start', {});
+export const getWhatsAppSignup = () => request('GET', '/integrations/whatsapp/signup');
+export const completeWhatsAppSignup = (body) => request('POST', '/integrations/whatsapp/complete', body);
+export const disconnectIntegration = (channel) => request('POST', `/integrations/${channel}/disconnect`, {});
 export const connectIntegration = (channel) => request('POST', `/integrations/${channel}/connect`, {});
 
 // Not in docs/api-contract.md yet (proposed addition, implemented in server/README.md): conversations stored from
 // Meta webhooks. Demo mode returns clearly-labelled sample conversations.
-export const getConversations = () => request('GET', '/conversations');
+export const getConversations = (dataset) => request('GET', `/conversations${dataset ? `?dataset=${dataset}` : ''}`);
+// A real conversation, read as ONE order: the customer's messages together become an editable draft (nothing is saved), then the owner's confirmation
+// creates the order and links it, once (a second attempt answers 409 ORDER_EXISTS with the existing order).
+export const draftOrderFromConversation = (id) => request('POST', `/conversations/${encodeURIComponent(id)}/draft-order`, {});
+export const createOrderFromConversation = (id, order) => request('POST', `/conversations/${encodeURIComponent(id)}/orders`, order);
 // patch: { read: true } and/or { orderId: string | null }
 export const updateConversation = (id, patch) => request('PATCH', `/conversations/${encodeURIComponent(id)}`, patch);
 

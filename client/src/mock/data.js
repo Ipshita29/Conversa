@@ -40,6 +40,6 @@ export const seedConversations = () => DEMO_CONVERSATIONS.map((c, i) => {
 });
 
 export const seedIntegrations = () => [
-  { channel: 'whatsapp', status: 'demo', statusReason: 'Demo mode: sample data only. No WhatsApp account is linked.', accountLabel: null, lastSyncAt: null },
-  { channel: 'instagram', status: 'unavailable', statusReason: 'Meta app permissions are not configured for this environment.', accountLabel: null, lastSyncAt: null },
+  { channel: 'whatsapp', state: 'demo', status: 'demo', statusReason: 'Demo mode: sample data only. No WhatsApp account is linked.', accountLabel: null, lastSyncAt: null },
+  { channel: 'instagram', state: 'demo', status: 'unavailable', statusReason: 'Meta app permissions are not configured for this environment.', accountLabel: null, lastSyncAt: null },
 ];

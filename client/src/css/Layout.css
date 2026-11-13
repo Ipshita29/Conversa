@@ -112,3 +112,16 @@
 .integration dt { color: var(--muted); }
 .integration dd { margin: 0; }
 .integration .btn { align-self: flex-start; }
+
+/* Settings: integrations */
+.int-status.int-connected { background: #E4EEDF; color: #3E6A3D; } .int-status.int-needs_attention, .int-status.int-expired { background: #FBEBD9; color: var(--caramel-ink); }
+.int-status.int-connecting { background: #E7F0FB; color: var(--primary); } .int-status.int-not_connected, .int-status.int-demo { background: #F1EEE8; color: var(--muted); }
+.int-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.6rem; }
+.int-needs { margin-top: 0.8rem; font-size: 0.84rem; color: var(--muted); } .int-needs summary { cursor: pointer; } .int-needs ul { margin: 0.5rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.4rem; }
+.int-webhooks { display: grid; grid-template-columns: 1fr; gap: 0.2rem 1rem; margin: 0.6rem 0 0; } .int-webhooks dt { margin-top: 0.7rem; font: 600 0.72rem var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+.int-url { display: flex; align-items: center; gap: 0.6rem; margin: 0; min-width: 0; } .int-url code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 0.85rem; }
+
+/* Real | Demo data switch */
+.ds-toggle { display: inline-flex; padding: 3px; background: #F4F1EA; border-radius: 999px; }
+.ds-toggle button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 30px; padding: 0 0.9rem; border: 0; border-radius: 999px; background: none; font: 500 0.82rem var(--display); color: var(--muted); cursor: pointer; }
+.ds-toggle button b { font-size: 0.7rem; font-weight: 600; opacity: 0.7; } .ds-toggle button.is-on { background: #fff; color: var(--cocoa); box-shadow: 0 1px 2px rgba(41, 41, 35, 0.1); }
