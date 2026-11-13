@@ -5,6 +5,8 @@ import { listOrders, createOrder, getOrder, updateOrder } from '../services/api.
 import useAsync from '../hooks/useAsync.js';
 import { OPEN } from '../utils/format.js';
 import { DemoBadge, Modal, StateMessage } from '../components/UI.jsx';
+import useDataset from '../hooks/useDataset.js';
+import DatasetToggle from '../components/DatasetToggle.jsx';
 import { COLUMNS, OrderAccordion, OrderDetails, OrderForm, statusFor } from '../components/Orders.jsx';
 import '../css/Orders.css';
 
@@ -51,7 +53,8 @@ export default function Orders() {
     if (id) { setEditing(id === 'new' ? 'new' : id); setParams({}, { replace: true }); }
   }, [params, setParams]);
 
-  const { status, data, error, reload } = useAsync(() => listOrders({ pageSize: 100 }));
+  const ds = useDataset();
+  const { status, data, error, reload } = useAsync(() => (ds.ready ? listOrders({ pageSize: 100, dataset: ds.dataset }) : new Promise(() => {})), [ds.dataset, ds.ready]);
   const [orders, setOrders] = useState([]); // local copy, so a drop moves the card at once and the API call follows
   useEffect(() => { if (data) setOrders(data.items); }, [data]);
 
@@ -91,7 +94,7 @@ export default function Orders() {
           {data && <p className="od-pulse"><b>{stats.open}</b> open{stats.overdue > 0 && <> · <b className="is-late">{stats.overdue}</b> overdue</>} · <b>{stats.due}</b> awaiting payment</p>}
         </div>
         <div className="od-head-actions">
-          <DemoBadge />
+          <DatasetToggle ds={ds} /><DemoBadge />
           <label className="od-search"><Search size={16} aria-hidden="true" /><input type="search" placeholder="Search customer or product" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search orders" /></label>
           <button type="button" className="btn btn-primary od-add" onClick={() => setEditing('new')}><Plus size={16} aria-hidden="true" /> Add order</button>
         </div>

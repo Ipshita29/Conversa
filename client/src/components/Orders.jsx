@@ -8,7 +8,7 @@ import { Modal, RiskBadge } from './UI.jsx';
 import { METHOD as METHOD_LABEL, RecPill, StatusPill } from './Payments.jsx';
 import useAsync from '../hooks/useAsync.js';
 import { needsRecovery, situationOf, proposeRevision, buildMessage, customerFirstName, copyText } from '../utils/recoveryMessage.js';
-import { attachmentSrc, getOrderConversation, getPayments, extractOrder, createOrder, updateConversation, updateOrder, getPlanner, simulatePlanner, DEMO_MODE } from '../services/api.js';
+import { attachmentSrc, getOrderConversation, getPayments, extractOrder, createOrder, draftOrderFromConversation, createOrderFromConversation, updateConversation, updateOrder, getPlanner, simulatePlanner, DEMO_MODE } from '../services/api.js';
 import '../css/Orders.css';
 import '../css/OrderDetails.css';
 
@@ -129,9 +129,16 @@ export function DraftOrder({ message: initialMessage = '', source: initialSource
   // autoStart: the seller already pressed "Extract order" elsewhere, so read the message straight away.
   useEffect(() => { if (autoStart && initialMessage.trim()) extract(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const live = Boolean(conversationId) && !DEMO_MODE; // a real conversation: read ALL its messages as one order, and create it once, on the server
+  const [existing, setExisting] = useState(null);
   async function extract() {
     setStage('extracting'); setError(null);
     try {
+      if (live) {
+        const r = await draftOrderFromConversation(conversationId);
+        if (r.existingOrderId) { setExisting(r.existingOrderId); setStage('idle'); return; }
+        setDraft(r); setStage('review'); return;
+      }
       const body = { message, source, ...(customerName && !customerName.startsWith('Unknown') ? { customerName } : {}) };
       setDraft(await extractOrder(body));
       setStage('review');
@@ -141,6 +148,11 @@ export function DraftOrder({ message: initialMessage = '', source: initialSource
   async function confirm(payload) {
     setSaving(true); setSaveError(null);
     try {
+      if (live) {
+        try { const order = await createOrderFromConversation(conversationId, payload); setCreated({ order, linkWarning: null }); setStage('created'); onCreated?.(order); }
+        catch (e) { if (e.code === 'ORDER_EXISTS') { setExisting(e.details?.[0]?.message ?? true); setStage('idle'); } else throw e; } // a second click or a retry: the order is already there
+        return;
+      }
       const order = await createOrder(payload);
       let linkWarning = null;
       if (conversationId) { try { await updateConversation(conversationId, { orderId: order.id }); } catch (e) { linkWarning = e.message; } }
@@ -160,6 +172,8 @@ export function DraftOrder({ message: initialMessage = '', source: initialSource
         {stage === 'review' && (
           <>
             <p className="sim-label">AI draft — not saved yet</p>
+            {draft.intent && draft.intent !== 'order' && <div className="notice info" role="note">{draft.intent === 'enquiry' ? 'This reads like an enquiry, not a confirmed order.' : 'It is not clear yet that the customer wants to order.'} Only create the order once they have agreed.</div>}
+            {draft.intent === 'order' && draft.readyToConfirm === false && draft.missingFields?.length > 0 && <div className="notice info" role="note">The customer wants to order, but some details are still missing. Ask them, or fill them in yourself.</div>}
             <p className="muted draft-note">
               {draft.missingFields.length > 0 ? `Missing: ${draft.missingFields.join(', ')}. ` : ''}
               {Object.keys(uncertain).length > 0 ? 'Please check the highlighted fields. ' : ''}
@@ -184,6 +198,7 @@ export function DraftOrder({ message: initialMessage = '', source: initialSource
           </label>
         </>
       )}
+      {existing && <div className="notice info" role="status">This conversation already has an order{typeof existing === 'string' ? <> · <Link to={`/orders?edit=${existing}`}>Open it</Link></> : ''}. Later messages are kept as updated instructions on it, so no second order is made.</div>}
       {error && (
         <div className="notice error" role="alert">
           Couldn't draft this order: {error.message}

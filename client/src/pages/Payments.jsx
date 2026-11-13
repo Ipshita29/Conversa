@@ -5,6 +5,8 @@ import { getPayments } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { formatMoney } from '../utils/format.js';
 import { DemoBadge, StateMessage } from '../components/UI.jsx';
+import useDataset from '../hooks/useDataset.js';
+import DatasetToggle from '../components/DatasetToggle.jsx';
 import { PaymentModal, AssignPayment, METHOD, PaymentDetail, ProofThumb, ProofViewer, RecordPayment, VerifyPayment, detectedFrom } from '../components/Payments.jsx';
 import '../css/Payments.css';
 
@@ -18,7 +20,8 @@ const toVerifyOf = (r) => r.payments.find((p) => p.status === 'pending' && p.kin
 
 export default function Payments() {
   const [params, setParams] = useSearchParams();
-  const { status, data, error, reload } = useAsync(getPayments);
+  const ds = useDataset();
+  const { status, data, error, reload } = useAsync(() => (ds.ready ? getPayments(ds.dataset) : new Promise(() => {})), [ds.dataset, ds.ready]);
   const [q, setQ] = useState('');
   const [tab, setTab] = useState('all');
   const [verifyId, setVerifyId] = useState(null); // the payment being verified
@@ -74,7 +77,7 @@ export default function Payments() {
       <header className="pmx-head">
         <div><h1>Payments</h1><p>Keep track of what your customers have paid.</p></div>
         <div className="pmx-head-actions">
-          <DemoBadge />
+          <DatasetToggle ds={ds} /><DemoBadge />
           <button type="button" className="btn btn-primary pmx-add" onClick={() => setRecording({ orderId: null })} disabled={!data}><Plus size={16} aria-hidden="true" /> Record payment</button>
         </div>
       </header>

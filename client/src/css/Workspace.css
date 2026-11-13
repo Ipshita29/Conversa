@@ -481,6 +481,7 @@ body:has(.roadmap) { background: #FCFBF9; }
 .im-back { display: none; }
 .im-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 1rem 1.5rem 1.4rem; overscroll-behavior: contain; scroll-behavior: auto; }
 .im-scroll > * { max-width: 46rem; margin-left: auto; margin-right: auto; }
+.im-flow { display: flow-root; } /* one box around all the messages, so its size can be watched (pictures loading, new messages) */
 .im-scroll:focus-visible { outline: 2px solid var(--im-navy); outline-offset: -2px; }
 .im-day-sep { display: flex; align-items: center; gap: 0.8rem; margin: 0.9rem 0 0.7rem; }
 .im-day-sep::before, .im-day-sep::after { content: ''; flex: 1; height: 1px; background: var(--im-line); }

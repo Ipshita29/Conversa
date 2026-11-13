@@ -9,7 +9,10 @@ import { REC_STATUS, recStatus } from '../components/Payments.jsx';
 import { DraftOrder } from '../components/Orders.jsx';
 import { parsePaymentText } from '../../../server/services/paymentExtraction.js';
 import { formatMoney } from '../utils/format.js';
+import useStickyScroll from '../hooks/useStickyScroll.js';
 import { OrderSummaryModal, SmartReplies } from '../components/Replies.jsx';
+import useDataset from '../hooks/useDataset.js';
+import DatasetToggle from '../components/DatasetToggle.jsx';
 import '../css/Workspace.css';
 
 const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp'], ['instagram', 'Instagram']];
@@ -51,10 +54,11 @@ function CopyButton({ text }) {
 }
 
 export default function Inbox() {
-  const conv = useAsync(getConversations);
+  const ds = useDataset();
+  const conv = useAsync(() => (ds.ready ? getConversations(ds.dataset) : new Promise(() => {})), [ds.dataset, ds.ready]);
   const integrations = useAsync(getIntegrations);
-  const ordersQ = useAsync(() => listOrders({ pageSize: 100 }));
-  const paymentsQ = useAsync(getPayments); // the linked order's payment status, shown in the chat
+  const ordersQ = useAsync(() => (ds.ready ? listOrders({ pageSize: 100, dataset: ds.dataset }) : new Promise(() => {})), [ds.dataset, ds.ready]);
+  const paymentsQ = useAsync(() => (ds.ready ? getPayments(ds.dataset) : new Promise(() => {})), [ds.dataset, ds.ready]); // the linked order's payment status, shown in the chat
   const [viewer, setViewer] = useState(null); // a picture opened full size
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
@@ -72,7 +76,7 @@ export default function Inbox() {
   const [sendState, setSendState] = useState({ status: 'idle', error: null }); // the message box: idle | sending | failed
   const boxRef = useRef(null);
   const scrollRef = useRef(null);
-  const stick = useRef(true); // true while the reader is at (or near) the bottom, so new messages may scroll into view
+  const flowRef = useRef(null); // wraps the messages: its size changes when pictures load or messages arrive
 
   const orders = ordersQ.data?.items ?? [];
   const convs = useMemo(() => [...(conv.data?.items ?? [])].sort((a, b) => new Date(lastOf(b)?.at ?? 0) - new Date(lastOf(a)?.at ?? 0)), [conv.data]);
@@ -88,7 +92,9 @@ export default function Inbox() {
   useEffect(() => { setDrafting(false); setPayNote(null); setDraft(''); setSendState({ status: 'idle', error: null }); setSummaryOpen(false); }, [selected?.id]);
 
   // Typed messages are sent only by the owner's own press of Send (or Enter). Real when the channel is connected, otherwise a clearly marked simulation.
-  const simulated = !selected || selected.isDemo || channelInfo?.status !== 'connected';
+  const simulated = !selected || selected.isDemo || (channelInfo?.state ?? channelInfo?.status) !== 'connected';
+  // Meta only allows a free-form reply for 24 hours after the customer's last message (a WhatsApp template is needed after that).
+  const windowClosed = !simulated && selected?.lastInboundAt && Date.now() - new Date(selected.lastInboundAt).getTime() > 24 * 3600000;
   async function sendDraft() {
     const text = draft.trim(); if (!text || sendState.status === 'sending') return;
     setSendState({ status: 'sending', error: null });
@@ -124,9 +130,7 @@ export default function Inbox() {
   }
 
   // Opening a conversation jumps to its latest message. Afterwards, only follow new messages if the reader is already at the bottom.
-  useLayoutEffect(() => { const el = scrollRef.current; if (el) { el.scrollTop = el.scrollHeight; stick.current = true; } }, [selected?.id]);
-  useLayoutEffect(() => { const el = scrollRef.current; if (el && stick.current) el.scrollTop = el.scrollHeight; }, [selected?.messages.length, drafting, createdFor]);
-  const onScroll = () => { const el = scrollRef.current; if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120; };
+  useStickyScroll(scrollRef, flowRef, selected?.id ?? null);
 
   async function open(c) {
     setSelId(c.id); setChatOpen(true); setMarkError(null);
@@ -156,6 +160,7 @@ export default function Inbox() {
             <h1>Chats</h1>
             <button type="button" className="im-icon-btn" onClick={() => setPaste(true)} aria-label="New message: paste a customer message to draft an order" title="Paste a customer message"><Plus size={18} aria-hidden="true" /></button>
           </header>
+          {ds.both && <div className="im-ds"><DatasetToggle ds={ds} /></div>}
           <label className="im-search"><Search size={16} aria-hidden="true" /><span className="sr-only">Search conversations</span>
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search chats and messages" /></label>
           <div className="im-tabs" role="group" aria-label="Filter conversations">
@@ -211,7 +216,7 @@ export default function Inbox() {
                 </div>
               </header>
 
-              <div className="im-scroll" ref={scrollRef} onScroll={onScroll} data-lenis-prevent tabIndex={0} aria-label="Messages">
+              <div className="im-scroll" ref={scrollRef} data-lenis-prevent tabIndex={0} aria-label="Messages"><div className="im-flow" ref={flowRef}>
                 {selected.isDemo && <div className="notice info im-demo-note" role="note"><b>Demo conversation.</b> These are sample messages and pictures to show how Conversa organises an order. They are not live WhatsApp or Instagram messages.</div>}
                 {markError && <div className="notice error" role="alert">Couldn't mark this conversation as read: {markError}</div>}
                 {groups.map((g) => (
@@ -239,7 +244,7 @@ export default function Inbox() {
                                 {selected.orderId ? <button type="button" className="im-link" onClick={() => readAsPayment(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Reading…' : 'Read as payment'}</button> : <small>Link an order to file it</small>}</span>) : null; })()}
                           </div>
                           {m.text && <CopyButton text={m.text} />}
-                          {mine && m.delivery && <small className={`im-sent${m.delivery.mode === 'simulated' ? ' is-sim' : ''}`}>{m.delivery.mode === 'simulated' ? 'Simulated · not sent to the customer' : 'Sent'}</small>}
+                          {mine && m.delivery && <small className={`im-sent${m.delivery.mode === 'simulated' ? ' is-sim' : m.delivery.state === 'failed' ? ' is-fail' : ''}`}>{m.delivery.mode === 'simulated' ? 'Simulated · not sent to the customer' : m.delivery.state === 'failed' ? `Not delivered${m.delivery.error ? ` · ${m.delivery.error}` : ''}` : m.delivery.state === 'read' ? 'Read' : m.delivery.state === 'delivered' ? 'Delivered' : 'Sent'}</small>}
                         </div>
                       );
                     })}
@@ -258,17 +263,19 @@ export default function Inbox() {
                       onCreated={(o) => { setDrafting(false); setCreatedFor({ convId: selected.id, customerName: o.customerName }); conv.reload(); ordersQ.reload(); }} /></div>
                 )}
                 {!selected.orderId && !drafting && <p className="im-hint">The AI can read the latest message and draft an order. You review and confirm it before anything is saved.</p>}
+                </div>
               </div>
 
               <SmartReplies conv={selected} onSent={() => conv.reload()} onEdit={(t) => { setDraft(t); setTimeout(() => boxRef.current?.focus(), 0); }} />
               <footer className="im-composer">
+                {windowClosed && <p className="rp-state is-error" role="alert">{selected.customerName} last wrote more than 24 hours ago. {selected.channel === 'whatsapp' ? 'WhatsApp only allows a free-form reply within 24 hours of their last message; after that an approved message template is required.' : 'Instagram only allows a reply within 24 hours of their last message.'} You can reply once they write again.</p>}
                 <p className="im-composer-note" role="status"><i className={`im-led ${simulated ? 'is-off' : 'is-connected'}`} />{sendNote}</p>
                 {sendState.status === 'failed' && <p className="rp-state is-error" role="alert">Not sent: {sendState.error}</p>}
                 <div className="im-composer-row">
                   <button type="button" className="im-icon-btn" disabled aria-label="Attach a file (not available)" title="Attachments aren't supported yet"><Paperclip size={18} aria-hidden="true" /></button>
                   <textarea ref={boxRef} rows={1} placeholder="Type a message..." aria-label="Message" value={draft} onChange={(e) => { setDraft(e.target.value); if (sendState.status === 'failed') setSendState({ status: 'idle', error: null }); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDraft(); } }} disabled={sendState.status === 'sending'} />
-                  <button type="button" className="im-send" onClick={sendDraft} disabled={!draft.trim() || sendState.status === 'sending'} aria-label={sendState.status === 'sending' ? 'Sending' : 'Send message'}><SendHorizontal size={18} aria-hidden="true" /></button>
+                  <button type="button" className="im-send" onClick={sendDraft} disabled={!draft.trim() || sendState.status === 'sending' || Boolean(windowClosed)} aria-label={sendState.status === 'sending' ? 'Sending' : 'Send message'}><SendHorizontal size={18} aria-hidden="true" /></button>
                 </div>
               </footer>
             </>
