@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, GripVertical, MessageCircle, Camera, PenLine, Pencil, Sparkles } from 'lucide-react';
+import { AlertTriangle, GripVertical, ImageOff, MessageCircle, Camera, PenLine, Pencil, Sparkles } from 'lucide-react';
 import { validateOrder, ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validateOrder.js';
 import { STATUS_LABEL, PAYMENT_LABEL, CHANNEL_LABEL, OPEN, toLocalInput, fromLocalInput, formatInTz, formatDateTime, formatMinutes, formatMoney, isDemoOrder } from '../utils/format.js';
 import { Modal, RiskBadge } from './UI.jsx';
@@ -32,7 +32,17 @@ function Field({ label, hint, children, error, isMissing, note }) {
 // `missing` highlights fields the AI could not find; `uncertain` maps field -> note to confirm.
 // `board` is the Add-order dialog on the Orders board: it adds the date/time the order was placed, shows both statuses, and lists payment as Due / Partial / Paid.
 const BOARD_PAYMENT = [['unverified', 'Due'], ['partial', 'Partial'], ['verified', 'Paid']];
-export function OrderForm({ initial = {}, missing = [], uncertain = {}, serverErrors = [], submitting, submitLabel = 'Save order', showStatus = false, board = false, onSubmit, onCancel }) {
+export function OrderForm({ initial = {}, missing = [], uncertain = {}, serverErrors = [], submitting, submitLabel = 'Save order', showStatus = false, board = false, showPicture = false, onSubmit, onCancel }) {
+  const [picture, setPicture] = useState(null); // an optional reference picture chosen for this order
+  const [pictureError, setPictureError] = useState(null);
+  const preview = useMemo(() => (picture ? URL.createObjectURL(picture) : null), [picture]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  function pick(e) {
+    const f = e.target.files?.[0] ?? null; setPictureError(null);
+    if (f && !['image/png', 'image/jpeg', 'image/webp'].includes(f.type)) { setPictureError('Choose a PNG, JPEG or WebP image.'); setPicture(null); return; }
+    if (f && f.size > 5 * 1024 * 1024) { setPictureError('The image is larger than 5 MB.'); setPicture(null); return; }
+    setPicture(f);
+  }
   const [v, setV] = useState({
     customerName: initial.customerName ?? '',
     item: initial.item ?? '',
@@ -65,7 +75,7 @@ export function OrderForm({ initial = {}, missing = [], uncertain = {}, serverEr
     if (board) payload.createdAt = v.createdAt ? fromLocalInput(v.createdAt) : new Date().toISOString();
     const errs = validateOrder(payload);
     setClientErrors(errs);
-    if (errs.length === 0) onSubmit(payload);
+    if (errs.length === 0) onSubmit(payload, picture);
   }
 
   // Props for the module-level <Field>, so inputs keep focus between renders.
@@ -105,10 +115,21 @@ export function OrderForm({ initial = {}, missing = [], uncertain = {}, serverEr
   return (
     <form className="order-form" onSubmit={submit} noValidate>
       <div className="form-grid">{order.map((k) => F[k])}</div>
+      {showPicture && (
+        <div className="of-picture">
+          <label className="field-label" htmlFor="of-pic">Reference image</label>
+          <div className="of-picture-row">
+            {preview ? <img src={preview} alt="The reference image you chose" /> : initial.referenceImage ? <img src={attachmentSrc(initial.referenceImage)} alt="The current reference image" /> : <span className="of-picture-empty">No reference image</span>}
+            <div><input id="of-pic" type="file" accept="image/png,image/jpeg,image/webp" onChange={pick} />
+              <span className="field-hint">{initial.referenceImage ? 'Choosing a new picture makes it the one shown on the order’s card; the earlier ones are kept.' : 'Optional. The picture the customer wants; it shows on the order’s card.'}</span>
+              {pictureError && <span className="field-note error" role="alert">{pictureError}</span>}</div>
+          </div>
+        </div>
+      )}
       {serverErrors.filter((e) => !e.field || !Object.keys(v).includes(e.field)).map((e, i) => <p key={i} className="field-note error" role="alert">{e.field ? `${e.field}: ` : ''}{e.message}</p>)}
       <div className="form-actions">
         {onCancel && <button type="button" className="btn" onClick={onCancel} disabled={submitting}>Cancel</button>}
-        <button type="submit" className="btn btn-primary" disabled={submitting}>{submitting ? 'Saving…' : submitLabel}</button>
+        <button type="submit" className="btn btn-primary" disabled={submitting || Boolean(pictureError)}>{submitting ? 'Saving…' : submitLabel}</button>
       </div>
     </form>
   );
@@ -375,13 +396,12 @@ function OrderCard({ o, dragging, onOpen, onStart, onMove, ignoreClick }) {
 
 // ---------- OrderAccordion ----------
 // Orders as a row of narrow vertical panels; the one under the cursor widens to take most of the row (tap on touch screens).
-// Pictures are the bakery's own photos in /public, picked from the product name.
-const PHOTOS = [[/cupcake/i, '/cupcake.png'], [/pastr/i, '/pastry.png'], [/pineapple/i, '/pineapple.png'], [/./, '/chocolate.png']];
-const photoFor = (o) => PHOTOS.find(([re]) => re.test(o.item ?? ''))[1];
+// Each card shows ITS OWN order's newest reference picture, the one the customer sent (order.referenceImage, from the order's conversation). An order with
+// none shows a neutral placeholder: a picture is never chosen for an order, and never shared between orders.
 const pad2 = (n) => String(n).padStart(2, '0');
 const SPRING = { type: 'spring', stiffness: 170, damping: 26, mass: 0.9 };
 
-export function OrderAccordion({ orders, onOpen }) {
+export function OrderAccordion({ orders, onOpen, onEdit }) {
   const [active, setActive] = useState(null);
   const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const dl = (o) => (o.deadline ? Date.parse(o.deadline) : Infinity);
@@ -391,12 +411,14 @@ export function OrderAccordion({ orders, onOpen }) {
       {list.map((o, i) => {
         const on = active === o.id; const pay = payTag(o); const rel = relativeDue(o);
         return (
-          <motion.article key={o.id} role="listitem" className={`oa-card${on ? ' is-on' : ''}`} initial={false}
+          <motion.article key={o.id} role="listitem" className={`oa-card${on ? ' is-on' : ''}${o.referenceImage ? '' : ' is-blank'}`} initial={false}
             animate={{ flexGrow: on ? 7 : 1 }} transition={reduced ? { duration: 0 } : SPRING}
             onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActive(o.id); }}
             onClick={(e) => { if (e.target.closest('button')) return; setActive((a) => (a === o.id ? null : o.id)); }}
             onFocus={() => setActive(o.id)}>
-            <img className="oa-img" src={photoFor(o)} alt="" loading="lazy" draggable="false" />
+            {o.referenceImage
+              ? <img className="oa-img" src={attachmentSrc(o.referenceImage)} alt={`Reference picture for ${o.customerName}'s order`} loading="lazy" draggable="false" /> /* one picture, filling the whole card, collapsed or open */
+              : <span className="oa-empty"><ImageOff size={20} aria-hidden="true" /><em>No reference image</em></span>}
             <span className="oa-shade" aria-hidden="true" />
             <span className="oa-num">{pad2(i + 1)}</span>
             <span className="oa-vert" aria-hidden="true">{o.customerName}</span>
@@ -411,6 +433,7 @@ export function OrderAccordion({ orders, onOpen }) {
                     <div><dt>Status</dt><dd>{STATUS_LABEL[o.status] ?? o.status}</dd></div>
                   </dl>
                   <button type="button" className="oa-open" onClick={() => onOpen(o.id)}>View order <span aria-hidden="true">→</span></button>
+                  {!o.referenceImage && onEdit && <button type="button" className="oa-open oa-add" onClick={() => onEdit(o.id)}>Add reference image</button>}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -572,12 +595,14 @@ const SPEC_ALWAYS = ['product', 'quantity', 'deadline'];
 // ---------- OrderDetails ----------
 // One translucent overlay, no nested cards: who and what, when and how much, then the reference picture beside the payment. Every figure is
 // the order's own record (placed = createdAt, due = deadline); the screenshots are the files the customer sent in Messages.
+const DRAFT_LABEL = { item: 'the product', quantity: 'the quantity', deadline: 'the delivery date and time', customisation: null };
 const PAY_STATE = { paid: ['Verified', 'is-ok'], partial: ['Partly paid', ''], verification_pending: ['Awaiting verification', 'is-wait'], cod: ['Cash on delivery', ''], due: ['Unpaid', ''] };
 export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus }) {
   const conv = useAsync(() => getOrderConversation(o.id), [o.id]);
   const pays = useAsync(getPayments);
   const [photo, setPhoto] = useState(null);
-  const refs = conv.data?.spec?.referenceImages ?? [];
+  // The order's own pictures (the owner's and the customer's, newest first) come with the order; the conversation is only a fallback for older responses.
+  const refs = o.referenceImages ?? conv.data?.spec?.referenceImages ?? [];
   const row = pays.data?.rows.find((r) => r.orderId === o.id) ?? null;
   const records = (row?.payments ?? []).filter((p) => p.kind !== 'refund' && p.status !== 'rejected');
   const shots = records.filter((p) => p.proof);
@@ -602,6 +627,18 @@ export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus }) {
             </select></label>
         </section>
 
+        {o.status === 'draft' && (
+          <section className="odg-draft" aria-label="Draft order">
+            <div>
+              <b>Draft{o.source && o.source !== 'manual' ? ` from ${CHANNEL_LABEL[o.source]}` : ''}</b>
+              <p>Read from the customer’s messages. It is not in your production plan until you confirm it.
+                {o.draft?.missingFields?.filter((f) => DRAFT_LABEL[f]).length > 0 && <> Still needed: {o.draft.missingFields.filter((f) => DRAFT_LABEL[f]).map((f) => DRAFT_LABEL[f]).join(', ')}.</>}
+                {o.draft?.assumed?.length > 0 && <> The preparation time is an estimate from your rules.</>}</p>
+            </div>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => onStatus(o, 'confirmed')}>Confirm order</button>
+          </section>
+        )}
+
         <dl className="odg-info">
           <div><dt>Placed</dt><dd>{o.createdAt ? formatDateTime(o.createdAt) : '—'}</dd></div>
           <div><dt>Due</dt><dd>{o.deadline ? formatDateTime(o.deadline) : <button type="button" className="odg-link" onClick={() => onEdit(o.id)}>Add a deadline</button>}</dd></div>
@@ -612,7 +649,7 @@ export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus }) {
           <section aria-label="Reference image">
             <h4>Reference</h4>
             {refs.length > 0 ? <div className="odg-frames">{refs.map((r) => thumb(r, 'the reference image', r.messageId, 'is-ref'))}</div>
-              : <p className="odg-none">{!conv.data && conv.status !== 'error' ? 'Loading…' : 'No reference image'}</p>}
+              : <p className="odg-none">{!o.referenceImages && !conv.data && conv.status !== 'error' ? 'Loading…' : 'No reference image'}</p>}
           </section>
 
           <section aria-label="Payment">

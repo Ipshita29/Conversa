@@ -35,6 +35,13 @@ const withRisk = () => {
   const plan = computePlan({ orders, settings: demoSettings(), now: new Date(), rangeDays: 1 });
   return orders.map((o) => ({ ...o, risk: plan.results[o.id]?.risk ?? null }));
 };
+// Pictures per order, newest first: the customer's (from its conversation) and the ones attached to the order itself. Same rule as the server.
+const pictures = (o) => [
+  ...(conversations.find((c) => c.orderId === o.id)?.messages ?? []).filter((x) => imageKind(x) === 'reference').map((x) => ({ messageId: x.id, url: x.attachment.url, contentType: x.attachment.contentType ?? null, at: x.at })),
+  ...(o.referenceImages ?? []).map((i) => ({ messageId: null, id: i.id, url: i.url, contentType: i.contentType, at: i.at })),
+].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+const withPictures = (o) => { const p = pictures(o); return { ...o, referenceImage: p[0] ?? null, referenceImages: p, referenceImageCount: p.length }; };
+const readDataUrl = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = () => reject(new ApiError(0, 'READ_FAILED', 'Could not read the file.')); r.readAsDataURL(file); });
 const notFound = (id) => new ApiError(404, 'NOT_FOUND', `Order '${id}' not found.`);
 const invalid = (details) => new ApiError(422, 'VALIDATION_ERROR', 'Request validation failed.', details);
 
@@ -166,7 +173,7 @@ export async function handleMockRequest(method, path, body = {}) {
     });
     const pageSize = Math.min(Number(q.get('pageSize')) || 20, 100);
     const page = Number(q.get('page')) || 1;
-    return clone({ items: items.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: items.length });
+    return clone({ items: items.slice((page - 1) * pageSize, page * pageSize).map(withPictures), page, pageSize, total: items.length });
   }
 
   if (method === 'POST' && p === '/orders') {
@@ -178,14 +185,29 @@ export async function handleMockRequest(method, path, body = {}) {
       ...body, id: `ord_${1000 + orders.length + 1 + Math.floor(Math.random() * 900)}`, createdAt: body.createdAt ?? now, updatedAt: now,
     };
     orders.push(order);
-    return clone(withRisk().find((o) => o.id === order.id));
+    return clone(withPictures(withRisk().find((o) => o.id === order.id)));
   }
 
+  if ((m = p.match(/^\/orders\/([^/]+)\/reference-images$/)) && method === 'POST') { // attach a picture to the order itself (kept in the browser, like the rest of the demo)
+    const o = orders.find((x) => x.id === decodeURIComponent(m[1])); if (!o) throw notFound(m[1]);
+    const f = body?.file;
+    if (!f || !['image/png', 'image/jpeg', 'image/webp'].includes(f.type)) throw new ApiError(415, 'UNSUPPORTED_MEDIA', 'Upload a PNG, JPEG or WebP image.');
+    if (f.size > 5 * 1024 * 1024) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'The image is larger than 5 MB.');
+    const url = await readDataUrl(f);
+    o.referenceImages = o.referenceImages ?? [];
+    if (!o.referenceImages.some((i) => i.url === url)) o.referenceImages.push({ id: `img_${Date.now()}_${o.referenceImages.length}`, url, contentType: f.type, at: new Date().toISOString() });
+    return clone(withPictures(withRisk().find((x) => x.id === o.id)));
+  }
+  if ((m = p.match(/^\/orders\/([^/]+)\/reference-images\/([^/]+)$/)) && method === 'DELETE') {
+    const o = orders.find((x) => x.id === decodeURIComponent(m[1])); if (!o) throw notFound(m[1]);
+    o.referenceImages = (o.referenceImages ?? []).filter((i) => i.id !== decodeURIComponent(m[2]));
+    return clone(withPictures(withRisk().find((x) => x.id === o.id)));
+  }
   if ((m = p.match(/^\/orders\/([^/]+)$/))) {
     const id = decodeURIComponent(m[1]);
     const idx = orders.findIndex((o) => o.id === id);
     if (idx < 0) throw notFound(id);
-    if (method === 'GET') return clone(withRisk()[idx]);
+    if (method === 'GET') return clone(withPictures(withRisk()[idx]));
     if (method === 'PATCH') {
       const details = [...rejectUnknown(body, PATCHABLE), ...validateOrder(body, { partial: true })];
       if (details.length) throw invalid(details);
@@ -194,7 +216,7 @@ export async function handleMockRequest(method, path, body = {}) {
       }
       const completing = body.status === 'completed' && orders[idx].status !== 'completed';
       orders[idx] = { ...orders[idx], ...body, ...(completing ? { completedAt: new Date().toISOString() } : {}), updatedAt: new Date().toISOString() }; // like the server: completion time is recorded by the system
-      return clone(withRisk()[idx]);
+      return clone(withPictures(withRisk()[idx]));
     }
   }
 

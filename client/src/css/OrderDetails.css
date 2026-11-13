@@ -48,3 +48,10 @@
 }
 @media (max-width: 420px) { .odg-id { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .modal-backdrop.is-glass, .is-glass .modal, .is-glass.is-leaving, .is-glass.is-leaving .modal { animation: none; } }
+
+.odg-draft { display: flex; align-items: center; justify-content: space-between; gap: 1rem 1.5rem; flex-wrap: wrap; margin: -0.4rem 0 0; padding: 0.95rem 1.2rem; background: rgba(251, 247, 240, 0.8); border: 1px solid rgba(217, 169, 78, 0.25); border-radius: 16px; }
+.odg-draft b { font: 600 0.9rem var(--display); color: #8A6320; } .odg-draft p { margin: 0.25rem 0 0; font-size: 0.84rem; line-height: 1.45; color: var(--muted); } .odg-draft > div { flex: 1 1 18rem; min-width: 0; }
+
+/* The customer's reference picture, shown whole (never cropped) so the owner can read their requirements */
+.odg-thumb.is-ref img { width: 220px; height: 270px; object-fit: contain; background: #F7F4ED; }
+@media (max-width: 700px) { .odg-thumb.is-ref img { width: min(100%, 240px); height: 280px; } }

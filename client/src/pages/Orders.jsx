@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Search } from 'lucide-react';
-import { listOrders, createOrder, getOrder, updateOrder } from '../services/api.js';
+import { listOrders, createOrder, getOrder, updateOrder, uploadOrderReferenceImage, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { OPEN } from '../utils/format.js';
 import { DemoBadge, Modal, StateMessage } from '../components/UI.jsx';
@@ -16,10 +16,16 @@ function OrderEditor({ orderId, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
-  async function save(payload) {
+  async function save(payload, picture) {
     setSaving(true); setSaveError(null);
-    try { await (orderId ? updateOrder(orderId, payload) : createOrder(payload)); onSaved(); }
-    catch (e) { setSaveError(e); } finally { setSaving(false); }
+    try {
+      const saved = await (orderId ? updateOrder(orderId, payload) : createOrder(payload));
+      let warning = null;
+      if (picture) { // the order is saved first; then its picture is attached to it (the same id), so the card shows it as soon as the list reloads
+        try { await uploadOrderReferenceImage(saved.id ?? orderId, picture); } catch (e) { warning = `The order was saved, but its picture could not be attached: ${e.message}`; }
+      }
+      onSaved(warning);
+    } catch (e) { setSaveError(e); } finally { setSaving(false); }
   }
 
   return (
@@ -29,7 +35,7 @@ function OrderEditor({ orderId, onClose, onSaved }) {
       {status === 'ready' && (
         <>
           {saveError && <div className="notice error" role="alert">{saveError.message}</div>}
-          <OrderForm initial={data} showStatus board={!orderId} serverErrors={saveError?.details} submitting={saving}
+          <OrderForm initial={data} showStatus showPicture board={!orderId} serverErrors={saveError?.details} submitting={saving}
             submitLabel={orderId ? 'Save changes' : 'Add order'} onSubmit={save} onCancel={onClose} />
         </>
       )}
@@ -57,6 +63,12 @@ export default function Orders() {
   const { status, data, error, reload } = useAsync(() => (ds.ready ? listOrders({ pageSize: 100, dataset: ds.dataset }) : new Promise(() => {})), [ds.dataset, ds.ready]);
   const [orders, setOrders] = useState([]); // local copy, so a drop moves the card at once and the API call follows
   useEffect(() => { if (data) setOrders(data.items); }, [data]);
+  // Real orders change on their own (a customer sends a new reference picture): look again every so often while the page is open and visible.
+  useEffect(() => {
+    if (DEMO_MODE) return undefined;
+    const t = setInterval(() => { if (document.visibilityState === 'visible') reload(); }, 20000);
+    return () => clearInterval(t);
+  }, [reload]);
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -109,7 +121,7 @@ export default function Orders() {
       )}
       {data && orders.length > 0 && (
         <>
-          <OrderAccordion orders={shown} onOpen={setOpenId} />
+          <OrderAccordion orders={shown} onOpen={setOpenId} onEdit={setEditing} />
           {search && shown.length === 0 && <p className="od-foot">No orders match “{search}”. <button type="button" className="od-clear" onClick={() => setSearch('')}>Clear search</button></p>}
         </>
       )}
@@ -127,7 +139,7 @@ export default function Orders() {
         </Modal>
       )}
 
-      {editing && <OrderEditor orderId={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
+      {editing && <OrderEditor orderId={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onSaved={(warning) => { setEditing(null); reload(); if (warning) setNotice(warning); }} />}
     </section>
   );
 }

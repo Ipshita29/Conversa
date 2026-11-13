@@ -174,3 +174,18 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; us
   .oa-body { padding: 0 16px 18px; } .oa-body dl { gap: 0.5rem 1.2rem; } .oa-body dd { white-space: normal; }
   .oa-card.is-on .oa-num { left: 16px; }
 }
+
+/* ---------- Order gallery: each card's own picture ---------- */
+/* The picture is one element that covers the whole card (position: absolute; inset: 0; object-fit: cover), behind a dark gradient and the order's text. */
+.oa-card > .oa-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.oa-card.is-blank { background: linear-gradient(165deg, #B7AE9F, #80786A); }
+.oa-empty { position: absolute; inset: 0; z-index: -1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem; padding: 0 0.6rem; text-align: center; color: #fff; }
+.oa-empty em { font: 600 0.74rem/1.3 var(--display); font-style: normal; letter-spacing: 0.02em; }
+.oa-card.is-blank .oa-shade { opacity: 0.4; }
+
+/* Add / Edit order: the optional reference picture */
+.of-picture { margin-top: 1rem; } .of-picture-row { display: flex; align-items: center; gap: 1rem; margin-top: 0.4rem; flex-wrap: wrap; }
+.of-picture-row img { width: 72px; height: 90px; object-fit: cover; border-radius: 12px; border: 1px solid #E4E0D8; background: #F7F4ED; }
+.of-picture-empty { display: inline-grid; place-items: center; width: 72px; height: 90px; padding: 0.3rem; border: 1px dashed #D8D2C6; border-radius: 12px; font-size: 0.68rem; line-height: 1.25; text-align: center; color: var(--faint); }
+.of-picture-row > div { display: grid; gap: 0.3rem; min-width: 0; flex: 1 1 14rem; }
+.oa-body .oa-add { margin-left: 0.6rem; background: transparent; }

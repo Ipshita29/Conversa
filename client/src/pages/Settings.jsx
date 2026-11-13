@@ -14,7 +14,7 @@ const STATE = { not_connected: 'Not connected', connecting: 'Connecting…', con
 const ICON = { whatsapp: MessageCircle, instagram: Camera };
 const REQUIRES = {
   whatsapp: ['A WhatsApp Business Account and a phone number that is not already on the regular WhatsApp app (or is migrated to the Business Platform).', 'A Meta app with the WhatsApp product, the whatsapp_business_messaging permission, and Embedded Signup configured. Business verification is needed to message customers at scale.'],
-  instagram: ['An Instagram professional account (business or creator). A personal account cannot use the messaging API.', 'A Meta app with Instagram API with Instagram Login and the instagram_business_manage_messages permission. Advanced Access (app review) is needed to serve accounts you do not own.'],
+  instagram: ['An Instagram professional account (business or creator). A personal account cannot use the messaging API.', 'A Meta app with “API setup with Unified login” (or Instagram Login) and the instagram_manage_messages permission. Accounts you do not own need Advanced Access (app review); until then only people with a role on the app can connect.'],
 };
 
 function Copyable({ label, value }) {
@@ -66,7 +66,8 @@ export default function Settings() {
         <div className="grid-2">
           {data.items.map((i) => {
             const Icon = ICON[i.channel]; const state = DEMO_MODE ? 'demo' : (i.state ?? 'not_connected'); const r = result[i.channel];
-            const connected = state === 'connected'; const canConnect = !DEMO_MODE && ['not_connected', 'needs_attention', 'expired'].includes(state);
+            const connected = state === 'connected'; const ready = i.connect?.ready !== false; // false = the server lacks a setting the sign-in needs (named in the message above)
+            const canConnect = !DEMO_MODE && ready && ['not_connected', 'connecting', 'needs_attention', 'expired'].includes(state);
             return (
               <div key={i.channel} className="panel integration">
                 <div className="integration-head">
@@ -83,7 +84,7 @@ export default function Settings() {
                 {r && <div className={`notice ${r.ok ? 'ok' : 'error'}`} role={r.ok ? 'status' : 'alert'}>{r.message}</div>}
                 <div className="int-actions">
                   <button type="button" className="btn btn-primary" disabled={!canConnect || busy === i.channel} onClick={() => connect(i.channel)}>
-                    {busy === i.channel ? 'Working…' : connected ? 'Connected' : state === 'needs_attention' || state === 'expired' ? 'Reconnect' : `Connect ${i.channel === 'whatsapp' ? 'WhatsApp' : 'Instagram'}`}
+                    {busy === i.channel ? 'Working…' : connected ? 'Connected' : state === 'needs_attention' || state === 'expired' ? 'Reconnect' : state === 'connecting' ? 'Try again' : `Connect ${i.channel === 'whatsapp' ? 'WhatsApp' : 'Instagram'}`}
                   </button>
                   {!DEMO_MODE && (connected || state === 'needs_attention' || state === 'expired') && i.source === 'oauth' && <button type="button" className="btn" disabled={busy === i.channel} onClick={() => disconnect(i.channel)}>Disconnect</button>}
                 </div>

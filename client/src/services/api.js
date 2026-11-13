@@ -54,6 +54,9 @@ export const getBoard = (dataset) => request('GET', `/board${qs({ dataset })}`);
 export const getInsights = (range, dataset) => request('GET', `/analytics/summary${qs(typeof range === 'object' && range ? { from: range.from, to: range.to, dataset } : { range, dataset })}`);
 export const getMonthlyAnalytics = (month, dataset) => request('GET', `/analytics/monthly${qs({ month, dataset })}`);
 
+// A picture attached to an order itself (Add / Edit order). The newest one is what the Orders gallery shows; customer pictures from its conversation are found automatically.
+export const uploadOrderReferenceImage = (orderId, file) => sendImage('POST', `/orders/${encodeURIComponent(orderId)}/reference-images`, file);
+export const removeOrderReferenceImage = (orderId, imageId) => request('DELETE', `/orders/${encodeURIComponent(orderId)}/reference-images/${encodeURIComponent(imageId)}`);
 export const listOrders = (params) => request('GET', `/orders${qs(params)}`);
 export const createOrder = (order) => request('POST', '/orders', order);
 export const getOrder = (id) => request('GET', `/orders/${encodeURIComponent(id)}`);

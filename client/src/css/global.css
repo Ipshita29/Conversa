@@ -106,6 +106,7 @@ a { color: var(--blue-ink); text-underline-offset: 3px; }
 
 /* ---------- Badges ---------- */
 .badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.12rem 0.6rem; border-radius: 999px; font-size: 0.74rem; font-weight: 500; background: var(--papaya); color: var(--cocoa); white-space: nowrap; }
+.status-draft { background: #F1EEE8; color: var(--muted); }
 .status-pending { background: var(--papaya); color: var(--caramel-ink); }
 .status-confirmed { background: var(--blue-soft); color: var(--blue-ink); }
 .status-in_progress { background: var(--blue); color: #1E4560; }

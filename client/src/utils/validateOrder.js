@@ -1,5 +1,5 @@
 // Validation rules from docs/api-contract.md §2. Shared by the order form and the demo mock backend.
-export const ORDER_STATUSES = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+export const ORDER_STATUSES = ['draft', 'pending', 'confirmed', 'in_progress', 'completed', 'cancelled'];
 export const PAYMENT_STATUSES = ['unverified', 'pending', 'partial', 'verified', 'rejected'];
 export const SOURCES = ['manual', 'whatsapp', 'instagram'];
 
