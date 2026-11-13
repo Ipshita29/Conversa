@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+
+// Automated tests never read the real .env: they must not use the owner's real Meta, AI or database credentials (or message real customers).
+if (!process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== 'test') dotenv.config();
 
 const int = (v, d) => (Number.isFinite(Number(v)) && v !== undefined && v !== '' ? Number(v) : d);
 
@@ -43,8 +46,17 @@ export const config = {
       accessToken: process.env.INSTAGRAM_ACCESS_TOKEN || '',
       businessAccountId: process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '',
       verifyToken: process.env.INSTAGRAM_VERIFY_TOKEN || verifyToken,
+      // How accounts log in. Apps created recently use UNIFIED LOGIN: Facebook Login for Business with a configuration id; the token is a business
+      // system-user token and everything goes through graph.facebook.com. Older apps use INSTAGRAM LOGIN (Instagram's own OAuth, graph.instagram.com),
+      // which has its own Instagram App ID / Secret (not the Meta app's). The mode follows which of these you set; INSTAGRAM_API_MODE forces one.
+      loginConfigId: process.env.INSTAGRAM_LOGIN_CONFIG_ID || '',
+      appId: process.env.INSTAGRAM_APP_ID || '',
+      appSecret: process.env.INSTAGRAM_APP_SECRET || '',
+      mode: process.env.INSTAGRAM_API_MODE || (process.env.INSTAGRAM_LOGIN_CONFIG_ID ? 'unified' : 'instagram_login'),
     },
   },
+  // Reading incoming conversations into order drafts. On by default whenever an AI key exists; the pause lets several quick messages be read together.
+  autoDraft: { enabled: process.env.AUTO_DRAFT !== 'false' && Boolean(process.env.GROQ_API_KEY), delayMs: int(process.env.AUTO_DRAFT_DELAY_MS, 8000) },
   aiRateLimitPerMinute: int(process.env.AI_RATE_LIMIT_PER_MINUTE, 20),
 };
 

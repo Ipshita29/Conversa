@@ -18,6 +18,7 @@ import { ApiError, notFound } from '../utils/errors.js';
 export async function ingest(messages) {
   let stored = 0;
   let duplicates = 0;
+  const toRead = new Set(); // conversations that just received customer text: candidates for an automatic order draft
   for (const m of messages) {
     const conv = await upsertConversation(m);
     try {
@@ -30,6 +31,7 @@ export async function ingest(messages) {
       const paymentScan = m.messageType !== 'image' ? null : attachment ? { state: 'processing', at: new Date() } : { state: 'failed', reason: 'The picture could not be downloaded, so it was not checked for a payment.', at: new Date() };
       const msg = await Message.create({ conversation: conv._id, channel: m.channel, externalId: m.externalId, text: m.text, messageType: m.messageType, receivedAt: m.receivedAt, attachment, paymentScan });
       stored++;
+      if (m.text) toRead.add(String(conv._id));
       if (paymentScan?.state === 'processing') queueScan(msg._id);
       // A payment-looking message in a chat already linked to an order is filed as Verification pending (never as paid).
       await draftFromIncoming(conv, m.text, String(msg._id), m.receivedAt);
@@ -38,7 +40,7 @@ export async function ingest(messages) {
       else throw err;
     }
   }
-  return { stored, duplicates };
+  return { stored, duplicates, toRead: [...toRead] };
 }
 
 // A customer's picture: downloaded with the connected account's own token (WhatsApp media id, or an Instagram CDN link) and kept like a payment proof.
@@ -173,6 +175,23 @@ export async function orderConversation(orderId) {
   if (!conv) return { conversation: null, messages: [], spec: extractOrderSpec([]) };
   const messages = ((await messagesByConversation([conv._id]))[conv._id] ?? []).map((m) => ({ ...m, kind: imageKind(m) }));
   return { conversation: { id: String(conv._id), channel: conv.channel, customerName: conv.customerName, isDemo: Boolean(conv.isDemo) }, messages, spec: extractOrderSpec(messages) };
+}
+
+// The reference pictures each order's customer sent, newest first, for the Orders gallery. An order's pictures live in its linked conversation; a payment
+// screenshot (or a picture still being read) is never a reference picture. One query for all the orders asked about, not one per order.
+export async function referenceImagesByOrder(orderIds) {
+  const ids = orderIds.filter((i) => ID.test(String(i)));
+  if (!ids.length) return {};
+  const convs = await Conversation.find({ orderId: { $in: ids } }).select('orderId').lean();
+  if (!convs.length) return {};
+  const orderOf = Object.fromEntries(convs.map((c) => [String(c._id), String(c.orderId)]));
+  const msgs = await Message.find({ conversation: { $in: convs.map((c) => c._id) }, attachment: { $ne: null } }).sort({ receivedAt: -1 }).select('conversation attachment paymentId paymentScan receivedAt').lean();
+  const out = {};
+  for (const m of msgs) {
+    if (imageKind({ attachment: m.attachment, payment: m.paymentId, scan: m.paymentScan }) !== 'reference') continue;
+    (out[orderOf[String(m.conversation)]] ??= []).push({ messageId: String(m._id), url: `/conversations/${m.conversation}/messages/${m._id}/attachment`, contentType: m.attachment.contentType ?? null, at: m.receivedAt.toISOString() });
+  }
+  return out;
 }
 
 // For the reply tools: a conversation and its messages in the same shape the list uses.

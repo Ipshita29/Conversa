@@ -7,8 +7,8 @@ import { getSettings } from './settingsService.js';
 import { conversationWithMessages } from './messageService.js';
 import { extractOrderSpec, imageKind } from './orderSpec.js';
 import { groqJson } from './groqClient.js';
-import { channels, listStatuses } from './integrations/index.js';
-import { refreshInstagramIfDue, resolveConfig } from './integrations/credentials.js';
+import { channels, listStatuses, clearStatusCache } from './integrations/index.js';
+import { markNeedsAttention, refreshInstagramIfDue, resolveConfig } from './integrations/credentials.js';
 import { REPLY_SYSTEM, cleanSuggestions, orderSummary, replyContext, replyPrompt, ruleSuggestions, shortId } from './replyLogic.js';
 import { ApiError, notFound, validationError } from '../utils/errors.js';
 
@@ -88,7 +88,10 @@ export async function sendReply(convId, text) {
     }
     if (conv.channel === 'instagram') await refreshInstagramIfDue(); // a token close to expiry is renewed before it is used
     const r = await channels[conv.channel].sendText(conv.contactId, clean, {}, await resolveConfig());
-    if (!r.ok) throw new ApiError(502, 'SEND_FAILED', r.reason);
+    if (!r.ok) {
+      if (r.code === 190) { await markNeedsAttention(conv.channel, r.reason).catch(() => {}); clearStatusCache(); } // the token is dead: show it in Settings
+      throw new ApiError(r.code === 'WINDOW_CLOSED' ? 409 : 502, r.code === 'WINDOW_CLOSED' ? 'WINDOW_CLOSED' : 'SEND_FAILED', r.reason);
+    }
     mode = 'real'; if (r.externalId) externalId = r.externalId;
   }
   const at = new Date();

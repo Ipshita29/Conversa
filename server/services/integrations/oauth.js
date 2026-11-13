@@ -9,45 +9,99 @@ import { consumeState, newState, saveConnection } from './credentials.js';
 import { graphPost } from './graph.js';
 
 const unavailable = (message) => new ApiError(503, 'INTEGRATION_UNAVAILABLE', message);
-const IG_SCOPES = ['instagram_business_basic', 'instagram_business_manage_messages'];
-
 function needApp(cfg) {
   const missing = [!cfg.meta.appId && 'META_APP_ID', !cfg.meta.appSecret && 'META_APP_SECRET', !hasEncryptionKey(cfg.encryptionKey) && 'ENCRYPTION_KEY'].filter(Boolean);
   if (missing.length) throw unavailable(`Connecting needs these environment variables on the server: ${missing.join(', ')}.`);
 }
 const form = (o) => new URLSearchParams(o).toString();
 
-// ---- Instagram (API with Instagram Login) ------------------------------------------------------------------------------------------------
+// ---- Instagram ------------------------------------------------------------------------------------------------------------------------
+// Two logins, never mixed (see config.meta.instagram.mode):
+//   unified          Facebook Login for Business + the configuration id. Authorize at facebook.com, exchange at graph.facebook.com (the META app id/secret),
+//                    find the account with /me/assigned_instagram_accounts, message through graph.facebook.com.
+//   instagram_login  Instagram's own OAuth at instagram.com with the INSTAGRAM app id/secret (a different pair from the Meta app's).
 export const instagramRedirectUri = (cfg = config) => `${cfg.serverUrl}/api/integrations/instagram/oauth/callback`;
+const IG_SCOPES = ['instagram_business_basic', 'instagram_business_manage_messages'];
+const MESSAGING_PERMISSIONS = ['instagram_manage_messages', 'instagram_business_manage_messages'];
+const igApp = (cfg) => ({ id: cfg.meta.instagram.appId || cfg.meta.appId, secret: cfg.meta.instagram.appSecret || cfg.meta.appSecret });
+const igMode = (cfg) => (cfg.meta.instagram.mode === 'unified' ? 'unified' : 'instagram_login');
+
+// What signing in with Instagram needs from this server. The account's own token is NOT among them: that is what signing in produces.
+export function instagramConnectReadiness(cfg = config) {
+  const unified = igMode(cfg) === 'unified'; const app = unified ? { id: cfg.meta.appId, secret: cfg.meta.appSecret } : igApp(cfg);
+  const missing = [!app.id && (unified ? 'META_APP_ID' : 'INSTAGRAM_APP_ID'), !app.secret && (unified ? 'META_APP_SECRET' : 'INSTAGRAM_APP_SECRET'), unified && !cfg.meta.instagram.loginConfigId && 'INSTAGRAM_LOGIN_CONFIG_ID',
+    !hasEncryptionKey(cfg.encryptionKey) && 'ENCRYPTION_KEY', !cfg.serverUrl && 'SERVER_URL'].filter(Boolean);
+  return { ready: missing.length === 0, missing, mode: unified ? 'unified' : 'instagram_login', app };
+}
+function needInstagram(cfg) {
+  const r = instagramConnectReadiness(cfg);
+  if (!r.ready) throw unavailable(`Connecting Instagram needs these environment variables on the server: ${r.missing.join(', ')}.`);
+  return r.app;
+}
 
 export async function instagramStart(cfg = config) {
-  needApp(cfg);
-  if (!cfg.serverUrl) throw unavailable('SERVER_URL is not set, so the OAuth callback address is unknown.');
+  const app = needInstagram(cfg);
   const state = await newState('instagram');
-  const url = `https://www.instagram.com/oauth/authorize?${form({ client_id: cfg.meta.appId, redirect_uri: instagramRedirectUri(cfg), response_type: 'code', scope: IG_SCOPES.join(','), state })}`;
+  const url = igMode(cfg) === 'unified'
+    // No "scope": the configuration decides the permissions. override_default_response_type returns a code we exchange on the server.
+    ? `https://www.facebook.com/${cfg.meta.graphVersion}/dialog/oauth?${form({ client_id: app.id, config_id: cfg.meta.instagram.loginConfigId, redirect_uri: instagramRedirectUri(cfg), response_type: 'code', override_default_response_type: 'true', state })}`
+    : `https://www.instagram.com/oauth/authorize?${form({ client_id: app.id, redirect_uri: instagramRedirectUri(cfg), response_type: 'code', scope: IG_SCOPES.join(','), state })}`;
   return { url };
 }
 
+const metaJson = async (res, what) => {
+  const b = await res.json().catch(() => null);
+  if (!res.ok || b?.error || b?.error_message) throw new ApiError(502, 'META_REJECTED', `${what} rejected the request${(b?.error?.message || b?.error_message) ? `: ${b.error?.message ?? b.error_message}` : ''}.`);
+  return b;
+};
+
 export async function instagramComplete({ code, state }, { fetchImpl = fetch, cfg = config } = {}) {
-  needApp(cfg);
+  const app = needInstagram(cfg);
   if (!code || !(await consumeState('instagram', state))) throw new ApiError(400, 'INVALID_STATE', 'This connection attempt expired or did not start here. Start again from Settings.');
-  const json = async (res) => { const b = await res.json().catch(() => null); if (!res.ok || b?.error || b?.error_message) throw new ApiError(502, 'META_REJECTED', `Instagram rejected the request${(b?.error?.message || b?.error_message) ? `: ${b.error?.message ?? b.error_message}` : ''}.`); return b; };
-  const short = await json(await fetchImpl('https://api.instagram.com/oauth/access_token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form({ client_id: cfg.meta.appId, client_secret: cfg.meta.appSecret, grant_type: 'authorization_code', redirect_uri: instagramRedirectUri(cfg), code: String(code).replace(/#_$/, '') }) }));
+  return igMode(cfg) === 'unified' ? unifiedComplete(code, app, fetchImpl, cfg) : instagramLoginComplete(code, app, fetchImpl, cfg);
+}
+
+async function unifiedComplete(code, app, fetchImpl, cfg) {
+  const api = `https://graph.facebook.com/${cfg.meta.graphVersion}`;
+  const tok = await metaJson(await fetchImpl(`${api}/oauth/access_token?${form({ client_id: app.id, client_secret: app.secret, redirect_uri: instagramRedirectUri(cfg), code })}`), 'Meta');
+  const token = tok.access_token;
+  if (!token) throw new ApiError(502, 'META_REJECTED', 'Meta did not return an access token.');
+  // What the token can do and when it ends (expires_at 0 = a system-user token that never expires). Asked of Meta, not assumed.
+  const dbg = (await metaJson(await fetchImpl(`${api}/debug_token?${form({ input_token: token, access_token: `${app.id}|${app.secret}` })}`), 'Meta'))?.data ?? {};
+  if (dbg.is_valid === false) throw new ApiError(502, 'META_REJECTED', 'Meta says the access token it just issued is not valid.');
+  const scopes = dbg.scopes ?? [];
+  if (scopes.length && !scopes.some((x) => MESSAGING_PERMISSIONS.includes(x))) throw new ApiError(422, 'MISSING_PERMISSION', 'Instagram messaging permission (instagram_manage_messages) was not granted. In the Meta app, add it to the Instagram Login configuration, then connect again.');
+  // The professional account(s) the owner shared. A Facebook Page is not involved in this login.
+  const list = (await metaJson(await fetchImpl(`${api}/me/assigned_instagram_accounts?${form({ fields: 'id,username,name', access_token: token })}`), 'Meta')).data ?? [];
+  const want = cfg.meta.instagram.businessAccountId;
+  let account = (want && list.find((a) => String(a.id) === String(want))) || list[0];
+  if (!account && want) { const r = await fetchImpl(`${api}/${want}?${form({ fields: 'id,username,name', access_token: token })}`); if (r.ok) account = await r.json(); }
+  if (!account?.id) throw new ApiError(422, 'NO_ACCOUNT', 'No Instagram professional account was shared with Conversa. Connect again and choose the account on the Instagram step; it must be a business or creator account added to your Meta business portfolio.');
+  const accountId = String(account.id);
+  const expiresIn = dbg.expires_at ? Math.max(60, dbg.expires_at - Math.floor(Date.now() / 1000)) : null;
+  await saveConnection('instagram', { accessToken: token, expiresInSeconds: expiresIn, accountId, accountLabel: account.username ? `@${account.username}` : (account.name ?? accountId), scopes, apiMode: 'unified' });
+  // Subscribe this account's messages to this app (each shared account is subscribed individually, with this token).
+  const sub = await graphPost(`${api}/${accountId}/subscribed_apps?${form({ subscribed_fields: 'messages,messaging_seen' })}`, token, {}, { fetchImpl });
+  if (!sub.ok) log.warn('instagram', 'Connected, but subscribing the account to message webhooks failed; check the Instagram webhook fields in the app dashboard.', { status: sub.status });
+  return { accountId, accountLabel: account.username ? `@${account.username}` : accountId, subscribed: sub.ok, extraAccounts: Math.max(0, list.length - 1) };
+}
+
+async function instagramLoginComplete(code, app, fetchImpl, cfg) {
+  const short = await metaJson(await fetchImpl('https://api.instagram.com/oauth/access_token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form({ client_id: app.id, client_secret: app.secret, grant_type: 'authorization_code', redirect_uri: instagramRedirectUri(cfg), code: String(code).replace(/#_$/, '') }) }), 'Instagram');
   const shortToken = short.access_token ?? short.data?.[0]?.access_token;
   if (!shortToken) throw new ApiError(502, 'META_REJECTED', 'Instagram did not return an access token.');
-  const long = await json(await fetchImpl(`https://graph.instagram.com/access_token?${form({ grant_type: 'ig_exchange_token', client_secret: cfg.meta.appSecret, access_token: shortToken })}`));
-  const me = await json(await fetchImpl(`https://graph.instagram.com/${cfg.meta.graphVersion}/me?${form({ fields: 'user_id,username,account_type', access_token: long.access_token })}`));
+  const long = await metaJson(await fetchImpl(`https://graph.instagram.com/access_token?${form({ grant_type: 'ig_exchange_token', client_secret: app.secret, access_token: shortToken })}`), 'Instagram');
+  const me = await metaJson(await fetchImpl(`https://graph.instagram.com/${cfg.meta.graphVersion}/me?${form({ fields: 'user_id,username,account_type', access_token: long.access_token })}`), 'Instagram');
   // Only professional accounts (business or creator) can use the messaging API; a personal account cannot.
   if (me.account_type && !['BUSINESS', 'MEDIA_CREATOR', 'CREATOR'].includes(String(me.account_type).toUpperCase())) {
     throw new ApiError(422, 'NOT_PROFESSIONAL', 'This is a personal Instagram account. Switch it to a professional (business or creator) account in Instagram, then connect again.');
   }
   const accountId = String(me.user_id ?? me.id ?? short.user_id);
-  await saveConnection('instagram', { accessToken: long.access_token, expiresInSeconds: long.expires_in ?? 5184000, accountId, accountLabel: me.username ? `@${me.username}` : accountId, scopes: IG_SCOPES });
-  // Subscribe this account to message webhooks (best effort: the same can be done once in the app dashboard).
+  await saveConnection('instagram', { accessToken: long.access_token, expiresInSeconds: long.expires_in ?? 5184000, accountId, accountLabel: me.username ? `@${me.username}` : accountId, scopes: IG_SCOPES, apiMode: 'instagram_login' });
   const sub = await graphPost(`https://graph.instagram.com/${cfg.meta.graphVersion}/${accountId}/subscribed_apps?${form({ subscribed_fields: 'messages,messaging_seen' })}`, long.access_token, {}, { fetchImpl });
   if (!sub.ok) log.warn('instagram', 'Connected, but subscribing the account to message webhooks failed; subscribe in the app dashboard.', { status: sub.status });
-  return { accountId, accountLabel: me.username ? `@${me.username}` : accountId };
+  return { accountId, accountLabel: me.username ? `@${me.username}` : accountId, subscribed: sub.ok };
 }
 
 // ---- WhatsApp (Embedded Signup) ------------------------------------------------------------------------------------------------------------

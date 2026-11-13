@@ -28,7 +28,7 @@ function parseRange(src, fail) {
 export const getPlanner = asyncHandler(async (req, res) => {
   const { days, from } = parseRange(req.query, badQuery);
   const dataset = datasetOf(req.query.dataset); // the Plan shows one data set: demo orders never take capacity from real ones
-  const [orders, settings] = await Promise.all([Order.find(orderFilter(dataset)).limit(5000), getSettings()]);
+  const [orders, settings] = await Promise.all([Order.find({ ...orderFilter(dataset), status: { $ne: 'draft' } }).limit(5000), getSettings()]);
   const now = planNow(planningStart(from, settings.timezone), await getCommitmentStart()); // an applied What-if commitment starts production at its own morning
   res.json({ ...publicPlan(computePlan({ orders, settings, now, rangeDays: days })), suggestedScenario: suggestScenario({ orders, settings, now, rangeDays: days }) });
 });
@@ -38,7 +38,7 @@ export const simulatePlanner = asyncHandler(async (req, res) => {
   const { days, from } = parseRange(req.body, validationError);
   const probeMinutes = req.body.probeMinutes === undefined ? 60 : req.body.probeMinutes;
   if (!Number.isInteger(probeMinutes) || probeMinutes < 15 || probeMinutes > 480) throw validationError([{ field: 'probeMinutes', message: 'Must be a whole number of minutes from 15 to 480.' }]);
-  const [orders, settings] = await Promise.all([Order.find().limit(5000), getSettings()]);
+  const [orders, settings] = await Promise.all([Order.find({ status: { $ne: 'draft' } }).limit(5000), getSettings()]);
   // Read-only: orders are only read, never written.
   res.json(simulate({ orders, changes: req.body.changes, settings, now: planningStart(from, settings.timezone), rangeDays: days, probeMinutes }));
 });
@@ -46,7 +46,7 @@ export const simulatePlanner = asyncHandler(async (req, res) => {
 // The What-if page. `scope` is 'commitment' (the five seeded demo orders with their requested times on one production day, planned from 9:00 that morning), 'demo' (the same orders on the real clock) or 'all' (every order); both run the same engine on copies and nothing is saved.
 const scopeOf = (v) => (v === 'all' || v === 'commitment' ? v : 'demo');
 const whatIfInputs = async (scope) => {
-  const [orders, settings] = await Promise.all([Order.find().limit(5000), getSettings()]);
+  const [orders, settings] = await Promise.all([Order.find({ status: { $ne: 'draft' } }).limit(5000), getSettings()]);
   const kind = scopeOf(scope); const raw = orders.map((o) => o.toJSON());
   return { ...scopeInputs(raw, kind, settings, new Date()), settings, raw };
 };

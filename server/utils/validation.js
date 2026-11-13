@@ -1,5 +1,6 @@
 // Order validation (docs/api-contract.md §2). Pure functions: returns { value, details }.
-export const ORDER_STATUSES = ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+// 'draft' = an order read from a customer's messages that the owner has not confirmed: visible in Orders, but never scheduled, counted or reported.
+export const ORDER_STATUSES = ['draft', 'pending', 'confirmed', 'in_progress', 'completed', 'cancelled'];
 export const PAYMENT_STATUSES = ['unverified', 'pending', 'partial', 'verified', 'rejected'];
 export const SOURCES = ['manual', 'whatsapp', 'instagram'];
 export const OPEN_STATUSES = ['pending', 'confirmed', 'in_progress'];

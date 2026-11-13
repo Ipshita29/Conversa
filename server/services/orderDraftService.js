@@ -24,9 +24,9 @@ export function classifyIntent(customerTexts, item, aiIntent = 'unclear') {
   return aiIntent === 'enquiry' ? 'enquiry' : 'unclear';
 }
 
-export async function draftFromConversation(convId, deps = {}) {
+export async function draftFromConversation(convId, deps = {}, { ignoreLinked = false } = {}) {
   const { conv, messages } = await conversationWithMessages(convId);
-  if (conv.orderId) {
+  if (conv.orderId && !ignoreLinked) {
     const existing = await Order.findById(conv.orderId);
     if (existing) return { existingOrderId: String(existing._id), draft: null, intent: 'order', readyToConfirm: false, missingFields: [], uncertainties: [], note: 'This conversation already has an order. Later messages are kept as updated instructions on it; no second order is drafted.' };
   }

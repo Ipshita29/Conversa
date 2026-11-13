@@ -24,15 +24,15 @@ export async function resolveConfig(base = config) {
     const token = decrypt(r.accessTokenEnc);
     if (!token) continue;
     if (r.channel === 'whatsapp') Object.assign(cfg.meta.whatsapp, { accessToken: token, ...(r.accountId ? { phoneNumberId: r.accountId } : {}), ...(r.businessAccountId ? { businessAccountId: r.businessAccountId } : {}) });
-    if (r.channel === 'instagram') Object.assign(cfg.meta.instagram, { accessToken: token, ...(r.accountId ? { businessAccountId: r.accountId } : {}) });
+    if (r.channel === 'instagram') Object.assign(cfg.meta.instagram, { accessToken: token, mode: r.apiMode ?? 'instagram_login', ...(r.accountId ? { businessAccountId: r.accountId } : {}) });
   }
   return cfg;
 }
 
-export async function saveConnection(channel, { accessToken, expiresInSeconds = null, accountId, accountLabel, businessAccountId = null, scopes = [] }) {
+export async function saveConnection(channel, { accessToken, expiresInSeconds = null, accountId, accountLabel, businessAccountId = null, scopes = [], apiMode = null }) {
   const now = new Date();
   return Integration.findOneAndUpdate({ channel }, { $set: {
-    status: 'connected', statusReason: null, accountId: accountId ?? null, accountLabel: accountLabel ?? null, businessAccountId, scopes,
+    status: 'connected', statusReason: null, apiMode, accountId: accountId ?? null, accountLabel: accountLabel ?? null, businessAccountId, scopes,
     accessTokenEnc: encrypt(accessToken), tokenIssuedAt: now, lastRefreshAt: now, connectedAt: now,
     tokenExpiresAt: expiresInSeconds ? new Date(now.getTime() + expiresInSeconds * 1000) : null, oauthStateHash: null, oauthStateExpires: null,
   } }, { upsert: true, new: true });
@@ -61,7 +61,9 @@ export async function consumeState(channel, state) {
 // What Settings shows for one channel: the stored record, or "configured through the environment", or nothing. Never a token.
 export function describe(channel, record, cfg = config, now = new Date()) {
   const env = channel === 'whatsapp' ? Boolean(cfg.meta.whatsapp.accessToken && cfg.meta.whatsapp.phoneNumberId) : Boolean(cfg.meta.instagram.accessToken);
-  if (record && record.status !== 'disconnected') {
+  // A sign-in that was started and never finished (the owner closed the tab) is not "connecting" for ever: after its ten minutes it is simply not connected.
+  const stale = record?.status === 'connecting' && (!record.oauthStateExpires || record.oauthStateExpires <= now) && !record.accessTokenEnc;
+  if (record && record.status !== 'disconnected' && !stale) {
     const status = expired(record, now) ? 'expired' : record.status;
     return { status, accountLabel: record.accountLabel, statusReason: status === 'expired' ? 'The access token has expired. Connect the account again.' : record.statusReason, source: 'oauth', expiresAt: record.tokenExpiresAt?.toISOString?.() ?? null };
   }
@@ -72,6 +74,10 @@ export function describe(channel, record, cfg = config, now = new Date()) {
 export async function refreshInstagramIfDue({ fetchImpl = fetch, now = new Date() } = {}) {
   const r = await getRecord('instagram');
   if (!r || r.status === 'disconnected' || !r.accessTokenEnc) return { refreshed: false, reason: 'not_connected' };
+  if (r.apiMode === 'unified') { // a business system-user token: Meta offers no refresh. Most never expire; one that does must be reconnected
+    if (r.tokenExpiresAt && r.tokenExpiresAt.getTime() - now.getTime() < 3 * 24 * 3600000 && r.status === 'connected') await markNeedsAttention('instagram', 'The access token is about to expire and cannot be renewed automatically. Connect the account again.');
+    return { refreshed: false, reason: 'unified' };
+  }
   if (expired(r, now)) { await Integration.updateOne({ channel: 'instagram' }, { $set: { status: 'expired', statusReason: 'The access token has expired. Connect the account again.' } }); return { refreshed: false, reason: 'expired' }; }
   if (!r.tokenExpiresAt || r.tokenExpiresAt.getTime() - now.getTime() > REFRESH_WITHIN_MS) return { refreshed: false, reason: 'not_due' };
   if (r.tokenIssuedAt && now.getTime() - r.tokenIssuedAt.getTime() < MIN_AGE_MS) return { refreshed: false, reason: 'too_new' };

@@ -25,6 +25,11 @@ const orderSchema = new mongoose.Schema({
   status: { type: String, enum: ORDER_STATUSES, default: 'pending' },
   paymentStatus: { type: String, enum: PAYMENT_STATUSES, default: 'unverified' },
   paymentEvidence: { type: [evidenceSchema], default: [] },
+  // Pictures attached to the order itself (the owner adds one when entering or editing an order). Stored by the same proof store as every other picture; only
+  // metadata is here, and the stored file name is never sent to a browser. Pictures a customer sent in the order's conversation are found through the conversation.
+  referenceImages: { type: [{ file: String, contentType: String, size: Number, sha256: String, originalName: String, addedAt: { type: Date, default: Date.now } }], default: [] },
+  // Set only on a draft read automatically from a conversation: what the AI could not find, what it assumed, and which messages it used.
+  draft: { type: { auto: Boolean, missingFields: [String], uncertainties: [{ field: String, message: String, _id: false }], assumed: [String], messageIds: [String], autoUpdatedAt: Date, extractedAt: Date, ownerEdited: Boolean }, default: null, _id: false },
 }, {
   timestamps: true,
   toJSON: {
@@ -33,6 +38,7 @@ const orderSchema = new mongoose.Schema({
     transform(doc, ret) {
       ret.id = String(ret._id);
       delete ret._id;
+      delete ret.referenceImages; // storage file names stay on the server; the API serves pictures through /orders/:id/reference-images/:imageId
       if (ret.paymentEvidence) ret.paymentEvidence = ret.paymentEvidence.map(({ _id, ...e }) => ({ id: String(_id), ...e }));
       return ret;
     },

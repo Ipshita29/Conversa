@@ -3,8 +3,9 @@ import { asyncHandler, badQuery, notFound, validationError, ApiError } from '../
 import { validateOrderInput, validateEvidenceInput, ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validation.js';
 import { getSettings } from '../services/settingsService.js';
 import { riskMap, withRisk } from '../services/orderService.js';
-import { orderConversation } from '../services/messageService.js';
+import { orderConversation, referenceImagesByOrder } from '../services/messageService.js';
 import { datasetOf, orderFilter } from '../utils/dataset.js';
+import { checkImage, saveProof, readProof, deleteProof, hashImage } from '../services/proofStore.js';
 
 const TERMINAL = ['completed', 'cancelled'];
 const SORTS = { deadline: 1, '-deadline': -1, createdAt: 1, '-createdAt': -1 };
@@ -16,6 +17,19 @@ async function findOrder(id) {
   if (!order) throw notFound('Order', id);
   return order;
 }
+
+// Each order's pictures: what the customer sent in the order's conversation AND what the owner attached to the order itself, newest first. One source of
+// truth for the Orders gallery, the order details and every order response, so Real and Demo orders behave the same.
+const ownPictures = (o) => (o.referenceImages ?? []).map((i) => ({ messageId: null, id: String(i._id), url: `/orders/${o.id}/reference-images/${i._id}`, contentType: i.contentType ?? null, at: new Date(i.addedAt ?? o.createdAt ?? 0).toISOString() }));
+export async function picturesOf(orders) {
+  const fromChats = await referenceImagesByOrder(orders.map((o) => String(o._id ?? o.id)));
+  return Object.fromEntries(orders.map((o) => {
+    const id = String(o._id ?? o.id);
+    return [id, [...(fromChats[id] ?? []), ...ownPictures({ ...o.toObject?.() ?? o, id })].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))];
+  }));
+}
+const pictureFields = (list = []) => ({ referenceImage: list[0] ?? null, referenceImages: list, referenceImageCount: list.length });
+const withPictures = async (order, risks) => ({ ...withRisk(order, risks), ...pictureFields((await picturesOf([order]))[String(order._id)]) });
 
 const enumList = (raw, allowed, field, details) => {
   const vals = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
@@ -48,7 +62,9 @@ export const list = asyncHandler(async (req, res) => {
     if (key === 'deadline') { if (!a.deadline && !b.deadline) return 0; if (!a.deadline) return 1; if (!b.deadline) return -1; } // nulls last
     return dir * (a[key] - b[key]);
   });
-  res.json({ items: orders.slice((page - 1) * pageSize, page * pageSize).map((o) => withRisk(o, risks)), page, pageSize, total: orders.length });
+  const pageOrders = orders.slice((page - 1) * pageSize, page * pageSize);
+  const pictures = await picturesOf(pageOrders);
+  res.json({ items: pageOrders.map((o) => ({ ...withRisk(o, risks), ...pictureFields(pictures[String(o._id)]) })), page, pageSize, total: orders.length });
 });
 
 export const create = asyncHandler(async (req, res) => {
@@ -56,12 +72,12 @@ export const create = asyncHandler(async (req, res) => {
   if (details.length) throw validationError(details);
   const order = await Order.create(value);
   const risks = await riskMap(await getSettings());
-  res.status(201).location(`/api/orders/${order.id}`).json(withRisk(order, risks));
+  res.status(201).location(`/api/orders/${order.id}`).json(await withPictures(order, risks));
 });
 
 export const get = asyncHandler(async (req, res) => {
   const order = await findOrder(req.params.id);
-  res.json(withRisk(order, await riskMap(await getSettings())));
+  res.json(await withPictures(order, await riskMap(await getSettings())));
 });
 
 export const update = asyncHandler(async (req, res) => {
@@ -76,7 +92,7 @@ export const update = asyncHandler(async (req, res) => {
   if (value.status === 'completed' && order.status !== 'completed') order.completedAt = new Date(); // the moment it was delivered: what on-time delivery is measured from
   order.set(value);
   await order.save();
-  res.json(withRisk(order, await riskMap(await getSettings())));
+  res.json(await withPictures(order, await riskMap(await getSettings())));
 });
 
 // Attaches a reference to payment evidence. It never changes paymentStatus: only the seller does that via PATCH.
@@ -90,3 +106,42 @@ export const addPaymentEvidence = asyncHandler(async (req, res) => {
 });
 
 export const conversation = asyncHandler(async (req, res) => res.json(await orderConversation((await findOrder(req.params.id)).id)));
+
+// ---- Pictures attached to an order -------------------------------------------------------------------------------------------------------------
+const MAX_PICTURES = 8;
+// POST /api/orders/:id/reference-images  (the image as the raw body, like every other picture upload). The newest picture is the one the gallery shows;
+// the same picture twice is kept once.
+export const addReferenceImage = asyncHandler(async (req, res) => {
+  if (!Buffer.isBuffer(req.body) || !req.body.length) throw new ApiError(415, 'UNSUPPORTED_MEDIA', 'Send the image as the request body (Content-Type image/png, image/jpeg or image/webp).');
+  checkImage(req.body);
+  const order = await findOrder(req.params.id);
+  const sha = hashImage(req.body);
+  const dupe = order.referenceImages.find((i) => i.sha256 === sha);
+  if (!dupe) {
+    if (order.referenceImages.length >= MAX_PICTURES) throw new ApiError(409, 'CONFLICT', `An order can hold up to ${MAX_PICTURES} pictures. Remove one first.`);
+    const saved = await saveProof(req.body, req.get('X-File-Name'));
+    order.referenceImages.push({ file: saved.file, contentType: saved.contentType, size: saved.size, sha256: saved.sha256, originalName: saved.originalName ?? null, addedAt: new Date() });
+    await order.save();
+  }
+  res.status(dupe ? 200 : 201).json(await withPictures(order, await riskMap(await getSettings())));
+});
+
+// GET /api/orders/:id/reference-images/:imageId: the stored original, with the same safe headers as every other picture.
+export const referenceImageFile = asyncHandler(async (req, res) => {
+  const order = await findOrder(req.params.id);
+  const img = ID.test(req.params.imageId) ? order.referenceImages.id(req.params.imageId) : null;
+  const data = img ? await readProof(img) : null;
+  if (!img || !data) throw notFound('Picture', req.params.imageId);
+  res.set({ 'Content-Type': img.contentType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=300', 'Content-Disposition': 'inline', 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:" });
+  res.send(data);
+});
+
+// DELETE /api/orders/:id/reference-images/:imageId: removes a picture the owner attached (never one a customer sent in a conversation).
+export const removeReferenceImage = asyncHandler(async (req, res) => {
+  const order = await findOrder(req.params.id);
+  const img = ID.test(req.params.imageId) ? order.referenceImages.id(req.params.imageId) : null;
+  if (!img) throw notFound('Picture', req.params.imageId);
+  const gone = { file: img.file };
+  img.deleteOne(); await order.save(); await deleteProof(gone);
+  res.json(await withPictures(order, await riskMap(await getSettings())));
+});

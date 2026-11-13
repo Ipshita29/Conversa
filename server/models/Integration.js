@@ -10,6 +10,7 @@ const integrationSchema = new mongoose.Schema({
   accountId: { type: String, default: null },          // Instagram professional account id / WhatsApp phone number id
   accountLabel: { type: String, default: null },       // @handle / the business phone number
   businessAccountId: { type: String, default: null },  // WhatsApp Business Account (WABA) id
+  apiMode: { type: String, enum: ['unified', 'instagram_login'], default: null }, // Instagram: which login produced the token (decides the API host)
   scopes: { type: [String], default: [] },
   accessTokenEnc: { type: String, default: null },
   tokenExpiresAt: { type: Date, default: null },       // null = a token that does not expire

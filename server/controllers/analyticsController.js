@@ -14,7 +14,7 @@ export const getMonthly = asyncHandler(async (req, res) => {
   if (!isMonth(month)) throw badQuery([{ field: 'month', message: 'Must be a month in YYYY-MM format.' }]);
   const dataset = req.query.dataset ?? 'all';
   if (!DATASETS.includes(dataset)) throw badQuery([{ field: 'dataset', message: 'Must be real, demo or all.' }]);
-  const orders = await Order.find().limit(5000).lean();
+  const orders = await Order.find({ status: { $ne: 'draft' } }).limit(5000).lean();
   res.json(buildMonthly({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, month, now, dataset }));
 });
 
@@ -31,7 +31,7 @@ export const getSummary = asyncHandler(async (req, res) => {
     if (r.details.length) throw badQuery(r.details);
     custom = { from: req.query.from, to: req.query.to };
   } else if (!RANGES.includes(days)) throw badQuery([{ field: 'range', message: `Must be one of ${RANGES.join(', ')}.` }]);
-  const orders = await Order.find().limit(5000).lean();
+  const orders = await Order.find({ status: { $ne: 'draft' } }).limit(5000).lean();
   res.json(buildSummary({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, days, ...custom, now, dataset }));
 });
 
@@ -40,6 +40,6 @@ export const getBoard = asyncHandler(async (req, res) => {
   const dataset = req.query.dataset ?? 'all';
   if (!DATASETS.includes(dataset)) throw badQuery([{ field: 'dataset', message: 'Must be real, demo or all.' }]);
   const settings = await getSettings();
-  const orders = await Order.find().limit(5000).lean();
+  const orders = await Order.find({ status: { $ne: 'draft' } }).limit(5000).lean();
   res.json(buildBoard({ orders: orders.map((o) => ({ ...o, id: String(o._id) })), settings, now: new Date(), dataset }));
 });

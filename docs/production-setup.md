@@ -31,12 +31,15 @@ Create one app at <https://developers.facebook.com/apps> (type **Business**). Us
 6. Message rules: free-form replies are allowed for **24 hours after the customer's last message**. After that WhatsApp requires an approved *message template*. Conversa refuses an out-of-window reply with a clear explanation instead of letting Meta reject it; it does not send templates yet.
 
 ### Instagram
-1. The account must be an Instagram **professional** account (business or creator). A personal account cannot use the messaging API.
-2. Add the product **Instagram > API setup with Instagram login**. Permissions: `instagram_business_basic`, `instagram_business_manage_messages`.
-3. Set the OAuth redirect URI to `SERVER_URL/api/integrations/instagram/oauth/callback`.
-4. Webhooks > Instagram: callback URL `SERVER_URL/api/webhooks/instagram`, verify token = `META_WEBHOOK_VERIFY_TOKEN`, subscribe to **messages**.
-5. While the app is in development mode only accounts with a role on the app can connect. Serving accounts you do not own needs **Advanced Access (app review)**.
-6. Replies are allowed within 24 hours of the customer's last message.
+Apps created recently only offer **"API setup with Unified login"** (Facebook Login for Business). Conversa supports it and the older Instagram Login; the mode follows which variables you set.
+1. The account must be an Instagram **professional** account (business or creator) and be shared with your Meta business portfolio during login. A personal account cannot use the messaging API.
+2. Meta app > Instagram > **API setup with Unified login**: create/choose the login **configuration**, make sure it grants `instagram_manage_messages` (and `instagram_basic`), and copy its **configuration id** into `INSTAGRAM_LOGIN_CONFIG_ID`.
+3. In that configuration (and Facebook Login for Business settings) add the exact redirect URI `SERVER_URL/api/integrations/instagram/oauth/callback` under **Valid OAuth redirect URIs**.
+4. Webhooks > Instagram: callback `SERVER_URL/api/webhooks/instagram`, verify token = `META_WEBHOOK_VERIFY_TOKEN`, fields **messages** and **messaging_seen**. Connecting from Settings also subscribes the chosen account to this app (a separate step Meta requires for every account).
+5. While the app is in development mode only people with a role on the app (Instagram Tester) can connect. Serving accounts you do not own needs **Advanced Access (app review)**.
+6. Replies are allowed within 24 hours of the customer's last message. A dead or revoked token shows as *Needs attention* in Settings with the reason.
+
+Older apps that still have **Instagram Login** leave `INSTAGRAM_LOGIN_CONFIG_ID` empty and use `INSTAGRAM_APP_ID` / `INSTAGRAM_APP_SECRET` (a different pair from the Meta app's). That mode talks to graph.instagram.com, uses Instagram's own OAuth and renews its 60-day token automatically.
 
 ## 3. Environment variables
 
@@ -50,6 +53,7 @@ Backend (set on the API host; see `server/.env.example`):
 | `WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID` | "Connect WhatsApp" in Settings |
 | `GROQ_API_KEY` (+ `GROQ_MODEL`, `GROQ_VISION_MODEL`) | reading orders and payment screenshots |
 | `PAYMENT_PROOF_DIR` | persistent location of customer pictures |
+| `INSTAGRAM_LOGIN_CONFIG_ID` (Unified Login) or `INSTAGRAM_APP_ID` + `INSTAGRAM_APP_SECRET` (Instagram Login) | "Connect Instagram" in Settings |
 | optional: `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_ACCESS_TOKEN`, `INSTAGRAM_BUSINESS_ACCOUNT_ID`, `INSTAGRAM_ACCESS_TOKEN` | a single account configured by environment instead of Meta sign-in |
 
 Frontend (set at build time; public values only): `VITE_DEMO_MODE=false`, `VITE_API_BASE_URL=https://api.yourdomain.com/api`.

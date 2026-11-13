@@ -7,6 +7,10 @@ const METHOD = { upi: 'UPI', bank_transfer: 'Bank transfer', cash: 'Cash', cod: 
 // Customer-facing wording for the payment state (never says "paid" for money the owner has not confirmed).
 const PAY_TEXT = { paid: 'Paid in full', partial: 'Partly paid', verification_pending: 'Payment received, being verified', cod: 'Cash on delivery', due: 'Unpaid' };
 
+// What to ask the customer for, by missing order field (internal fields such as the preparation time are never asked of the customer).
+const ASK_FOR = { item: 'which product you would like', quantity: 'how many you need (and the size)', deadline: 'the date and time you need it by' };
+const askList = (fields) => { const t = fields.map((f) => ASK_FOR[f]); return t.length > 1 ? `${t.slice(0, -1).join(', ')} and ${t.at(-1)}` : t[0]; };
+
 export const inr = (n) => `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: n % 1 ? 2 : 0 }).format(n)}`;
 const when = (iso, tz, withTime = true) => (iso ? new Intl.DateTimeFormat('en-IN', { timeZone: tz || undefined, weekday: 'short', day: 'numeric', month: 'short', ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}) }).format(new Date(iso)) : null);
 export const shortId = (id) => `#${/^[a-f\d]{24}$/i.test(String(id)) ? String(id).slice(-6).toUpperCase() : String(id).replace(/^ord_/, '')}`;
@@ -23,6 +27,7 @@ export function orderFacts(order, row, tz) {
     quantity: order.quantity ?? null, customisation: order.customisation || null, status: order.status,
     orderedAt: order.createdAt ?? null, deadline: order.deadline ?? null, deadlineText: when(order.deadline, tz),
     total: s.total, paid: s.paid, balance: s.balance, pending: s.pending ?? 0, codDue: s.codDue ?? 0,
+    isDraft: order.status === 'draft', missing: order.status === 'draft' ? (order.draft?.missingFields ?? []).filter((f) => ASK_FOR[f]) : [], // what an unconfirmed draft still lacks
     paymentState: s.status, paymentText: PAY_TEXT[s.status] ?? null, method: methodOf(s),
   };
 }
@@ -80,6 +85,7 @@ export function ruleSuggestions(ctx) {
   const out = [];
   const add = (text) => { if (!out.includes(text)) out.push(text); };
 
+  if (o?.isDraft && o.missing.length) add(`${hi}Thanks! To go ahead with your order, could you tell me ${askList(o.missing)}?`); // the draft is missing essentials: ask for exactly those
   if (!lastIn) add(`${hi}How can I help you today?`);
   if (lastIn && has(t, /\b(price|cost|how much|charge|rate|quote|₹|rs\.?)\b/)) {
     if (o?.total != null) add(`The total for your order is ${inr(o.total)}.`);
@@ -120,7 +126,7 @@ Return JSON only: {"replies":["...","..."]}`;
 export const replyPrompt = (ctx) => JSON.stringify({
   customerFirstName: ctx.customer, channel: ctx.channel,
   conversation: ctx.recent,
-  order: ctx.order && { product: ctx.order.item, quantity: ctx.order.quantity, status: ctx.order.status, total: ctx.order.total, paid: ctx.order.paid, balance: ctx.order.balance, payment: ctx.order.paymentText, delivery: ctx.order.deadlineText, customisation: ctx.order.customisation },
+  order: ctx.order && { unconfirmedDraft: ctx.order.isDraft || undefined, stillNeeded: ctx.order.missing?.length ? ctx.order.missing.map((f) => ASK_FOR[f]) : undefined, product: ctx.order.item, quantity: ctx.order.quantity, status: ctx.order.status, total: ctx.order.total, paid: ctx.order.paid, balance: ctx.order.balance, payment: ctx.order.paymentText, delivery: ctx.order.deadlineText, customisation: ctx.order.customisation },
 });
 
 // Every amount, weekday, month and clock time in a reply has to come from the context (or the customer's own words).

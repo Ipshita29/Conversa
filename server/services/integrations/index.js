@@ -1,6 +1,7 @@
 import * as whatsapp from './whatsappService.js';
 import * as instagram from './instagramService.js';
 import { getRecord, resolveConfig, describe } from './credentials.js';
+import { instagramConnectReadiness, whatsappSignupConfig } from './oauth.js';
 
 export const channels = { whatsapp, instagram };
 
@@ -20,7 +21,15 @@ export async function listStatuses(deps = {}, { fresh = false } = {}) {
     else if (d.status === 'connecting') state = 'connecting';
     else if (d.status === 'needs_attention' || hasCreds) state = 'needs_attention';
     else state = 'not_connected';
-    return { ...live, state, source: d.source, expiresAt: d.expiresAt, accountLabel: live.accountLabel ?? d.accountLabel, statusReason: state === 'connected' ? live.statusReason : (d.status === 'expired' || d.status === 'needs_attention' ? d.statusReason : null) ?? live.statusReason };
+    // What Settings tells the owner. The environment-token message from checkStatus ("Missing environment variables: INSTAGRAM_ACCESS_TOKEN...") only
+    // concerns a token configured BY HAND; it must never be shown for the sign-in flow, which produces its own token.
+    const ready = channel === 'instagram' ? instagramConnectReadiness(cfg) : { ...whatsappSignupConfig(cfg), ready: whatsappSignupConfig(cfg).ready };
+    const connect = { ready: ready.ready, missing: ready.missing ?? [] };
+    const reason = state === 'connected' ? live.statusReason
+      : state === 'connecting' ? 'Waiting for you to finish signing in. Use Connect to start again if the window was closed.'
+      : state === 'not_connected' ? (connect.ready ? 'Not connected yet. Use Connect to sign in and choose the account.' : `To connect, the server still needs: ${connect.missing.join(', ')}.`)
+      : d.statusReason ?? live.statusReason;
+    return { ...live, state, connect, statusReason: reason, source: d.source, expiresAt: d.expiresAt, accountLabel: live.accountLabel ?? d.accountLabel };
   }));
   cache = { at: Date.now(), items };
   return items;
