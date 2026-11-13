@@ -328,3 +328,289 @@ test('14. WhatsApp Embedded Signup: the code is exchanged server-side, the numbe
   const cfg = await resolveConfig(); assert.deepEqual([cfg.meta.whatsapp.accessToken, cfg.meta.whatsapp.phoneNumberId], ['BUSINESS-TOKEN-XYZ', '555000222']);
   await assert.rejects(whatsappComplete({ code: 'x', wabaId: '1029384756', phoneNumberId: '555000222' }, { fetchImpl: async () => json({ error: { message: 'Invalid code' } }, 400) }), (e) => e.code === 'META_REJECTED');
 });
+
+// ---- Conversation -> order draft, automatically ---------------------------------------------------------------------------------------------
+import { autoDraftForConversation, scheduleAutoDraft } from '../services/autoDraftService.js';
+import { replyContext, ruleSuggestions } from '../services/replyLogic.js';
+
+const ymdTomorrow = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() + 86400000));
+// A stand-in for the AI that reads the PROMPT it is given, so each run sees exactly the messages that existed at that moment.
+const reader = (rules) => async (p) => {
+  const said = p.user; const out = { customerName: 'Meera Pillai', item: null, quantity: null, customisation: null, notes: null, price: null, intent: 'unclear', deadlineDate: null, deadlineTime: null, deadlineIsAmbiguous: false, uncertainties: [] };
+  for (const [re, patch] of rules) if (re.test(said)) Object.assign(out, patch);
+  return out;
+};
+const chocolate = reader([
+  [/order a chocolate cake/i, { item: 'Chocolate cake', quantity: 1, intent: 'order' }],
+  [/2 kg/i, { item: 'Chocolate cake (2 kg)' }], [/tomorrow at 5 PM/i, { deadlineDate: ymdTomorrow(), deadlineTime: '17:00' }],
+  [/Happy Birthday Aanya/i, { customisation: 'Happy Birthday Aanya' }], [/Actually make it 3 kg/i, { item: 'Chocolate cake (3 kg)' }],
+]);
+const text = (id, body, from = '919822222222') => waMsg(id, body, from).entry[0].changes[0].value.contacts[0].profile.name && { ...waMsg(id, body, from), entry: [{ changes: [{ field: 'messages', value: { contacts: [{ wa_id: from, profile: { name: 'Meera Pillai' } }], messages: [{ id, from, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body } }] } }] }] };
+
+test('15. three WhatsApp messages become ONE order draft in Orders, linked to the conversation, with the customer\'s own details and the gaps marked', { skip }, async () => {
+  const M = ['Hi, I want to order a chocolate cake.', '2 kg, for tomorrow at 5 PM.', 'Please write Happy Birthday Aanya on it.'];
+  const steps = [];
+  for (let i = 0; i < M.length; i++) {
+    const r = await hook('whatsapp', text(`wamid.D${i}`, M[i]));
+    assert.deepEqual([r.json.stored, r.json.duplicates], [1, 0]);
+    const conv = await Conversation.findOne({ contactId: '919822222222' });
+    steps.push(await autoDraftForConversation(String(conv._id), { groqJson: chocolate })); // what the scheduled run does after each message
+  }
+  assert.deepEqual(steps.map((s) => s.action), ['created', 'updated', 'updated']);
+  assert.equal(await Conversation.countDocuments({ contactId: '919822222222' }), 1); // one conversation, three messages
+  assert.equal(await Message.countDocuments({ externalId: /^wamid\.D/ }), 3);
+  assert.equal(await Order.countDocuments({ customerName: 'Meera Pillai' }), 1); // ONE order
+  const o = await Order.findOne({ customerName: 'Meera Pillai' }).lean(); const conv = await Conversation.findOne({ contactId: '919822222222' }).lean();
+  assert.deepEqual([o.status, o.source, o.customerContact, o.item, o.customisation], ['draft', 'whatsapp', '919822222222', 'Chocolate cake (2 kg)', 'Happy Birthday Aanya']);
+  assert.equal(new Date(o.deadline).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }), '17:00'); // the requested time, in the business timezone
+  assert.equal(o.price ?? null, null); // never invented
+  assert.equal(String(conv.orderId), String(o._id)); assert.ok(o.draft.auto); assert.deepEqual(o.draft.messageIds.length, 3);
+  assert.ok(steps[0].orderId === steps[2].orderId); // the same draft, updated
+  // It appears in Orders (as a draft) but is not scheduled, counted or reported until the owner confirms it.
+  assert.equal((await api('GET', '/orders?dataset=real&pageSize=100')).json.items.find((x) => x.id === String(o._id)).status, 'draft');
+  assert.ok(!(await api('GET', '/planner?dataset=real&days=30')).json.schedule.some((e) => e.orderId === String(o._id)));
+  assert.ok(!JSON.stringify((await api('GET', '/dashboard')).json).includes('Meera Pillai'));
+});
+
+test('16. a duplicate webhook delivery creates no message, no draft run and no second order', { skip }, async () => {
+  const before = { m: await Message.countDocuments(), o: await Order.countDocuments() };
+  const r = await hook('whatsapp', text('wamid.D1', '2 kg, for tomorrow at 5 PM.'));
+  assert.deepEqual([r.json.stored, r.json.duplicates], [0, 1]);
+  assert.deepEqual([await Message.countDocuments(), await Order.countDocuments()], [before.m, before.o]);
+  const { ingest } = await import('../services/messageService.js');
+  const again = await ingest([{ channel: 'whatsapp', externalId: 'wamid.D1', contactId: '919822222222', contactName: 'Meera Pillai', messageType: 'text', text: 'x', receivedAt: new Date() }]);
+  assert.deepEqual(again.toRead, []); // nothing new arrived, so nothing is queued for reading
+});
+
+test('17. a correction updates the SAME draft; the owner\'s edits are never overwritten; a confirmed order is never touched', { skip }, async () => {
+  const conv = await Conversation.findOne({ contactId: '919822222222' }); const id = String(conv._id);
+  const draft = () => Order.findOne({ customerName: 'Meera Pillai' }).lean();
+  const first = await draft();
+  await hook('whatsapp', text('wamid.D3', 'Actually make it 3 kg please.'));
+  const r = await autoDraftForConversation(id, { groqJson: chocolate });
+  assert.equal(r.action, 'updated'); assert.deepEqual(r.fields, ['item']);
+  const second = await draft(); assert.equal(String(second._id), String(first._id)); assert.equal(second.item, 'Chocolate cake (3 kg)'); assert.equal(await Order.countDocuments({ customerName: 'Meera Pillai' }), 1);
+  assert.equal(second.customisation, 'Happy Birthday Aanya'); // what the customer said earlier is kept
+  // The owner fixes the customisation by hand: later automatic runs fill blanks only.
+  await new Promise((r2) => setTimeout(r2, 20));
+  assert.equal((await api('PATCH', `/orders/${first._id}`, { customisation: 'Happy Birthday Aanya (gold lettering)', notes: null })).status, 200);
+  const ownerFix = reader([[/./, { item: 'Chocolate cake (5 kg)', quantity: 1, customisation: 'something else', notes: 'Delivery to Flat 4', intent: 'order' }]]);
+  const r2 = await autoDraftForConversation(id, { groqJson: ownerFix });
+  const third = await draft();
+  assert.equal(third.customisation, 'Happy Birthday Aanya (gold lettering)'); assert.equal(third.item, 'Chocolate cake (3 kg)'); // untouched
+  assert.equal(third.notes, 'Delivery to Flat 4'); assert.ok(r2.fields.includes('notes')); assert.equal(third.draft.ownerEdited, true); // only the blank was filled
+  // Confirmed: automatic reading stops.
+  assert.equal((await api('PATCH', `/orders/${first._id}`, { status: 'confirmed' })).status, 200);
+  assert.deepEqual(await autoDraftForConversation(id, { groqJson: ownerFix }), { action: 'skipped', reason: 'order_confirmed', orderId: String(first._id) });
+  assert.equal((await draft()).item, 'Chocolate cake (3 kg)');
+});
+
+test('18. an enquiry creates no draft; a confirmed draft joins the scheduler; Instagram conversations are read the same way', { skip }, async () => {
+  const enquiry = reader([[/./, { item: 'Chocolate cake', quantity: 1, intent: 'enquiry' }]]);
+  await hook('whatsapp', text('wamid.E1', 'How much is a 2 kg chocolate cake? Do you deliver?', '919833333333'));
+  const c = await Conversation.findOne({ contactId: '919833333333' });
+  assert.deepEqual(await autoDraftForConversation(String(c._id), { groqJson: enquiry }), { action: 'skipped', reason: 'not_an_order', intent: 'enquiry' });
+  assert.equal(await Order.countDocuments({ source: 'whatsapp', customerContact: '919833333333' }), 0);
+  // Instagram: same pipeline, its own channel.
+  const ig = { object: 'instagram', entry: [{ messaging: [{ sender: { id: '17841400000077' }, timestamp: Date.now(), message: { mid: 'ig.D1', text: 'Hi, I want to order a chocolate cake. 2 kg, for tomorrow at 5 PM. Please write Happy Birthday Aanya on it.' } }] }] };
+  assert.equal((await hook('instagram', ig)).json.stored, 1);
+  const igc = await Conversation.findOne({ contactId: '17841400000077' });
+  assert.equal((await autoDraftForConversation(String(igc._id), { groqJson: chocolate })).action, 'created');
+  const igo = await Order.findOne({ customerContact: '17841400000077' }).lean();
+  assert.deepEqual([igo.source, igo.status, igo.item, igo.customisation], ['instagram', 'draft', 'Chocolate cake (2 kg)', 'Happy Birthday Aanya']);
+  // Confirming makes it a real order the scheduler plans.
+  const before = (await api('GET', '/planner?dataset=real&days=30')).json.schedule.length;
+  assert.equal((await api('PATCH', `/orders/${igo._id}`, { status: 'confirmed', prepTimeMinutes: 90 })).status, 200);
+  const plan = (await api('GET', '/planner?dataset=real&days=30')).json;
+  assert.equal(plan.schedule.length, before + 1); assert.ok(plan.schedule.some((e) => e.orderId === String(igo._id)));
+});
+
+test('19. the suggested reply asks the customer for exactly what a draft still lacks', () => {
+  const order = { id: 'o1', customerName: 'Meera', item: 'Chocolate cake', quantity: 1, status: 'draft', price: null, deadline: null, createdAt: new Date().toISOString(), draft: { missingFields: ['deadline', 'prepTimeMinutes'] } };
+  const ctx = replyContext({ customerName: 'Meera Pillai', channel: 'whatsapp', messages: [{ from: 'customer', text: 'Hi, I want to order a chocolate cake.' }], order, row: null, tz: 'Asia/Kolkata' });
+  assert.deepEqual(ctx.order.missing, ['deadline']); // the preparation time is the owner's, never asked of the customer
+  assert.match(ruleSuggestions(ctx)[0].text, /could you tell me the date and time you need it by\?/);
+});
+
+test('20. reading is scheduled after a pause, once per conversation, and again if more messages arrive while it runs', async () => {
+  const saved = { ...config.autoDraft }; config.autoDraft = { enabled: true, delayMs: 20 };
+  try {
+    const calls = []; let release;
+    const run = (id) => { calls.push(id); return new Promise((r) => { release = r; }); };
+    scheduleAutoDraft('c1', { delayMs: 20, run }); scheduleAutoDraft('c1', { delayMs: 20, run }); scheduleAutoDraft('c1', { delayMs: 20, run }); // three quick messages
+    await new Promise((r) => setTimeout(r, 80)); assert.equal(calls.length, 1); // read once, together
+    scheduleAutoDraft('c1', { delayMs: 20, run }); await new Promise((r) => setTimeout(r, 60)); assert.equal(calls.length, 1); // arrived mid-run: waits
+    release(); await new Promise((r) => setTimeout(r, 120)); assert.equal(calls.length, 2); release?.(); // then read again
+    config.autoDraft = { enabled: false, delayMs: 20 }; scheduleAutoDraft('c2', { delayMs: 5, run }); await new Promise((r) => setTimeout(r, 40)); assert.equal(calls.includes('c2'), false); // switched off
+  } finally { config.autoDraft = saved; }
+});
+
+// ---- Instagram with Unified Login (Facebook Login for Business + configuration id), against a fake Meta -----------------------------------------
+import * as igSvc from '../services/integrations/instagramService.js';
+const unifiedOn = () => { const was = { ...config.meta.instagram }; Object.assign(config.meta.instagram, { mode: 'unified', loginConfigId: '1679980733491845', accessToken: '', businessAccountId: '' }); return () => Object.assign(config.meta.instagram, was); };
+const fakeMeta = (o = {}) => {
+  const seen = [];
+  const fn = async (url, init) => {
+    const u = String(url); seen.push([init?.method ?? 'GET', u.replace(/access_token=[^&]+/, 'access_token=…').replace(/client_secret=[^&]+/, 'client_secret=…')]);
+    if (u.includes('/oauth/access_token')) return o.exchange ?? json({ access_token: 'SUAT-TOKEN-ABC' });
+    if (u.includes('/debug_token')) return json({ data: { is_valid: true, expires_at: 0, scopes: ['instagram_basic', 'instagram_manage_messages'], ...(o.debug ?? {}) } });
+    if (u.includes('/me/assigned_instagram_accounts')) return json({ data: o.accounts ?? [{ id: '17841400000001', username: 'sweetcrumbs', name: 'Sweet Crumbs' }] });
+    if (u.includes('/subscribed_apps')) return json(o.subscribe ?? { success: true });
+    return json({ id: '17841400000001', username: 'sweetcrumbs' });
+  };
+  return { fn, seen };
+};
+
+test('21. Unified Login: the authorization URL uses the configuration id (no scope) and the server-side redirect; missing settings are named', { skip }, async () => {
+  const off = unifiedOn();
+  try {
+    const u = new URL((await instagramStart()).url);
+    assert.equal(u.origin + u.pathname, `https://www.facebook.com/${config.meta.graphVersion}/dialog/oauth`);
+    assert.deepEqual([u.searchParams.get('config_id'), u.searchParams.get('client_id'), u.searchParams.get('response_type'), u.searchParams.get('override_default_response_type'), u.searchParams.has('scope')], ['1679980733491845', '1234567890', 'code', 'true', false]);
+    assert.equal(u.searchParams.get('redirect_uri'), 'https://api.example.com/api/integrations/instagram/oauth/callback'); assert.ok(u.searchParams.get('state').length > 20);
+    config.meta.instagram.loginConfigId = ''; config.meta.instagram.mode = 'unified';
+    await assert.rejects(instagramStart(), (e) => e.code === 'INTEGRATION_UNAVAILABLE' && /INSTAGRAM_LOGIN_CONFIG_ID/.test(e.message) && !/1234567890/.test(e.message));
+  } finally { off(); }
+});
+
+test('22. Unified Login callback: state checked, code exchanged on graph.facebook.com, account found, token encrypted, webhooks subscribed; failures are explained and store nothing', { skip }, async () => {
+  const off = unifiedOn(); await Integration.deleteOne({ channel: 'instagram' });
+  try {
+    const state = async () => new URL((await instagramStart()).url).searchParams.get('state');
+    await assert.rejects(instagramComplete({ code: 'c', state: 'forged' }, { fetchImpl: fakeMeta().fn }), (e) => e.code === 'INVALID_STATE');
+    const bad = fakeMeta({ exchange: json({ error: { message: 'Invalid verification code format.' } }, 400) });
+    await assert.rejects(instagramComplete({ code: 'c', state: await state() }, { fetchImpl: bad.fn }), (e) => e.code === 'META_REJECTED' && /Invalid verification code/.test(e.message));
+    await assert.rejects(instagramComplete({ code: 'c', state: await state() }, { fetchImpl: fakeMeta({ debug: { scopes: ['instagram_basic'] } }).fn }), (e) => e.code === 'MISSING_PERMISSION');
+    await assert.rejects(instagramComplete({ code: 'c', state: await state() }, { fetchImpl: fakeMeta({ accounts: [] }).fn }), (e) => e.code === 'NO_ACCOUNT');
+    assert.equal((await Integration.findOne({ channel: 'instagram' }))?.accessTokenEnc ?? null, null); // nothing stored by any failure
+
+    const meta = fakeMeta();
+    const r = await instagramComplete({ code: 'c', state: await state() }, { fetchImpl: meta.fn });
+    assert.deepEqual([r.accountLabel, r.subscribed], ['@sweetcrumbs', true]);
+    assert.ok(meta.seen.every(([, u]) => u.startsWith('https://graph.facebook.com/'))); // never the Instagram-Login host
+    assert.ok(meta.seen.some(([m, u]) => m === 'POST' && u.includes('/17841400000001/subscribed_apps') && u.includes('subscribed_fields=messages')));
+    const rec = await Integration.findOne({ channel: 'instagram' }).lean();
+    assert.deepEqual([rec.status, rec.apiMode, rec.accountId, rec.tokenExpiresAt], ['connected', 'unified', '17841400000001', null]); // a system-user token that never expires
+    assert.equal(decrypt(rec.accessTokenEnc, KEY), 'SUAT-TOKEN-ABC'); assert.ok(!JSON.stringify(rec).includes('SUAT-TOKEN'));
+    const cfg = await resolveConfig();
+    assert.deepEqual([cfg.meta.instagram.mode, cfg.meta.instagram.businessAccountId, cfg.meta.instagram.accessToken], ['unified', '17841400000001', 'SUAT-TOKEN-ABC']);
+    assert.equal(JSON.stringify((await api('GET', '/integrations')).json).includes('SUAT'), false);
+  } finally { off(); }
+});
+
+test('23. Unified Login messaging: statuses and replies use graph.facebook.com with the account id; Meta errors are reported honestly', { skip }, async () => {
+  const off = unifiedOn();
+  try {
+    const cfg = await resolveConfig(); const calls = [];
+    const f = (res) => async (url, init) => { calls.push([init?.method ?? 'GET', String(url)]); return res; };
+    const st = await igSvc.checkStatus({ fetchImpl: f(json({ id: '17841400000001', username: 'sweetcrumbs' })) }, cfg);
+    assert.deepEqual([st.status, st.accountLabel], ['connected', '@sweetcrumbs']); assert.equal(calls[0][1].startsWith(`https://graph.facebook.com/${config.meta.graphVersion}/17841400000001?`), true);
+    const ok = await igSvc.sendText('99001122', 'Hello!', { fetchImpl: f(json({ recipient_id: '99001122', message_id: 'mid.OUT1' })) }, cfg);
+    assert.deepEqual(ok, { ok: true, externalId: 'mid.OUT1' }); assert.deepEqual(calls.at(-1), ['POST', `https://graph.facebook.com/${config.meta.graphVersion}/17841400000001/messages`]);
+    const expired = await igSvc.sendText('1', 'x', { fetchImpl: f(json({ error: { code: 190, message: 'Error validating access token' } }, 401)) }, cfg);
+    assert.deepEqual([expired.ok, expired.code], [false, 190]); assert.match(expired.reason, /expired or was revoked/);
+    const closed = await igSvc.sendText('1', 'x', { fetchImpl: f(json({ error: { code: 10, error_subcode: 2534022, message: 'outside window' } }, 400)) }, cfg);
+    assert.deepEqual([closed.ok, closed.code], [false, 'WINDOW_CLOSED']); assert.match(closed.reason, /24 hours/);
+    assert.match((await igSvc.sendText('1', 'x', { fetchImpl: f(json({ error: { code: 200, message: 'no permission' } }, 403)) }, cfg)).reason, /permission/);
+    assert.match((await igSvc.sendText('1', 'x', { fetchImpl: f(json({ error: { code: 551, message: 'unavailable' } }, 400)) }, cfg)).reason, /can no longer be messaged/);
+    assert.equal((await igSvc.sendText('1', 'x', { fetchImpl: async () => { throw new Error('offline'); } }, cfg)).ok, false);
+  } finally { off(); }
+});
+
+test('24. a dead Instagram token is surfaced: the reply is refused with the reason, Settings shows Needs attention, and nothing is recorded as sent', { skip }, async () => {
+  const off = unifiedOn(); const realFetch = globalThis.fetch; clearStatusCache();
+  const conv = await Conversation.findOne({ contactId: '17841400000042' });
+  await Message.updateOne({ conversation: conv._id, direction: { $ne: 'outbound' } }, { $set: { receivedAt: new Date() } }); // inside the 24-hour window
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(base)) return realFetch(url, init);
+    if (String(url).includes('/messages')) return json({ error: { code: 190, message: 'Error validating access token' } }, 401);
+    return json({ id: '17841400000001', username: 'sweetcrumbs' }); // the credential check before sending still passes
+  };
+  try {
+    await assert.rejects(sendReply(String(conv._id), 'Thanks!'), (e) => e.code === 'SEND_FAILED' && /expired or was revoked/.test(e.message));
+    assert.equal(await Message.countDocuments({ conversation: conv._id, text: 'Thanks!' }), 0);
+    assert.equal((await Integration.findOne({ channel: 'instagram' }).lean()).status, 'needs_attention');
+    clearStatusCache(); globalThis.fetch = async (url, init) => (String(url).startsWith(base) ? realFetch(url, init) : json({ error: { code: 190, message: 'Error validating access token' } }, 401));
+    const card = (await api('GET', '/integrations')).json.items.find((i) => i.channel === 'instagram');
+    assert.equal(card.state, 'needs_attention'); assert.match(card.statusReason, /expired or was revoked|Connect the account again/);
+  } finally { globalThis.fetch = realFetch; off(); clearStatusCache(); }
+});
+
+test('25. Unified Login webhooks: events wrapped in changes[] are read like messaging[]; echoes, reactions and unknown fields are ignored', { skip }, async () => {
+  const msg = (mid, text, extra = {}) => ({ sender: { id: '17841400000555' }, recipient: { id: '17841400000001' }, timestamp: Date.now(), message: { mid, text, ...extra } });
+  const wrapped = { object: 'instagram', entry: [{ id: '17841400000001', time: Date.now(), changes: [
+    { field: 'messages', value: msg('ig.U1', 'Hi! I want to order a chocolate cake.') },
+    { field: 'messages', value: { ...msg('ig.U2', 'ours'), message: { mid: 'ig.U2', text: 'ours', is_echo: true } } },
+    { field: 'messages', value: msg('ig.U3', undefined, { attachments: [{ type: 'image', payload: { url: 'https://scontent.cdninstagram.com/ref.jpg' } }] }) },
+    { field: 'comments', value: { id: 'c1' } }] }] };
+  assert.deepEqual(parseIg(wrapped).map((m) => [m.externalId, m.messageType]), [['ig.U1', 'text'], ['ig.U3', 'image']]);
+  assert.deepEqual(igStatuses({ object: 'instagram', entry: [{ changes: [{ field: 'messaging_seen', value: { sender: { id: '1' }, timestamp: 1760000000000, read: { mid: 'out-9' } } }] }] }).map((s) => [s.externalId, s.status]), [['out-9', 'read']]);
+  const r = await hook('instagram', wrapped); assert.equal(r.json.stored, 2);
+  assert.equal((await hook('instagram', wrapped)).json.stored, 0); // a retry
+  const c = await Conversation.findOne({ channel: 'instagram', contactId: '17841400000555' }); assert.deepEqual([c.isDemo, await Message.countDocuments({ conversation: c._id })], [false, 2]);
+  const img = await Message.findOne({ externalId: 'ig.U3' }).lean(); assert.equal(img.messageType, 'image'); assert.equal(img.attachment, null); // no token here, so the picture could not be fetched: kept honestly without it
+  assert.equal((await hook('instagram', { object: 'instagram', entry: [{ changes: [{ field: 'message_reactions', value: {} }] }] })).status, 200); // unknown event: accepted, ignored, logged by field name only
+  assert.equal((await hook('instagram', wrapped, { signature: 'sha256=' + '1'.repeat(64) })).status, 401);
+});
+
+test('26. Instagram DMs become drafts exactly like WhatsApp: multiple messages, one draft, linked, source Instagram, unconfirmed, unscheduled, and an enquiry makes none', { skip }, async () => {
+  const c = await Conversation.findOne({ channel: 'instagram', contactId: '17841400000555' });
+  const hi = (id, text) => hook('instagram', { object: 'instagram', entry: [{ changes: [{ field: 'messages', value: { sender: { id: '17841400000555' }, recipient: { id: '17841400000001' }, timestamp: Date.now(), message: { mid: id, text } } }] }] });
+  await hi('ig.U4', '2 kg, for tomorrow at 5 PM.'); await hi('ig.U5', 'Please write Happy Birthday Aanya on it.');
+  const run = () => autoDraftForConversation(String(c._id), { groqJson: chocolate });
+  assert.equal((await run()).action, 'created'); assert.equal((await run()).action, 'unchanged'); // reading again changes nothing
+  assert.equal(await Order.countDocuments({ source: 'instagram', customerContact: '17841400000555' }), 1);
+  const o = await Order.findOne({ source: 'instagram', customerContact: '17841400000555' }).lean();
+  assert.deepEqual([o.status, o.customisation], ['draft', 'Happy Birthday Aanya']);
+  assert.equal(String((await Conversation.findById(c._id).lean()).orderId), String(o._id));
+  assert.ok(!(await api('GET', '/planner?dataset=real&days=30')).json.schedule.some((e) => e.orderId === String(o._id))); // not scheduled until confirmed
+  const q = await Conversation.findOne({ channel: 'instagram', contactId: '17841400000042' }); // an enquiry-only chat
+  assert.equal((await autoDraftForConversation(String(q._id), { groqJson: reader([[/./, { item: 'Cupcakes', intent: 'enquiry' }]]) })).action, 'skipped');
+});
+
+test('27. demo mode is untouched by Instagram: the five demo orders and conversations are still there and never returned as real', { skip }, async () => {
+  assert.equal(await Order.countDocuments({ notes: /^\[DEMO\]/ }), 5);
+  const real = (await api('GET', '/conversations?dataset=real')).json.items; const demo = (await api('GET', '/conversations?dataset=demo')).json.items;
+  assert.ok(real.every((x) => !x.isDemo) && demo.length === 5 && demo.every((x) => x.isDemo));
+  assert.ok(real.some((x) => x.channel === 'instagram') && real.some((x) => x.channel === 'whatsapp'));
+});
+
+// ---- Settings: what Instagram reports before, during and after the sign-in (no token is ever required to START it) ------------------------------------
+import { instagramConnectReadiness } from '../services/integrations/oauth.js';
+
+test('28. Instagram connect readiness: Unified Login needs the Meta app, the configuration id, the encryption key and the server URL, and never an access token or account id', () => {
+  const base = { encryptionKey: KEY, serverUrl: 'https://api.example.com', meta: { appId: '123', appSecret: 's', graphVersion: 'v26.0', instagram: { mode: 'unified', loginConfigId: '1679980733491845', accessToken: '', businessAccountId: '', appId: '', appSecret: '' } } };
+  const ok = instagramConnectReadiness(base);
+  assert.deepEqual([ok.ready, ok.missing, ok.mode], [true, [], 'unified']); // no INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_BUSINESS_ACCOUNT_ID anywhere
+  const miss = instagramConnectReadiness({ ...base, serverUrl: '', encryptionKey: '', meta: { ...base.meta, appSecret: '', instagram: { ...base.meta.instagram, loginConfigId: '' } } });
+  assert.deepEqual(miss.missing, ['META_APP_SECRET', 'INSTAGRAM_LOGIN_CONFIG_ID', 'ENCRYPTION_KEY', 'SERVER_URL']);
+  const legacy = instagramConnectReadiness({ ...base, meta: { ...base.meta, instagram: { ...base.meta.instagram, mode: 'instagram_login', loginConfigId: '' } } }); // Instagram Login: its own app id/secret, falling back to the Meta pair
+  assert.deepEqual([legacy.ready, legacy.mode], [true, 'instagram_login']);
+});
+
+test('29. Settings reports the truth: not connected (with what is missing, or ready to connect), connecting, an abandoned sign-in expiring, connected with the account, then disconnected', { skip }, async () => {
+  const off = unifiedOn(); const saved = { s: config.serverUrl };
+  const card = async () => { clearStatusCache(); return (await api('GET', '/integrations')).json.items.find((i) => i.channel === 'instagram'); };
+  try {
+    await Integration.deleteOne({ channel: 'instagram' });
+    let c = await card();
+    assert.deepEqual([c.state, c.connect.ready], ['not_connected', true]); assert.match(c.statusReason, /Use Connect to sign in/); assert.ok(!/INSTAGRAM_ACCESS_TOKEN|INSTAGRAM_BUSINESS_ACCOUNT_ID/.test(c.statusReason));
+    config.serverUrl = ''; c = await card(); // a missing server setting is named, and Connect is not offered
+    assert.deepEqual([c.state, c.connect.ready, c.connect.missing], ['not_connected', false, ['SERVER_URL']]); assert.match(c.statusReason, /the server still needs: SERVER_URL/);
+    config.serverUrl = saved.s;
+    // Starting the sign-in marks it as connecting (and creates nothing else); a sign-in left unfinished falls back after ten minutes.
+    assert.equal((await api('POST', '/integrations/instagram/oauth/start', {})).status, 200);
+    c = await card(); assert.equal(c.state, 'connecting'); assert.match(c.statusReason, /finish signing in/);
+    await Integration.updateOne({ channel: 'instagram' }, { $set: { oauthStateExpires: new Date(Date.now() - 1000) } });
+    assert.equal((await card()).state, 'not_connected'); // Connect is never stuck
+    // Finishing it stores the account and the card shows it, from Meta's own answer.
+    const state = new URL((await instagramStart()).url).searchParams.get('state');
+    await instagramComplete({ code: 'c', state }, { fetchImpl: fakeMeta().fn });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => (String(url).startsWith(base) ? realFetch(url, init) : json({ id: '17841400000001', username: 'sweetcrumbs' }));
+    try { c = await card(); } finally { globalThis.fetch = realFetch; }
+    assert.deepEqual([c.state, c.accountLabel, c.source], ['connected', '@sweetcrumbs', 'oauth']); assert.ok(!JSON.stringify(c).includes('SUAT'));
+    assert.equal((await api('POST', '/integrations/instagram/disconnect')).json.status, 'disconnected');
+    c = await card(); assert.deepEqual([c.state, c.accountLabel], ['not_connected', null]);
+  } finally { config.serverUrl = saved.s; off(); clearStatusCache(); }
+});

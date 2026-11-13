@@ -188,7 +188,8 @@ test('integrations are honestly unavailable without credentials', { skip }, asyn
   const r = await call('GET', '/integrations');
   assert.equal(r.status, 200);
   assert.deepEqual(r.json.items.map((i) => i.channel).sort(), ['instagram', 'whatsapp']);
-  assert.ok(r.json.items.every((i) => i.status === 'unavailable' && /Missing environment variables/.test(i.statusReason)));
+  // Not connected, and told what the SIGN-IN needs: never the manual-token message (an Instagram or WhatsApp token is what signing in produces).
+  assert.ok(r.json.items.every((i) => i.status === 'unavailable' && i.state === 'not_connected' && !/INSTAGRAM_ACCESS_TOKEN|WHATSAPP_ACCESS_TOKEN/.test(i.statusReason) && i.connect.ready === false && i.connect.missing.length > 0));
   const c = await call('POST', '/integrations/whatsapp/connect', {});
   assert.equal(c.status, 503);
   assert.equal(c.json.error.code, 'INTEGRATION_UNAVAILABLE');

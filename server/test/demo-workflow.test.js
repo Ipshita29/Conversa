@@ -411,3 +411,85 @@ test('Payments: verifying and rejecting update the existing record (same id, sam
   }
   assert.equal(await snap(kartik.id), JSON.stringify(kBefore)); assert.equal(await countOf(), before);
 });
+
+// ---- The Orders gallery: every card carries its own order's reference picture ---------------------------------------------------------------------
+test('Orders list: each order carries ITS OWN newest reference picture; payment screenshots and other orders\' pictures never appear; a new picture replaces the old; none means none', { skip }, async () => {
+  const items = (await get('/orders?dataset=demo&pageSize=100')).json.items;
+  assert.equal(items.length, 5);
+  const byName = Object.fromEntries(items.map((o) => [o.customerName, o]));
+  const urls = items.map((o) => o.referenceImage?.url);
+  assert.ok(urls.every(Boolean) && new Set(urls).size === 5, 'five orders, five different pictures');
+  for (const o of items) { // the picture really is a reference message of that order's own conversation, served from its stored original
+    const conv = await Conversation.findOne({ orderId: o.id }).lean();
+    assert.ok(o.referenceImage.url.startsWith(`/conversations/${conv._id}/messages/`), o.customerName);
+    const msg = await Message.findById(o.referenceImage.messageId).lean();
+    assert.deepEqual([String(msg.conversation), msg.paymentId ?? null, msg.paymentScan?.state], [String(conv._id), null, 'not_payment']); // never a payment screenshot
+    const img = await get(o.referenceImage.url); assert.equal(img.status, 200); assert.equal(img.type, 'image/png');
+  }
+  // The stored files differ too (Aanya's and Neha's cakes are not the same picture).
+  const hash = async (name) => (await Message.findById(byName[name].referenceImage.messageId).lean()).attachment.sha256;
+  assert.notEqual(await hash('Aanya Sharma'), await hash('Neha Sharma'));
+  // A new reference picture from the customer becomes the card's picture; the old one is kept in the order's history.
+  const { saveProof } = await import('../services/proofStore.js');
+  const png = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'assets', 'demo', 'ref-kartik-cupcakes.png'));
+  const conv = await Conversation.findOne({ orderId: byName['Kartik Singh'].id });
+  const before = byName['Kartik Singh'].referenceImage.messageId;
+  const extra = await saveProof(Buffer.concat([png, Buffer.from('\0')]), null);
+  const msg = await Message.create({ conversation: conv._id, channel: conv.channel, externalId: `ref-update-${Date.now()}`, messageType: 'image', receivedAt: new Date(Date.now() + 60000), attachment: { file: extra.file, contentType: extra.contentType, size: extra.size, sha256: extra.sha256 }, paymentScan: { state: 'not_payment' } });
+  try {
+    const now = (await get('/orders?dataset=demo&pageSize=100')).json.items.find((o) => o.customerName === 'Kartik Singh');
+    assert.equal(now.referenceImage.messageId, String(msg._id)); assert.equal(now.referenceImageCount, 2); assert.notEqual(now.referenceImage.messageId, before);
+    // ...but a picture still being read, or a payment screenshot, is not a reference picture.
+    await Message.updateOne({ _id: msg._id }, { $set: { paymentScan: { state: 'processing' } } });
+    assert.equal((await get('/orders?dataset=demo&pageSize=100')).json.items.find((o) => o.customerName === 'Kartik Singh').referenceImage.messageId, before);
+  } finally { await Message.deleteOne({ _id: msg._id }); }
+  // An order with no conversation has no picture (the page shows a placeholder).
+  const lone = await post('/orders', { customerName: 'Walk-in', item: 'Brownies', quantity: 1 });
+  try { assert.equal(lone.status, 201); const l = (await get('/orders?pageSize=100')).json.items.find((o) => o.id === lone.json.id); assert.deepEqual([l.referenceImage, l.referenceImageCount], [null, 0]); }
+  finally { await Order.deleteOne({ _id: lone.json.id }); }
+});
+
+// ---- Real orders get pictures exactly like demo orders: attach, show on the card, survive a refresh, replace, remove -----------------------------------
+const sendPicture = async (orderId, buf, type = 'image/png', name = 'ref.png') => { const r = await fetch(`${base}/orders/${orderId}/reference-images`, { method: 'POST', headers: { 'Content-Type': type, 'X-File-Name': name }, body: buf }); return { status: r.status, json: await r.json().catch(() => null) }; };
+test('Real orders: a picture attached to an order shows on its card at once, survives a refresh, opens whole in its details, and a newer one replaces it', { skip }, async () => {
+  const assets = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'assets', 'demo');
+  const cake = fs.readFileSync(path.join(assets, 'ref-aanya-cake.png')); const cupcakes = fs.readFileSync(path.join(assets, 'ref-kartik-cupcakes.png'));
+  const made = await post('/orders', { customerName: 'Real Walk-in', item: 'Birthday cake', quantity: 1 });
+  assert.equal(made.status, 201); assert.deepEqual([made.json.referenceImage, made.json.referenceImageCount], [null, 0]); // genuinely none: the card shows its placeholder
+  const id = made.json.id; const card = async () => (await get('/orders?pageSize=100')).json.items.find((o) => o.id === id);
+  try {
+    const first = await sendPicture(id, cake);
+    assert.equal(first.status, 201); assert.equal(first.json.referenceImageCount, 1);
+    const c1 = await card();
+    assert.equal(c1.referenceImage.url, `/orders/${id}/reference-images/${first.json.referenceImage.id}`); assert.ok(!JSON.stringify(c1).match(/[a-f0-9]{32}\.(png|jpg|webp)/), 'no storage file name leaves the server');
+    const served = await get(c1.referenceImage.url); assert.equal(served.status, 200); assert.equal(served.type, 'image/png'); assert.deepEqual(Buffer.from(served.bytes), cake); // the very file that was uploaded
+    assert.equal((await get(`/orders/${id}`)).json.referenceImage.url, c1.referenceImage.url); // the order's details see the same picture
+    assert.equal((await card()).referenceImage.url, c1.referenceImage.url); // "refresh": nothing but the database holds it
+    assert.equal((await sendPicture(id, cake)).status, 200); assert.equal((await card()).referenceImageCount, 1); // the same picture twice is kept once
+    // A newer picture replaces it on the card; the older one stays in the order's pictures (newest first).
+    await new Promise((r) => setTimeout(r, 15));
+    const second = await sendPicture(id, cupcakes); assert.equal(second.status, 201);
+    const c2 = await card(); assert.equal(c2.referenceImage.id, second.json.referenceImage.id); assert.deepEqual(c2.referenceImages.map((i) => i.id), [second.json.referenceImage.id, first.json.referenceImage.id]);
+    // It never takes another order's picture, and it never shows a demo order's.
+    assert.ok(!(await get('/orders?dataset=demo&pageSize=100')).json.items.some((o) => o.id === id));
+    // Only real images are accepted.
+    assert.equal((await sendPicture(id, Buffer.from('<html>not an image</html>'), 'image/png')).status, 415);
+    assert.equal((await sendPicture(id, Buffer.from('GIF89a....'), 'image/gif')).status, 415);
+    // Removing a picture falls back to the older one, then to the placeholder.
+    const del = async (imgId) => (await fetch(`${base}/orders/${id}/reference-images/${imgId}`, { method: 'DELETE' })).status;
+    assert.equal(await del(second.json.referenceImage.id), 200); assert.equal((await card()).referenceImage.id, first.json.referenceImage.id);
+    assert.equal(await del(first.json.referenceImage.id), 200); assert.deepEqual([(await card()).referenceImage, (await card()).referenceImageCount], [null, 0]);
+    assert.equal((await get(`/orders/${id}/reference-images/${first.json.referenceImage.id}`)).status, 404);
+  } finally { await Order.deleteOne({ _id: id }); }
+});
+
+test('an order\'s conversation pictures and its own pictures are one list: whichever arrived last is the card\'s picture', { skip }, async () => {
+  const o = (await get('/orders?dataset=demo&pageSize=100')).json.items.find((x) => x.customerName === 'Rohan Mehta');
+  const own = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'assets', 'demo', 'ref-neha-cake.png'));
+  const up = await sendPicture(o.id, own); assert.equal(up.status, 201);
+  try {
+    const now = (await get('/orders?dataset=demo&pageSize=100')).json.items.find((x) => x.id === o.id);
+    assert.equal(now.referenceImageCount, 2); assert.equal(now.referenceImage.messageId, null); // the owner's newer picture is first
+    assert.equal(now.referenceImages[1].messageId, o.referenceImage.messageId); // the customer's own picture is still there
+  } finally { await fetch(`${base}/orders/${o.id}/reference-images/${up.json.referenceImage.id}`, { method: 'DELETE' }); }
+});
