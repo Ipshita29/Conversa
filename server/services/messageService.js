@@ -20,40 +20,72 @@ export async function ingest(messages) {
   let duplicates = 0;
   const toRead = new Set(); // conversations that just received customer text: candidates for an automatic order draft
   for (const m of messages) {
+    log.info('inbound', `${m.channel}: message received`, { messageId: m.externalId, type: m.messageType, sender: mask(m.contactId), hasText: Boolean(m.text), mediaId: m.mediaId ?? null });
     const conv = await upsertConversation(m);
     try {
       if (!conv.customerName && m.channel === 'instagram') { // Instagram sends no name with a message: ask for the profile once, where permitted
         const prof = await fetchProfile(m.contactId, {}, await resolveConfig()).catch(() => null);
         if (prof?.name) { await Conversation.updateOne({ _id: conv._id, customerName: null }, { $set: { customerName: prof.name } }); conv.customerName = prof.name; }
       }
-      const attachment = await fetchAttachment(m);
-      // Every image is checked for a payment in the background. If the picture could not be downloaded, say so instead of staying silent.
-      const paymentScan = m.messageType !== 'image' ? null : attachment ? { state: 'processing', at: new Date() } : { state: 'failed', reason: 'The picture could not be downloaded, so it was not checked for a payment.', at: new Date() };
-      const msg = await Message.create({ conversation: conv._id, channel: m.channel, externalId: m.externalId, text: m.text, messageType: m.messageType, receivedAt: m.receivedAt, attachment, paymentScan });
+      // The message is saved FIRST, so it is in the Inbox at once; a picture is downloaded afterwards (the Inbox shows it as "loading").
+      const isImage = m.messageType === 'image';
+      const msg = await Message.create({ conversation: conv._id, channel: m.channel, externalId: m.externalId, text: m.text, messageType: m.messageType, receivedAt: m.receivedAt, attachment: null, media: isImage ? { id: m.mediaId ?? null, url: m.mediaUrl ?? null, error: null, attempts: 0, state: 'downloading' } : null, paymentScan: null });
       stored++;
+      log.info('inbound', `${m.channel}: message stored`, { messageId: m.externalId, conversation: String(conv._id), text: Boolean(m.text), picture: isImage ? 'downloading' : null });
       if (m.text) toRead.add(String(conv._id));
-      if (paymentScan?.state === 'processing') queueScan(msg._id);
+      if (isImage) trackMedia(finishMedia(msg._id, m, conv._id));
       // A payment-looking message in a chat already linked to an order is filed as Verification pending (never as paid).
       await draftFromIncoming(conv, m.text, String(msg._id), m.receivedAt);
     } catch (err) {
-      if (err.code === 11000) duplicates++;
-      else throw err;
+      if (err.code === 11000) { duplicates++; log.info('inbound', `${m.channel}: duplicate delivery ignored`, { messageId: m.externalId }); }
+      else { log.error('inbound', `${m.channel}: processing failed`, { messageId: m.externalId, error: err.message }); throw err; }
     }
   }
   return { stored, duplicates, toRead: [...toRead] };
 }
 
-// A customer's picture: downloaded with the connected account's own token (WhatsApp media id, or an Instagram CDN link) and kept like a payment proof.
-// Never fatal: the message is stored either way, just without its picture.
-async function fetchAttachment(m) {
+// Downloads a stored message's picture in the background, then files the result: the picture (and a payment check), or the reason it failed.
+const mediaJobs = new Set();
+const trackMedia = (p) => { mediaJobs.add(p); p.finally(() => mediaJobs.delete(p)); };
+export const mediaIdle = () => Promise.allSettled([...mediaJobs]);
+async function finishMedia(messageId, m, convId, prior = null) {
   try {
-    if (m.messageType !== 'image') return null;
-    const buf = m.channel === 'whatsapp' && m.mediaId ? await downloadMedia(m.mediaId, {}, await resolveConfig())
+    const { attachment, media } = await fetchAttachment(m, prior);
+    const state = attachment ? 'ready' : 'failed';
+    await Message.updateOne({ _id: messageId }, { $set: { attachment, media: { ...media, state }, paymentScan: attachment ? { state: 'processing', at: new Date() } : { state: 'failed', reason: `The picture could not be downloaded, so it was not checked for a payment. ${media?.error ?? ''}`.trim(), at: new Date() } } });
+    if (attachment) queueScan(messageId);
+    return Boolean(attachment);
+  } catch (e) { log.error('media', 'Picture processing failed', { messageId: String(messageId), error: e.message }); return false; }
+}
+
+const mask = (id) => (id ? `${String(id).slice(0, 3)}…${String(id).slice(-2)}` : null); // enough to tell senders apart in a log, never the whole number
+
+// A customer's picture: downloaded with the connected account's own token (WhatsApp media id, or an Instagram CDN link) and kept like a payment proof.
+// Never fatal: the message is stored either way. When the picture cannot be fetched the reason and the platform id are kept so it can be retried.
+async function fetchAttachment(m, prior = null) {
+  if (m.messageType !== 'image') return { attachment: null, media: null };
+  const media = { id: m.mediaId ?? null, url: m.mediaUrl ?? null, error: null, attempts: (prior?.attempts ?? 0) + 1 };
+  try {
+    const report = {};
+    const buf = m.channel === 'whatsapp' && m.mediaId ? await downloadMedia(m.mediaId, { report }, await resolveConfig())
       : m.channel === 'instagram' && m.mediaUrl ? await downloadMediaUrl(m.mediaUrl) : null;
-    if (!buf) return null;
+    if (!buf) { media.error = report.reason ?? 'The picture could not be downloaded.'; log.warn('media', `${m.channel}: picture not downloaded`, { messageId: m.externalId, mediaId: m.mediaId ?? null, reason: media.error }); return { attachment: null, media }; }
     const { file, contentType, size, sha256 } = await saveProof(buf, null);
-    return { file, contentType, size, sha256 };
-  } catch (e) { log.warn('messages', `Could not store a customer's picture: ${e.message}`); return null; }
+    log.info('media', `${m.channel}: picture downloaded`, { messageId: m.externalId, bytes: size, contentType });
+    return { attachment: { file, contentType, size, sha256 }, media: { ...media, error: null } };
+  } catch (e) { media.error = e.message; log.warn('media', `${m.channel}: picture not stored`, { messageId: m.externalId, reason: e.message }); return { attachment: null, media }; }
+}
+
+// Downloads the pictures that failed earlier (the connection was down or the token had expired), then checks them for a payment. Returns how many came back.
+export async function retryMedia({ conversationId, messageId } = {}) {
+  const q = { attachment: null, messageType: 'image', 'media.id': { $ne: null }, $or: [{ 'media.state': { $ne: 'downloading' } }, { updatedAt: { $lt: new Date(Date.now() - 120000) } }], ...(conversationId ? { conversation: conversationId } : {}), ...(messageId ? { _id: messageId } : {}), direction: 'inbound' };
+  let recovered = 0; const failed = [];
+  for (const msg of await Message.find(q).limit(20)) {
+    await Message.updateOne({ _id: msg._id }, { $set: { 'media.state': 'downloading' } });
+    const ok = await finishMedia(msg._id, { channel: msg.channel, externalId: msg.externalId, messageType: 'image', mediaId: msg.media?.id, mediaUrl: msg.media?.url }, msg.conversation, msg.media);
+    if (ok) recovered++; else failed.push({ id: String(msg._id), reason: (await Message.findById(msg._id).lean())?.media?.error });
+  }
+  return { recovered, failed };
 }
 
 async function upsertConversation(m, retry = true) {
@@ -93,6 +125,7 @@ async function messagesByConversation(ids) {
       id: String(m._id), from: m.direction === 'outbound' ? 'business' : 'customer', text: m.text ?? (m.attachment ? null : `[${m.messageType} message — not shown]`), at: m.receivedAt.toISOString(), read: Boolean(m.readAt),
       attachment: m.attachment ? { url: `/conversations/${m.conversation}/messages/${m._id}/attachment`, contentType: m.attachment.contentType } : null,
       scan: scanOf(m),
+      picture: m.messageType === 'image' && !m.attachment ? { state: m.media?.state === 'downloading' && Date.now() - new Date(m.createdAt ?? 0).getTime() < 120000 ? 'loading' : 'failed', reason: m.media?.error ?? null } : null,
       delivery: m.direction === 'outbound' ? (m.delivery ? { mode: m.delivery.mode, state: m.delivery.state, error: m.delivery.error ?? null } : { mode: 'simulated', state: 'sent', error: null }) : null,
       payment: m.paymentId ? payBy[String(m.paymentId)] ?? null : null,
     });
@@ -205,7 +238,7 @@ export async function conversationWithMessages(id) {
 
 // Delivery receipts for messages we sent (WhatsApp statuses, Instagram "seen"). A message only ever moves forward (sent -> delivered -> read); a
 // "failed" receipt is kept unless the customer has already read it. Receipts for messages we do not know (sent elsewhere) are ignored.
-const RANK = { sent: 1, delivered: 2, read: 3 };
+const RANK = { accepted: 0, sent: 1, delivered: 2, read: 3 }; // accepted = Meta took the request; only its webhooks say it was sent, delivered or read
 export async function applyStatuses(statuses) {
   let updated = 0;
   for (const st of statuses) {

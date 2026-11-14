@@ -10,6 +10,7 @@ import Order from '../models/Order.js';
 import { config } from '../config/env.js';
 import { log } from '../utils/log.js';
 import { draftFromConversation, createOrderForConversation } from './orderDraftService.js';
+import { retryMedia } from './messageService.js';
 
 const FIELDS = ['item', 'quantity', 'customisation', 'notes', 'price', 'deadline', 'prepTimeMinutes'];
 const blank = (v) => v === null || v === undefined || v === '';
@@ -20,7 +21,10 @@ export async function autoDraftForConversation(convId, deps = {}) {
   if (!conv || conv.isDemo) return { action: 'skipped', reason: 'demo_or_missing' };
   let order = conv.orderId ? await Order.findById(conv.orderId) : null;
   if (order && order.status !== 'draft') return { action: 'skipped', reason: 'order_confirmed', orderId: String(order._id) }; // later messages stay as updated instructions
+  if (!deps.skipMedia) { const back = await retryMedia({ conversationId: convId }).catch(() => null); if (back?.recovered) log.info('draft', `Recovered ${back.recovered} picture(s) that had failed to download.`, { conversation: String(convId) }); }
+  log.info('draft', 'Reading the conversation', { conversation: String(convId), existingOrder: Boolean(order) });
   const r = await draftFromConversation(convId, deps, { ignoreLinked: true });
+  log.info('draft', 'AI extraction completed', { conversation: String(convId), intent: r.intent, item: Boolean(r.draft?.item), missing: r.missingFields });
   if (r.intent !== 'order' || !r.draft?.item) return { action: 'skipped', reason: 'not_an_order', intent: r.intent };
   const assumed = [...(r.estimates?.prepTimeMinutes ? ['prepTimeMinutes'] : []), ...r.uncertainties.filter((u) => u.field === 'deadline' && /assumed/i.test(u.message)).map(() => 'deadlineTime')];
   const meta = { auto: true, missingFields: r.missingFields, uncertainties: r.uncertainties, assumed, messageIds: r.sourceMessageIds ?? [], extractedAt: new Date() };
@@ -32,7 +36,7 @@ export async function autoDraftForConversation(convId, deps = {}) {
       const created = await createOrderForConversation(convId, body);
       const now = new Date();
       await Order.updateOne({ _id: created.id }, { $set: { draft: { ...meta, autoUpdatedAt: now, ownerEdited: false }, updatedAt: now } }, { timestamps: false });
-      log.info('draft', `Created an order draft from a ${conv.channel} conversation.`);
+      log.info('draft', `Order draft created from a ${conv.channel} conversation.`, { order: created.id });
       return { action: 'created', orderId: created.id };
     } catch (e) {
       if (e.code !== 'ORDER_EXISTS') throw e; // another run created it a moment ago: update that one instead
@@ -46,6 +50,10 @@ export async function autoDraftForConversation(convId, deps = {}) {
   for (const [f, v] of Object.entries(fresh)) {
     if (ownerTouched ? blank(order[f]) : !same(order[f], v)) set[f] = v; // the owner's own edits are never overwritten; a customer's correction is
   }
+  // What is missing is judged on the order AS IT NOW STANDS (the owner's edits and earlier readings count), not on this one reading alone.
+  const eff = (f) => (f in set ? set[f] : order[f]);
+  meta.missingFields = meta.missingFields.filter((f) => blank(eff(f)));
+  meta.uncertainties = meta.uncertainties.filter((u) => !(FIELDS.includes(u.field) && !blank(eff(u.field)) && u.field !== 'prepTimeMinutes'));
   const now = new Date();
   const next = { ...meta, autoUpdatedAt: ownerTouched ? order.draft?.autoUpdatedAt ?? now : now, ownerEdited: ownerTouched };
   if (Object.keys(set).length === 0 && JSON.stringify(order.draft?.missingFields ?? []) === JSON.stringify(meta.missingFields)) return { action: 'unchanged', orderId: String(order._id) };

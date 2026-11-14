@@ -36,7 +36,8 @@ export async function draftFromConversation(convId, deps = {}, { ignoreLinked = 
   const used = [];
   for (const l of [...lines].reverse()) { const row = `${l.who}: ${l.text}\n`; if (message.length + row.length > MAX_CHARS) break; message = row + message; used.unshift(l.id); }
   const settings = await getSettings();
-  const r = await extractOrder({ message: message.trim(), source: conv.channel, customerName: conv.customerName }, settings, deps);
+  const latest = [...messages].reverse().find((m) => m.from === 'customer' && m.text)?.at; // "tomorrow" means tomorrow as of when the customer wrote it, in the business's timezone
+  const r = await extractOrder({ message: message.trim(), source: conv.channel, customerName: conv.customerName, ...(latest ? { referenceTime: new Date(latest) } : {}) }, settings, deps);
   const intent = classifyIntent(lines.filter((l) => l.who === 'Customer').map((l) => l.text), r.draft.item, r.aiIntent);
   const missing = r.missingFields.filter((f) => f !== 'prepTimeMinutes' || r.draft.prepTimeMinutes === null);
   return { existingOrderId: null, draft: r.draft, intent, missingFields: missing, uncertainties: r.uncertainties, estimates: r.estimates,
