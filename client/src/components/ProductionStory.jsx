@@ -1,28 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion.js';
-import { getOrderConversation } from '../services/api.js';
+import { attachmentSrc } from '../services/api.js';
 import { formatMinutes, formatTimeInTz, STATUS_LABEL, PAYMENT_LABEL } from '../utils/format.js';
 import '../css/ProductionStory.css';
 
 // The production sequence as one scroll-driven story: the large step numbers on the left scroll past, and the ONE production card on the right stays where
 // it is and swaps to the order that is currently in the middle of the screen. Every time and figure comes from the scheduler's roadmap (`tasks`, built from
-// GET /planner) and the orders; nothing is hardcoded. The reference picture is the one the customer sent in their conversation, when there is one.
+// GET /planner) and the orders; nothing is hardcoded. The picture is the order's own newest reference picture (order.referenceImage: the one the customer sent, or
+// the one attached to the order), the same one its Orders card shows; an order with none shows its initial.
 const pad = (n) => String(n).padStart(2, '0');
 const day = (iso, tz) => new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(iso));
 const PRIORITY = { high: { label: 'Needs attention', tone: 'high' }, medium: { label: 'Tight', tone: 'medium' }, low: { label: 'On track', tone: 'low' } };
-
-function useReferencePictures(tasks) {
-  const [pics, setPics] = useState({});
-  const key = tasks.map((t) => t.id).join('|');
-  useEffect(() => {
-    let gone = false;
-    Promise.all(tasks.map((t) => getOrderConversation(t.id).then((c) => [t.id, c.spec?.referenceImages?.[0]?.url ?? null]).catch(() => [t.id, null])))
-      .then((pairs) => { if (!gone) setPics(Object.fromEntries(pairs)); });
-    return () => { gone = true; };
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
-  return pics;
-}
 
 // An order the roadmap splits across two days is one step here: its first stretch of work, flagged as continuing.
 const merge = (rows) => {
@@ -37,7 +26,6 @@ export default function ProductionStory({ tasks: rows, orders, tz }) {
   const reduced = usePrefersReducedMotion();
   const [active, setActive] = useState(0);
   const steps = useRef([]);
-  const pics = useReferencePictures(tasks);
   const byId = Object.fromEntries(orders.map((o) => [o.id, o]));
 
   useEffect(() => {
@@ -85,7 +73,7 @@ export default function ProductionStory({ tasks: rows, orders, tz }) {
           <AnimatePresence mode="wait" initial={false}>
             <motion.div key={t.key} className="ps-card-body" {...swap}>
               <div className="ps-pic">
-                {pics[t.id] ? <img src={pics[t.id]} alt={`Reference picture for ${t.customerName}'s order`} /> : <span aria-hidden="true">{t.customerName.charAt(0)}</span>}
+                {byId[t.id]?.referenceImage ? <img src={attachmentSrc(byId[t.id].referenceImage)} alt={`Reference picture for ${t.customerName}'s order`} /> : <span aria-hidden="true">{t.customerName.charAt(0)}</span>}
                 <i className={`ps-prio is-${pr.tone}`}>{active === 0 && pr.tone === 'low' ? 'Make first' : pr.label}</i>
               </div>
               <h3>{t.customerName}</h3>

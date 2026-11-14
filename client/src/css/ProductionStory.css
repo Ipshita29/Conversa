@@ -21,7 +21,7 @@
 .ps-dots button { width: 22px; height: 6px; padding: 0; border: 0; border-radius: 99px; background: #D7E4F5; cursor: pointer; transition: background 0.3s, width 0.3s; } .ps-dots button.is-on { width: 34px; background: var(--primary); }
 .ps-card-body { display: grid; grid-auto-rows: min-content; align-content: start; gap: 0.35rem; min-height: 0; }
 .ps-pic { position: relative; display: grid; place-items: center; height: clamp(150px, 28vh, 250px); margin-bottom: 0.7rem; border-radius: 20px; background: #EEF4FC; overflow: hidden; }
-.ps-pic img { width: 100%; height: 100%; object-fit: cover; display: block; } .ps-pic > span { font: 400 5rem var(--brand); color: #8FB1DE; }
+.ps-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 72%; display: block; } /* fills the frame (the frame has a fixed height; without this the picture kept its own height and was just clipped) */ .ps-pic > span { font: 400 5rem var(--brand); color: #8FB1DE; }
 .ps-prio { position: absolute; top: 0.7rem; left: 0.7rem; padding: 3px 10px; border-radius: 99px; background: #fff; font: 600 0.72rem var(--display); font-style: normal; color: var(--low); }
 .ps-prio.is-medium { color: var(--caramel-ink); background: var(--papaya-soft); } .ps-prio.is-high { color: var(--high); background: var(--high-bg); }
 .ps-card-body h3 { margin: 0; font: 600 1.7rem var(--display); letter-spacing: -0.03em; }

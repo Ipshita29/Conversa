@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Camera, Copy, ExternalLink, MessageCircle, MessageSquare, Paperclip, Plus, Search, SendHorizontal, Sparkles, Check, FileText } from 'lucide-react';
-import { attachmentSrc, extractMessagePayment, extractPaymentText, getConversations, getIntegrations, getPayments, listOrders, sendConversationMessage, updateConversation, DEMO_MODE } from '../services/api.js';
+import useLive from '../hooks/useLive.js';
+import { attachmentSrc, sendTemplateMessage, retryConversationPictures, extractMessagePayment, extractPaymentText, getConversations, getIntegrations, getPayments, listOrders, sendConversationMessage, updateConversation, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import { CHANNEL_LABEL, STATUS_LABEL } from '../utils/format.js';
 import { Drawer, Modal, StateMessage } from '../components/UI.jsx';
@@ -11,12 +12,10 @@ import { parsePaymentText } from '../../../server/services/paymentExtraction.js'
 import { formatMoney } from '../utils/format.js';
 import useStickyScroll from '../hooks/useStickyScroll.js';
 import { OrderSummaryModal, SmartReplies } from '../components/Replies.jsx';
-import useDataset from '../hooks/useDataset.js';
-import DatasetToggle from '../components/DatasetToggle.jsx';
 import '../css/Workspace.css';
 
-const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp'], ['instagram', 'Instagram']];
-const CHANNEL_ICON = { whatsapp: MessageCircle, instagram: Camera };
+const FILTERS = [['all', 'All'], ['unread', 'Unread'], ['whatsapp', 'WhatsApp']];
+const CHANNEL_ICON = { whatsapp: MessageCircle, instagram: MessageCircle };
 const initials = (name) => (name ?? '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
 const hue = (name) => [...(name ?? '')].reduce((h, c) => (h + c.charCodeAt(0)) % 4, 0); // decorative only: picks one of four palette tints
 const dayKey = (iso) => new Date(iso).toDateString();
@@ -54,11 +53,11 @@ function CopyButton({ text }) {
 }
 
 export default function Inbox() {
-  const ds = useDataset();
-  const conv = useAsync(() => (ds.ready ? getConversations(ds.dataset) : new Promise(() => {})), [ds.dataset, ds.ready]);
+  const conv = useAsync(() => getConversations(), []);
   const integrations = useAsync(getIntegrations);
-  const ordersQ = useAsync(() => (ds.ready ? listOrders({ pageSize: 100, dataset: ds.dataset }) : new Promise(() => {})), [ds.dataset, ds.ready]);
-  const paymentsQ = useAsync(() => (ds.ready ? getPayments(ds.dataset) : new Promise(() => {})), [ds.dataset, ds.ready]); // the linked order's payment status, shown in the chat
+  const ordersQ = useAsync(() => listOrders({ pageSize: 100 }), []);
+  useLive(['messages', 'orders', 'payments'], () => { conv.reload(); ordersQ.reload(); paymentsQ.reload(); }); // a message, order or payment changed on the server
+  const paymentsQ = useAsync(() => getPayments(), []); // the linked order's payment status, shown in the chat
   const [viewer, setViewer] = useState(null); // a picture opened full size
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
@@ -92,11 +91,16 @@ export default function Inbox() {
   useEffect(() => { setDrafting(false); setPayNote(null); setDraft(''); setSendState({ status: 'idle', error: null }); setSummaryOpen(false); }, [selected?.id]);
 
   // Typed messages are sent only by the owner's own press of Send (or Enter). Real when the channel is connected, otherwise a clearly marked simulation.
-  const simulated = !selected || selected.isDemo || (channelInfo?.state ?? channelInfo?.status) !== 'connected';
+  // Only a sample conversation is ever simulated. A real conversation on a channel that is not connected cannot send at all (and says why): nothing is
+  // stored as if it had been delivered.
+  const simulated = !selected || Boolean(selected.isDemo);
+  const chanState = channelInfo?.state ?? channelInfo?.status;
+  const blocked = Boolean(selected) && !selected.isDemo && !DEMO_MODE && chanState !== 'connected';
+  const blockedWhy = (channelInfo?.statusReason ?? 'it is not connected').split(/\.\s/)[0]; // the first sentence; Settings has the whole explanation
   // Meta only allows a free-form reply for 24 hours after the customer's last message (a WhatsApp template is needed after that).
   const windowClosed = !simulated && selected?.lastInboundAt && Date.now() - new Date(selected.lastInboundAt).getTime() > 24 * 3600000;
   async function sendDraft() {
-    const text = draft.trim(); if (!text || sendState.status === 'sending') return;
+    const text = draft.trim(); if (!text || sendState.status === 'sending' || blocked) return;
     setSendState({ status: 'sending', error: null });
     try { await sendConversationMessage(selected.id, text); setDraft(''); setSendState({ status: 'idle', error: null }); conv.reload(); }
     catch (e) { setSendState({ status: 'failed', error: e.message }); }
@@ -142,13 +146,12 @@ export default function Inbox() {
   if (conv.status === 'loading' && !conv.data) return <section className="page inbox-page"><div className="im"><div className="im-state"><StateMessage kind="loading" message="Loading conversations…" /></div></div></section>;
   if (conv.status === 'error') return <section className="page inbox-page"><div className="im"><div className="im-state"><StateMessage kind="error" message={`Couldn't load conversations. ${conv.error.message}`} onRetry={conv.reload} /></div></div></section>;
 
-  const items = integrations.data?.items ?? [];
+  const items = (integrations.data?.items ?? []).filter((i) => i.channel === 'whatsapp'); // WhatsApp is the only channel offered
   const groups = [];
   selected?.messages.forEach((m) => { const k = dayKey(m.at); const g = groups[groups.length - 1]; if (g?.key === k) g.items.push(m); else groups.push({ key: k, at: m.at, items: [m] }); });
   const last = selected ? lastOf(selected) : null;
-  const sendNote = !selected ? '' : simulated
-    ? `Demo mode: sends are simulated. Messages appear here and nothing reaches ${selected.customerName} on ${CHANNEL_LABEL[selected.channel]}.`
-    : `Messages are sent to ${selected.customerName} through ${CHANNEL_LABEL[selected.channel]}.`;
+  // The only note under the chat is a real problem: the channel is not connected, so nothing can be sent. Sample chats and working chats say nothing.
+  const sendNote = selected && blocked ? `${CHANNEL_LABEL[selected.channel]} is not connected (${blockedWhy.replace(/\.$/, '')}). Messages cannot be sent until you reconnect it.` : '';
 
   return (
     <section className="page inbox-page">
@@ -160,7 +163,6 @@ export default function Inbox() {
             <h1>Chats</h1>
             <button type="button" className="im-icon-btn" onClick={() => setPaste(true)} aria-label="New message: paste a customer message to draft an order" title="Paste a customer message"><Plus size={18} aria-hidden="true" /></button>
           </header>
-          {ds.both && <div className="im-ds"><DatasetToggle ds={ds} /></div>}
           <label className="im-search"><Search size={16} aria-hidden="true" /><span className="sr-only">Search conversations</span>
             <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search chats and messages" /></label>
           <div className="im-tabs" role="group" aria-label="Filter conversations">
@@ -168,7 +170,7 @@ export default function Inbox() {
           </div>
 
           {convs.length === 0 ? (
-            <div className="im-empty"><MessageSquare size={30} aria-hidden="true" /><h2>No conversations yet</h2><p>{DEMO_MODE ? 'Sample conversations appear here.' : 'They appear here once WhatsApp or Instagram is connected and a customer writes in.'} You can still paste a message to draft an order.</p><button type="button" className="btn btn-sm" onClick={() => setPaste(true)}>Paste a message</button></div>
+            <div className="im-empty"><MessageSquare size={30} aria-hidden="true" /><h2>No conversations yet</h2><p>{DEMO_MODE ? 'Sample conversations appear here.' : 'They appear here once WhatsApp is connected and a customer writes in.'} You can still paste a message to draft an order.</p><button type="button" className="btn btn-sm" onClick={() => setPaste(true)}>Paste a message</button></div>
           ) : shown.length === 0 ? (
             <div className="im-empty"><Search size={28} aria-hidden="true" /><h2>{q ? 'No chats found' : 'Nothing here'}</h2><p>{q ? `Nothing matches “${query.trim()}”.` : `No ${FILTERS.find(([k]) => k === filter)?.[1].toLowerCase()} conversations.`}</p>{(q || filter !== 'all') && <button type="button" className="btn btn-sm" onClick={() => { setQuery(''); setFilter('all'); }}>Clear search and filters</button>}</div>
           ) : (
@@ -194,7 +196,7 @@ export default function Inbox() {
           <footer className="im-conn" aria-label="Channel connections">
             {integrations.status === 'error' ? <span className="im-conn-item" title="Couldn't check integrations"><i className="im-led is-off" />Connections unknown <button type="button" className="im-link" onClick={integrations.reload}>Retry</button></span>
               : items.length === 0 ? <span className="im-conn-item">Checking connections…</span>
-                : items.map((i) => <span key={i.channel} className="im-conn-item" title={i.statusReason}><i className={`im-led is-${i.status}`} />{CHANNEL_LABEL[i.channel]} {i.status === 'connected' ? 'connected' : i.status === 'demo' ? 'demo only' : 'not connected'}</span>)}
+                : items.map((i) => <span key={i.channel} className="im-conn-item" title={i.statusReason}><i className={`im-led is-${i.status}`} />{CHANNEL_LABEL[i.channel]} {i.status === 'connected' ? 'connected' : i.status === 'demo' ? 'demo only' : i.state === 'needs_attention' ? 'needs attention' : 'not connected'}</span>)}
           </footer>
         </aside>
 
@@ -206,7 +208,7 @@ export default function Inbox() {
               <header className="im-chat-head">
                 <button type="button" className="im-icon-btn im-back" onClick={() => setChatOpen(false)} aria-label="Back to chats"><ArrowLeft size={18} aria-hidden="true" /></button>
                 <Avatar name={selected.customerName} channel={selected.channel} size="lg" />
-                <div className="im-chat-id"><h2>{selected.customerName}</h2><p>{CHANNEL_LABEL[selected.channel]}{selected.isDemo && <span className="im-demo">Demo conversation</span>}</p></div>
+                <div className="im-chat-id"><h2>{selected.customerName}{selected.isDemo && <span className="im-demo-chip">Demo</span>}</h2><p>{CHANNEL_LABEL[selected.channel]}</p></div>
                 <div className="im-chat-actions">
                   {linked ? <Link className="btn btn-sm" to={`/orders?edit=${linked.id}`}><ExternalLink size={14} aria-hidden="true" /> Open order</Link>
                     : !selected.orderId && <button type="button" className="btn btn-sm btn-primary" onClick={() => setDrafting(true)} disabled={drafting}><Sparkles size={14} aria-hidden="true" /> Extract order</button>}
@@ -217,7 +219,6 @@ export default function Inbox() {
               </header>
 
               <div className="im-scroll" ref={scrollRef} data-lenis-prevent tabIndex={0} aria-label="Messages"><div className="im-flow" ref={flowRef}>
-                {selected.isDemo && <div className="notice info im-demo-note" role="note"><b>Demo conversation.</b> These are sample messages and pictures to show how Conversa organises an order. They are not live WhatsApp or Instagram messages.</div>}
                 {markError && <div className="notice error" role="alert">Couldn't mark this conversation as read: {markError}</div>}
                 {groups.map((g) => (
                   <div key={g.key} className="im-day">
@@ -226,7 +227,7 @@ export default function Inbox() {
                       const mine = m.from && m.from !== 'customer';
                       return (
                         <div key={m.id} className={`im-msg ${mine ? 'is-mine' : 'is-theirs'}`}>
-                          <div className="im-bubble">{m.attachment && <button type="button" className="im-img" onClick={() => setViewer({ src: attachmentSrc(m.attachment), m })} aria-label="View the picture full size"><img src={attachmentSrc(m.attachment)} alt="Picture sent in this chat" loading="lazy" /></button>}{m.text && <p>{m.text}</p>}<span className="im-time"><time dateTime={m.at}>{timeOf(m.at)}</time></span>
+                          <div className="im-bubble">{m.attachment && <button type="button" className="im-img" onClick={() => setViewer({ src: attachmentSrc(m.attachment), m })} aria-label="View the picture full size"><img src={attachmentSrc(m.attachment)} alt="Picture sent in this chat" loading="lazy" /></button>}{m.picture && <p className={`im-pic-state is-${m.picture.state}`} role="status">{m.picture.state === 'loading' ? 'Picture loading…' : <>Picture not received{m.picture.reason ? `: ${m.picture.reason}` : ''} <button type="button" className="im-link" onClick={() => retryConversationPictures(selected.id).then(() => conv.reload()).catch(() => {})}>Retry</button></>}</p>}{m.text && <p>{m.text}</p>}<span className="im-time"><time dateTime={m.at}>{timeOf(m.at)}</time></span>
                             {m.attachment && (m.payment
                               ? <span className={`im-pay${recStatus(m.payment) === 'pending_review' ? ' is-review' : ''}`} role="status">
                                   <b>{m.scan?.state ? 'Payment detected' : 'Payment'} {formatMoney(m.payment.amount)} · {REC_STATUS[recStatus(m.payment)]}</b>
@@ -244,7 +245,7 @@ export default function Inbox() {
                                 {selected.orderId ? <button type="button" className="im-link" onClick={() => readAsPayment(m)} disabled={payBusy === m.id}>{payBusy === m.id ? 'Reading…' : 'Read as payment'}</button> : <small>Link an order to file it</small>}</span>) : null; })()}
                           </div>
                           {m.text && <CopyButton text={m.text} />}
-                          {mine && m.delivery && <small className={`im-sent${m.delivery.mode === 'simulated' ? ' is-sim' : m.delivery.state === 'failed' ? ' is-fail' : ''}`}>{m.delivery.mode === 'simulated' ? 'Simulated · not sent to the customer' : m.delivery.state === 'failed' ? `Not delivered${m.delivery.error ? ` · ${m.delivery.error}` : ''}` : m.delivery.state === 'read' ? 'Read' : m.delivery.state === 'delivered' ? 'Delivered' : 'Sent'}</small>}
+                          {mine && m.delivery && m.delivery.mode !== 'simulated' && <small className={`im-sent${m.delivery.state === 'failed' ? ' is-fail' : ''}`}>{m.delivery.state === 'failed' ? `Not delivered${m.delivery.error ? ` · ${m.delivery.error}` : ''}` : m.delivery.state === 'read' ? 'Read' : m.delivery.state === 'delivered' ? 'Delivered' : m.delivery.state === 'sent' ? 'Sent' : 'Sending…'}</small>}
                         </div>
                       );
                     })}
@@ -268,14 +269,14 @@ export default function Inbox() {
 
               <SmartReplies conv={selected} onSent={() => conv.reload()} onEdit={(t) => { setDraft(t); setTimeout(() => boxRef.current?.focus(), 0); }} />
               <footer className="im-composer">
-                {windowClosed && <p className="rp-state is-error" role="alert">{selected.customerName} last wrote more than 24 hours ago. {selected.channel === 'whatsapp' ? 'WhatsApp only allows a free-form reply within 24 hours of their last message; after that an approved message template is required.' : 'Instagram only allows a reply within 24 hours of their last message.'} You can reply once they write again.</p>}
-                <p className="im-composer-note" role="status"><i className={`im-led ${simulated ? 'is-off' : 'is-connected'}`} />{sendNote}</p>
+                {windowClosed && <p className="rp-state is-error" role="alert">{selected.customerName} last wrote more than 24 hours ago. {selected.channel === 'whatsapp' ? 'WhatsApp only allows a free-form reply within 24 hours of their last message; after that an approved message template is required.' : 'Replies are only allowed within 24 hours of their last message.'} You can reply freely once they write again.{selected.channel === 'whatsapp' && !simulated && <> <button type="button" className="im-link" disabled={sendState.status === 'sending'} onClick={async () => { setSendState({ status: 'sending', error: null }); try { await sendTemplateMessage(selected.id); setSendState({ status: 'idle', error: null }); conv.reload(); } catch (e) { setSendState({ status: 'failed', error: e.message }); } }}>Send an approved template message</button></>}</p>}
+                {blocked && <p className="im-composer-note" role="status"><i className="im-led is-off" />{sendNote} <Link to="/settings" className="im-link">Open Settings</Link></p>}
                 {sendState.status === 'failed' && <p className="rp-state is-error" role="alert">Not sent: {sendState.error}</p>}
                 <div className="im-composer-row">
                   <button type="button" className="im-icon-btn" disabled aria-label="Attach a file (not available)" title="Attachments aren't supported yet"><Paperclip size={18} aria-hidden="true" /></button>
                   <textarea ref={boxRef} rows={1} placeholder="Type a message..." aria-label="Message" value={draft} onChange={(e) => { setDraft(e.target.value); if (sendState.status === 'failed') setSendState({ status: 'idle', error: null }); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDraft(); } }} disabled={sendState.status === 'sending'} />
-                  <button type="button" className="im-send" onClick={sendDraft} disabled={!draft.trim() || sendState.status === 'sending' || Boolean(windowClosed)} aria-label={sendState.status === 'sending' ? 'Sending' : 'Send message'}><SendHorizontal size={18} aria-hidden="true" /></button>
+                  <button type="button" className="im-send" onClick={sendDraft} disabled={!draft.trim() || sendState.status === 'sending' || Boolean(windowClosed) || blocked} aria-label={sendState.status === 'sending' ? 'Sending' : 'Send message'}><SendHorizontal size={18} aria-hidden="true" /></button>
                 </div>
               </footer>
             </>
@@ -283,7 +284,7 @@ export default function Inbox() {
         </section>
       </div>
 
-      {summaryOpen && selected && <OrderSummaryModal conv={selected} simulated={simulated} onClose={() => setSummaryOpen(false)} onSent={() => conv.reload()} />}
+      {summaryOpen && selected && <OrderSummaryModal conv={selected} simulated={simulated} blocked={blocked} onClose={() => setSummaryOpen(false)} onSent={() => conv.reload()} />}
 
       {viewer && (
         <Modal variant="lightbox" title={viewer.m.payment || ['filed', 'review', 'duplicate'].includes(viewer.m.scan?.state) ? 'Payment screenshot' : 'Reference picture'} onClose={() => setViewer(null)}>

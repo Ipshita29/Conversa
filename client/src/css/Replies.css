@@ -27,4 +27,3 @@
 .im-composer textarea:not(:disabled) { cursor: text; }
 @media (max-width: 640px) { .rp { padding-inline: 0.8rem; } .rp-send { flex-direction: column; align-items: flex-start; gap: 0.15rem; } }
 .im-sent.is-fail { color: #A5543F; }
-.im-ds { padding: 0 1rem 0.5rem; }

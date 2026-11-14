@@ -72,7 +72,6 @@ a { color: var(--blue-ink); text-underline-offset: 3px; }
 .stepbar li.done { background: var(--blue); }
 .stepbar li.now { background: var(--primary); }
 .step-cancelled { font-size: 0.82rem; }
-.demo-tag { margin-left: 0.5rem; padding: 0.05rem 0.45rem; border: 1px solid var(--blue); border-radius: 999px; background: var(--blue-soft); color: var(--blue-ink); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: 2px; }
 
 /* ---------- Sections ---------- */
 .ws-section { padding: 3.5rem 0; border-top: 1px solid var(--border); scroll-margin-top: 1rem; }
@@ -117,7 +116,6 @@ a { color: var(--blue-ink); text-underline-offset: 3px; }
 .pay-rejected { background: var(--high-bg); color: var(--high); }
 .pay-unverified { background: var(--border); color: var(--muted); }
 .channel-whatsapp, .channel-instagram, .channel-manual { background: transparent; color: var(--muted); padding-inline: 0; }
-.demo-badge { background: var(--blue-soft); color: var(--blue-ink); border: 1px solid var(--blue); padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; white-space: nowrap; }
 .risk-dot { width: 8px; height: 8px; background: currentColor; display: inline-block; }
 .risk-high { background: var(--high-bg); color: var(--high); font-weight: 600; }
 .risk-high .risk-dot { transform: rotate(45deg); }                              /* diamond */
@@ -246,3 +244,12 @@ textarea { resize: vertical; min-height: 96px; }
 /* Quieter dialogs and drawers */
 .modal { border: 1px solid #ECE8E1; box-shadow: 0 24px 60px -24px rgba(27, 34, 51, 0.3); }
 .modal-header h2 { font-size: 1.2rem; }
+
+/* A confirmation dialog: its own layer above every other dialog (Order Details is 120, the picture viewer 90), centred over the whole viewport. It is portalled into <body>, so no
+   page or dialog ancestor can trap it in a lower stacking context. The dialog sits above its own backdrop. */
+.modal-backdrop.is-confirm { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 1rem; background: rgba(36, 33, 28, 0.42); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+.is-confirm .modal { position: relative; z-index: 1; width: min(440px, 100%); max-width: none; max-height: calc(100dvh - 2rem); overflow-y: auto; background: #FCFAF5; border-radius: 22px; box-shadow: 0 30px 80px -24px rgba(27, 34, 51, 0.45); }
+.is-confirm .modal-header { padding: 1.1rem 1.4rem 0.4rem; border: 0; background: transparent; } .is-confirm .modal-header h2 { font-size: 1.3rem; }
+.is-confirm .modal-body { padding: 0 1.4rem 1.3rem; } .is-confirm .modal-body p { margin: 0 0 1rem; color: var(--muted); }
+.is-confirm .form-actions { display: flex; justify-content: flex-end; gap: 0.6rem; flex-wrap: wrap; }
+.is-confirm .btn.btn-danger { background: #B4503A; border-color: #B4503A; color: #fff; } .is-confirm .btn.btn-danger:hover:not(:disabled) { background: #9C412D; border-color: #9C412D; }

@@ -2,6 +2,7 @@ import { MessageCircle, Camera, PenLine, X, ArrowUpRight } from 'lucide-react';
 import { STATUS_LABEL, PAYMENT_LABEL, CHANNEL_LABEL, RISK_LABEL } from '../utils/format.js';
 import { DEMO_MODE } from '../services/api.js';
 import { useEffect, useRef, useLayoutEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { ReactLenis, useLenis } from 'lenis/react';
 import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion.js';
@@ -21,7 +22,7 @@ export function RiskBadge({ risk, needsDetails = false }) {
   return <span className={`badge risk-${risk}`}><i className="risk-dot" aria-hidden="true" />{RISK_LABEL[risk]}</span>;
 }
 
-const ICONS = { whatsapp: MessageCircle, instagram: Camera, manual: PenLine };
+const ICONS = { whatsapp: MessageCircle, instagram: MessageCircle, manual: PenLine };
 export function ChannelBadge({ channel }) {
   const Icon = ICONS[channel] ?? PenLine;
   return <span className={`badge channel-${channel}`}><Icon size={14} aria-hidden="true" />{CHANNEL_LABEL[channel] ?? channel}</span>;
@@ -29,10 +30,7 @@ export function ChannelBadge({ channel }) {
 
 // ---------- DemoBadge ----------
 // Renders only in demo mode so simulated data is never mistaken for live data.
-export function DemoBadge({ label = 'Demo data' }) {
-  if (!DEMO_MODE) return null;
-  return <span className="demo-badge" title="Simulated by the in-browser mock backend (src/mock)">{label}</span>;
-}
+export function DemoBadge() { return null; } // orders are orders: nothing on a page is labelled demo or real
 
 // ---------- Modal ----------
 // A restrained 3D depth behind the wide dialog: a few soft translucent sheets that settle into place as it opens and drift back as it closes,
@@ -98,8 +96,8 @@ export function Modal({ title, subtitle, onClose, children, variant }) {
     return () => { document.removeEventListener('keydown', onKey); openModals.splice(openModals.indexOf(me), 1); };
   }, []);
 
-  return (
-    <div className={`modal-backdrop${variant === 'lightbox' ? ' is-lightbox' : ''}${wide ? ' is-wide' : ''}${glass ? ' is-glass' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
+  const node = (
+    <div className={`modal-backdrop${variant === 'lightbox' ? ' is-lightbox' : ''}${wide ? ' is-wide' : ''}${glass ? ' is-glass' : ''}${variant === 'confirm' ? ' is-confirm' : ''}${leaving ? ' is-leaving' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
       {wide && !reduced && <DepthBackdrop leaving={leaving} />}
       <div className="modal" data-lenis-prevent role="dialog" aria-modal="true" aria-label={title}>
         <header className="modal-header">
@@ -110,6 +108,9 @@ export function Modal({ title, subtitle, onClose, children, variant }) {
       </div>
     </div>
   );
+  // A confirmation always sits above whatever opened it. It is rendered straight into <body>, outside every page and dialog (and so outside their transforms,
+  // filters and stacking contexts), and has its own layer above all the other dialogs.
+  return variant === 'confirm' ? createPortal(node, document.body) : node;
 }
 
 // ---------- Drawer ----------
@@ -423,6 +424,7 @@ const PALETTES = {
   caramel: { pastel: '#E7F0FB', light: '#E8C5A2', medium: '#E8C5A2', deep: '#B8C8F0', glass: '#B8E3DE' },
   teal: { pastel: '#E7F0FB', light: '#B8E3DE', medium: '#B8E3DE', deep: '#A9C9EE', glass: '#B8C8F0' },
 };
+export const HOME_PALETTE = PALETTES.hero; // the homepage's colours, shared with the Insights scene so the two read as one product
 let THREE = null; // the three.js module, once loaded
 const toColors = (p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, new THREE.Color(v)]));
 const ROLES = ['pastel', 'light', 'medium', 'deep', 'glass'];

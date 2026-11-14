@@ -51,7 +51,7 @@ const qs = (params = {}) => {
 export const getDashboard = () => request('GET', '/dashboard');
 export const getBoard = (dataset) => request('GET', `/board${qs({ dataset })}`);
 // range: 7 | 30 | 90, or { from, to } (YYYY-MM-DD) for a custom period.
-export const getInsights = (range, dataset) => request('GET', `/analytics/summary${qs(typeof range === 'object' && range ? { from: range.from, to: range.to, dataset } : { range, dataset })}`);
+export const getInsights = (range, dataset, week) => request('GET', `/analytics/summary${qs(typeof range === 'object' && range ? { from: range.from, to: range.to, dataset, week } : { range, dataset, week })}`);
 export const getMonthlyAnalytics = (month, dataset) => request('GET', `/analytics/monthly${qs({ month, dataset })}`);
 
 // A picture attached to an order itself (Add / Edit order). The newest one is what the Orders gallery shows; customer pictures from its conversation are found automatically.
@@ -60,6 +60,7 @@ export const removeOrderReferenceImage = (orderId, imageId) => request('DELETE',
 export const listOrders = (params) => request('GET', `/orders${qs(params)}`);
 export const createOrder = (order) => request('POST', '/orders', order);
 export const getOrder = (id) => request('GET', `/orders/${encodeURIComponent(id)}`);
+export const deleteOrder = (id) => request('DELETE', `/orders/${encodeURIComponent(id)}`);
 export const updateOrder = (id, patch) => request('PATCH', `/orders/${encodeURIComponent(id)}`, patch);
 
 export const extractOrder = (payload) => request('POST', '/ai/extract-order', payload);
@@ -75,6 +76,13 @@ export const applyWhatIf = (scope) => request('POST', '/planner/whatif/apply', {
 export const simulatePlanner = (payload) => request('POST', '/planner/simulate', payload);
 
 // Payments. Nothing here marks money as received on its own: records start as "pending" until the owner confirms them.
+// download again the pictures of a chat that could not be fetched (e.g. after WhatsApp was reconnected)
+export const retryConversationPictures = (id) => request('POST', `/conversations/${id}/retry-pictures`);
+export const getChannelDiagnostics = (channel) => request('GET', `/integrations/${channel}/diagnostics`);
+export const testChannelConnection = (channel) => request('POST', `/integrations/${channel}/test`); // real checks against Meta and the public webhook address
+export const registerChannelWebhook = (channel) => request('POST', `/integrations/${channel}/register-webhook`);
+// An approved WhatsApp template: the only message allowed once the customer's 24-hour window has closed.
+export const sendTemplateMessage = (conversationId) => request('POST', `/conversations/${conversationId}/template-message`, {});
 export const getPayments = (dataset) => request('GET', `/payments${qs({ dataset })}`);
 export const getPayment = (id) => request('GET', `/payments/${encodeURIComponent(id)}`);
 export const confirmPayment = (id, body) => request('POST', `/payments/${encodeURIComponent(id)}/confirm`, body);

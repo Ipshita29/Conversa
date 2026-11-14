@@ -31,6 +31,18 @@ try {
 
 const wait = (ms = 350) => new Promise((r) => setTimeout(r, ms));
 const clone = (x) => JSON.parse(JSON.stringify(x));
+// The Insights story, from the same shared module as the server, on the browser's own orders and chats.
+async function withStory(summary, settings, now, week) {
+  const { buildStory } = await import('../../../server/services/insightsStory.js');
+  const dates = summary.trend.map((d) => d.date); const days = dates.length; const first = new Date(`${dates[0]}T00:00:00Z`);
+  const prevDates = Array.from({ length: days }, (_, i) => { const d = new Date(first); d.setUTCDate(d.getUTCDate() - days + i); return d.toISOString().slice(0, 10); });
+  const inbound = conversations.flatMap((c) => c.messages.filter((m) => m.from === 'customer').map((m) => ({ conversationId: c.id, at: m.at })));
+  const convs = Object.fromEntries(conversations.map((c) => [c.id, { channel: c.channel, contactId: c.id, orderContact: orders.find((o) => o.id === c.orderId)?.customerContact ?? null }]));
+  const story = buildStory({ orders, inbound, conversations: convs, collected: {}, settings, dates, prevDates, weekStart: week, now });
+  if (story.popular.available) { const hit = story.popular.orderIds.map((id) => orders.find((o) => o.id === id)).map((o) => o && pictures(o)[0]).find(Boolean); story.popular.image = hit ? { url: hit.url } : null; }
+  delete story.popular.orderIds;
+  return { ...summary, story };
+}
 const withRisk = () => {
   const plan = computePlan({ orders, settings: demoSettings(), now: new Date(), rangeDays: 1 });
   return orders.map((o) => ({ ...o, risk: plan.results[o.id]?.risk ?? null }));
@@ -140,11 +152,11 @@ export async function handleMockRequest(method, path, body = {}) {
     if (from !== null || to !== null) {
       const { details } = checkCustomRange(from, to, zonedParts(now, settings.timezone));
       if (details.length) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', details);
-      return clone(buildSummary({ orders, settings, from, to, now, dataset }));
+      return clone(await withStory(buildSummary({ orders, settings, from, to, now, dataset }), settings, now, q.get('week') || undefined));
     }
     const days = q.get('range') === null ? 7 : Number(q.get('range'));
     if (!RANGES.includes(days)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query.', [{ field: 'range', message: `Must be one of ${RANGES.join(', ')}.` }]);
-    return clone(buildSummary({ orders, settings, days, now, dataset }));
+    return clone(await withStory(buildSummary({ orders, settings, days, now, dataset }), settings, now, q.get('week') || undefined));
   }
 
   if (method === 'GET' && p === '/analytics/monthly') {
@@ -208,6 +220,10 @@ export async function handleMockRequest(method, path, body = {}) {
     const idx = orders.findIndex((o) => o.id === id);
     if (idx < 0) throw notFound(id);
     if (method === 'GET') return clone(withPictures(withRisk()[idx]));
+    if (method === 'DELETE') { // like the server: the order goes, its chat is only unlinked
+      orders = orders.filter((o) => o.id !== id); conversations.forEach((c) => { if (c.orderId === id) c.orderId = null; });
+      return { deleted: true, id };
+    }
     if (method === 'PATCH') {
       const details = [...rejectUnknown(body, PATCHABLE), ...validateOrder(body, { partial: true })];
       if (details.length) throw invalid(details);

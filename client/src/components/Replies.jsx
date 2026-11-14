@@ -76,7 +76,7 @@ export function SmartReplies({ conv, onSent, onEdit }) {
 
 // ---- Send order summary -------------------------------------------------------------------------------------------------------
 // Drafts the summary from the real order and payment records, shows it for editing, and sends only when the owner presses Send.
-export function OrderSummaryModal({ conv, simulated, onClose, onSent }) {
+export function OrderSummaryModal({ conv, simulated, blocked, onClose, onSent }) {
   const [orderId, setOrderId] = useState(null);
   const [data, setData] = useState(null);
   const [text, setText] = useState('');
@@ -117,11 +117,11 @@ export function OrderSummaryModal({ conv, simulated, onClose, onSent }) {
           <>
             <p className="rp-lede">Preview — you can edit anything before it is sent. Fields that aren’t on the order are left out.</p>
             <textarea className="rp-text" rows={Math.min(18, text.split('\n').length + 1)} value={text} onChange={(e) => setText(e.target.value)} disabled={status === 'sending'} aria-label="Order summary message" />
-            <p className={`rp-mode${simulated ? ' is-sim' : ''}`}>{simulated ? 'Demo: this send is simulated. It is added to the chat and nothing reaches the customer.' : `Sends to ${conv.customerName} on ${conv.channel === 'instagram' ? 'Instagram' : 'WhatsApp'}.`}</p>
+            {blocked && <p className="rp-mode">{conv.channel === 'whatsapp' ? 'WhatsApp' : 'This chat'} is not connected, so this cannot be sent. Reconnect it in Settings.</p>}
             {error && <p className="rp-state is-error" role="alert">Not sent: {error}</p>}
             <div className="form-actions">
               <button type="button" className="btn" onClick={onClose} disabled={status === 'sending'}>Cancel</button>
-              <button type="button" className="btn btn-primary" onClick={send} disabled={status === 'sending' || !text.trim()}>{status === 'sending' ? 'Sending…' : error ? 'Retry send' : 'Send summary'}</button>
+              <button type="button" className="btn btn-primary" onClick={send} disabled={status === 'sending' || !text.trim() || blocked}>{status === 'sending' ? 'Sending…' : error ? 'Retry send' : 'Send summary'}</button>
             </div>
           </>
         )}

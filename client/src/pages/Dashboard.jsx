@@ -5,7 +5,6 @@ import { Field, HeroSection, Reveal, ScrollR, useCardGlow } from '../components/
 import { Marquee } from '../components/Layout.jsx';
 import { ConnectSection } from '../components/Workspace.jsx';
 import { summarise } from '../utils/homeSummary.js';
-import { isDemoOrder } from '../utils/format.js';
 import useHashScroll from '../hooks/useHashScroll.js';
 import '../css/Workspace.css';
 
@@ -44,8 +43,7 @@ export default function Dashboard() {
   if (moved) return <Navigate to={moved} replace />;
 
   const sum = data ? summarise({ planner: data.planner, orders: data.orders }) : null;
-  const demoCount = data ? data.orders.filter(isDemoOrder).length : 0; // sample orders are called what they are; real ones are just open orders
-  const live = sum ? `${demoCount > 0 ? `${demoCount} demo` : `${sum.open.length} open`} ${plural(demoCount > 0 ? demoCount : sum.open.length, 'order', 'orders')} · ${sum.attention} ${plural(sum.attention, 'needs', 'need')} attention` : 'Checked before you commit';
+  const live = sum ? `${sum.open.length} open ${plural(sum.open.length, 'order', 'orders')} · ${sum.attention} ${plural(sum.attention, 'needs', 'need')} attention` : 'Checked before you commit';
 
   return (
     <section className="page home" ref={pageRef}>
@@ -60,7 +58,7 @@ export default function Dashboard() {
             <Glow />
             <p className="chip chip--flat"><i aria-hidden="true" />01 · THE CONVERSA SYSTEM</p>
             <h2 className="fx-h"><span className="fx-sans">From customer messages to</span><em className="fx-serif is-caramel">orders in control.</em></h2>
-            <p className="fx-lead">Conversa turns WhatsApp and Instagram orders into organized work — helping small businesses plan production, track payments and stay ahead of deadlines.</p>
+            <p className="fx-lead">Conversa turns WhatsApp orders into organized work — helping small businesses plan production, track payments and stay ahead of deadlines.</p>
             <span className="fx-spacer" />
             <p className="fx-micro">{live}</p>
           </article>

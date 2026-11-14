@@ -100,7 +100,7 @@ export function SourceMessage({ m }) {
   if (!m) return null;
   return (
     <div className="pm-srcmsg"><MessageSquare size={14} aria-hidden="true" />
-      <div><p><b>{m.customerName ?? 'A customer'}</b> · {m.channel === 'instagram' ? 'Instagram' : 'WhatsApp'} · {when(m.at)}</p>
+      <div><p><b>{m.customerName ?? 'A customer'}</b> · {m.channel === 'whatsapp' ? 'WhatsApp' : 'Chat'} · {when(m.at)}</p>
         <p className="pm-srcmsg-text">{m.text ? `“${m.text}”` : 'A picture with no text.'}</p>
         <Link className="pm-link" to={`/inbox?conversation=${m.conversationId}`}>Open the message</Link></div></div>
   );
@@ -307,7 +307,7 @@ export function PaymentDetail({ row, tz, onChanged, onRecord, onProof, refreshin
     <div className="pm-detail" ref={root}>
       <header className="pm-mhead">
         <div>
-          <h3>{row.customerName}{row.isDemo && <span className="demo-tag">Demo</span>}</h3>
+          <h3>{row.customerName}</h3>
           <p>{row.item} × {row.quantity} · Order <Link to={`/orders?edit=${row.orderId}`}>{shortId(row.orderId)}</Link></p>
         </div>
         <StatusPill status={row.status} />
