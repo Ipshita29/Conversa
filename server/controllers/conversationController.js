@@ -6,8 +6,8 @@ import { ApiError } from '../utils/errors.js';
 import { datasetOf } from '../utils/dataset.js';
 import { checkImage } from '../services/proofStore.js';
 import { draftFromConversation, createOrderForConversation } from '../services/orderDraftService.js';
-import { sendReply, suggestReplies, summariseOrder, suggestFromContext } from '../services/replyService.js';
-import { addAttachment, extractMessagePayment, getAttachmentFile, listConversations, updateConversation } from '../services/messageService.js';
+import { sendReply, sendTemplateReply, suggestReplies, summariseOrder, suggestFromContext } from '../services/replyService.js';
+import { addAttachment, extractMessagePayment, getAttachmentFile, listConversations, updateConversation, retryMedia } from '../services/messageService.js';
 
 const ID = /^[a-f\d]{24}$/i;
 
@@ -43,6 +43,7 @@ export const attachment = asyncHandler(async (req, res) => {
   res.set({ 'Content-Type': contentType, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=300', 'Content-Disposition': 'inline', 'Content-Security-Policy': "default-src 'none'; img-src 'self' data:" });
   res.send(data);
 });
+export const retryPictures = asyncHandler(async (req, res) => res.json(await retryMedia({ conversationId: req.params.id, ...(req.params.mid ? { messageId: req.params.mid } : {}) })));
 export const extractPayment = asyncHandler(async (req, res) => {
   const r = await extractMessagePayment(req.params.id, req.params.mid);
   res.status(r.existing ? 200 : 201).json(r);
@@ -54,6 +55,7 @@ export const suggestions = asyncHandler(async (req, res) => res.json(await sugge
 // GET /api/conversations/:id/order-summary?orderId=  -> the drafted text for the owner to preview. Nothing is sent.
 export const orderSummary = asyncHandler(async (req, res) => res.json(await summariseOrder(req.params.id, orderIdOf(req.query.orderId))));
 // POST /api/conversations/:id/messages  { text } -> sends exactly that text (only ever called after the owner chose to send it).
+export const sendTemplate = asyncHandler(async (req, res) => res.status(201).json(await sendTemplateReply(req.params.id)));
 export const sendMessage = asyncHandler(async (req, res) => res.status(201).json(await sendReply(req.params.id, req.body?.text)));
 // POST /api/ai/suggest-replies  { context } -> the same generator on a context the browser built (used by the demo, whose chats are not in the database).
 export const suggestFromBody = asyncHandler(async (req, res) => {

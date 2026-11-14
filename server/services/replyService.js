@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { log } from '../utils/log.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
 import Order from '../models/Order.js';
@@ -67,8 +68,36 @@ export async function summariseOrder(convId, orderId) {
   return { summary: orderSummary(order, row, { tz, spec, customerName: conv.customerName }), candidates, reason: null };
 }
 
+// A refused send becomes an error the owner can act on. Nothing is stored (a message WhatsApp did not accept never appears as sent), and a dead token is
+// flagged in Settings at once.
+const HTTP = { token: 401, recipient_not_allowed: 422, window_closed: 409, rate_limit: 429, invalid: 422, invalid_recipient: 422, undeliverable: 422, sender: 502, config: 409, network: 502 };
+const CODE = { token: 'TOKEN_INVALID', recipient_not_allowed: 'RECIPIENT_NOT_ALLOWED', window_closed: 'WINDOW_CLOSED', rate_limit: 'RATE_LIMITED', invalid: 'INVALID_REQUEST', invalid_recipient: 'INVALID_RECIPIENT', undeliverable: 'UNDELIVERABLE', sender: 'SENDER_INVALID', config: 'NOT_CONNECTED', network: 'NETWORK_ERROR' };
+function sendFailure(conv, r) {
+  if (r.kind === 'token' || r.code === 190) { markNeedsAttention(conv.channel, r.reason).catch(() => {}); clearStatusCache(); } // the token is dead: show it in Settings
+  log.warn('send', `${conv.channel}: message not sent`, { reason: r.kind ?? 'other', metaCode: r.code ?? null });
+  return new ApiError(HTTP[r.kind] ?? 502, CODE[r.kind] ?? 'SEND_FAILED', r.reason);
+}
+
+// Sends an approved WhatsApp template (the only kind of message allowed outside the 24-hour window). The template is named in WHATSAPP_TEMPLATE_NAME (language
+// WHATSAPP_TEMPLATE_LANG, default en_US); Meta gives every test number "hello_world". It is stored only if WhatsApp accepts it.
+export async function sendTemplateReply(convId) {
+  if (!ID.test(String(convId))) throw notFound('Conversation', convId);
+  const conv = await Conversation.findById(convId);
+  if (!conv) throw notFound('Conversation', convId);
+  if (conv.channel !== 'whatsapp' || conv.isDemo) throw new ApiError(409, 'NOT_AVAILABLE', 'Template messages are sent to real WhatsApp conversations only.');
+  const status = (await listStatuses()).find((s) => s.channel === 'whatsapp');
+  if (status?.state !== 'connected') throw new ApiError(409, 'NOT_CONNECTED', `WhatsApp is not connected, so nothing was sent. ${status?.statusReason ?? ''}`.trim());
+  const name = process.env.WHATSAPP_TEMPLATE_NAME || 'hello_world'; const language = process.env.WHATSAPP_TEMPLATE_LANG || 'en_US';
+  const r = await channels.whatsapp.sendTemplate(conv.contactId, { name, language }, {}, await resolveConfig());
+  if (!r.ok) throw sendFailure(conv, r);
+  const at = new Date();
+  const msg = await Message.create({ conversation: conv._id, channel: 'whatsapp', externalId: r.externalId, direction: 'outbound', text: `[Template message: ${name}]`, messageType: 'template', receivedAt: at, readAt: at, delivery: { mode: 'real', state: 'accepted', sentAt: at } });
+  await Conversation.updateOne({ _id: conv._id }, { $set: { lastMessageAt: at } });
+  return { id: String(msg._id), from: 'business', text: msg.text, at: at.toISOString(), read: true, attachment: null, scan: null, payment: null, delivery: { mode: 'real', state: 'accepted' } };
+}
+
 // Sends the text the owner confirmed. A real send goes through the channel's API and is stored only if it succeeded. A demo conversation, or a
-// channel that is not connected, is stored as a SIMULATED send: it appears in Conversa and nothing reaches the customer.
+// sample conversation is stored as a SIMULATED send. A real conversation on a channel that is not connected is refused (409 NOT_CONNECTED).
 export async function sendReply(convId, text) {
   const clean = typeof text === 'string' ? text.trim() : '';
   if (!clean) throw validationError([{ field: 'text', message: 'Write a message first.' }]);
@@ -78,24 +107,23 @@ export async function sendReply(convId, text) {
   if (!conv) throw notFound('Conversation', convId);
 
   const status = (await listStatuses()).find((s) => s.channel === conv.channel);
+  // A real customer on a channel that is not connected cannot be written to: say why, store nothing (never a message that looks delivered).
+  if (!conv.isDemo && status?.state !== 'connected') throw new ApiError(409, 'NOT_CONNECTED', `${conv.channel === 'instagram' ? 'Instagram' : 'WhatsApp'} is not connected, so this message was not sent. ${status?.statusReason ?? ''} Reconnect it in Settings.`.trim());
   let mode = 'simulated'; let externalId = `out-${crypto.randomBytes(8).toString('hex')}`;
   if (!conv.isDemo && status?.state === 'connected') {
     // Meta only accepts a free-form reply within 24 hours of the customer's last message. Outside that window a pre-approved WhatsApp message template
     // is required, which this app does not send: refuse clearly instead of letting Meta reject it.
     const lastIn = await Message.findOne({ conversation: conv._id, direction: 'inbound' }).sort({ receivedAt: -1 }).select('receivedAt').lean();
     if (!lastIn || Date.now() - new Date(lastIn.receivedAt).getTime() > WINDOW_MS) {
-      throw new ApiError(409, 'WINDOW_CLOSED', `${conv.customerName ?? 'This customer'} last wrote more than 24 hours ago. ${conv.channel === 'whatsapp' ? 'WhatsApp only allows a free-form reply within 24 hours of the customer’s last message; after that an approved message template is required.' : 'Instagram only allows a reply within 24 hours of the customer’s last message.'} Reply once they write again.`);
+      throw new ApiError(409, 'WINDOW_CLOSED', `${conv.customerName ?? 'This customer'} last wrote more than 24 hours ago. ${conv.channel === 'whatsapp' ? 'Send an approved template message to start the conversation again; once they reply you can write freely. ' : ''}${conv.channel === 'whatsapp' ? 'WhatsApp only allows a free-form reply within 24 hours of the customer’s last message; after that an approved message template is required.' : 'Instagram only allows a reply within 24 hours of the customer’s last message.'} Reply once they write again.`);
     }
     if (conv.channel === 'instagram') await refreshInstagramIfDue(); // a token close to expiry is renewed before it is used
     const r = await channels[conv.channel].sendText(conv.contactId, clean, {}, await resolveConfig());
-    if (!r.ok) {
-      if (r.code === 190) { await markNeedsAttention(conv.channel, r.reason).catch(() => {}); clearStatusCache(); } // the token is dead: show it in Settings
-      throw new ApiError(r.code === 'WINDOW_CLOSED' ? 409 : 502, r.code === 'WINDOW_CLOSED' ? 'WINDOW_CLOSED' : 'SEND_FAILED', r.reason);
-    }
+    if (!r.ok) throw sendFailure(conv, r);
     mode = 'real'; if (r.externalId) externalId = r.externalId;
   }
   const at = new Date();
-  const msg = await Message.create({ conversation: conv._id, channel: conv.channel, externalId, direction: 'outbound', text: clean, messageType: 'text', receivedAt: at, readAt: at, isDemo: Boolean(conv.isDemo), delivery: { mode, state: 'sent', sentAt: at } });
+  const msg = await Message.create({ conversation: conv._id, channel: conv.channel, externalId, direction: 'outbound', text: clean, messageType: 'text', receivedAt: at, readAt: at, isDemo: Boolean(conv.isDemo), delivery: { mode, state: mode === 'real' ? 'accepted' : 'sent', sentAt: at } });
   await Conversation.updateOne({ _id: conv._id }, { $set: { lastMessageAt: at } });
-  return { id: String(msg._id), from: 'business', text: clean, at: at.toISOString(), read: true, attachment: null, scan: null, payment: null, delivery: { mode, state: 'sent' } };
+  return { id: String(msg._id), from: 'business', text: clean, at: at.toISOString(), read: true, attachment: null, scan: null, payment: null, delivery: { mode, state: mode === 'real' ? 'accepted' : 'sent' } };
 }
