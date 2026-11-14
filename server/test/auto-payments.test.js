@@ -83,7 +83,7 @@ before(async () => {
   await new Promise((r) => { server = createApp().listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}/api`;
   await mongoose.model('Payment').init();
-  ({ ingest } = await import('../services/messageService.js'));
+  { const mod = await import('../services/messageService.js'); ingest = async (x) => { const r = await mod.ingest(x); await mod.mediaIdle(); return r; }; } // pictures download after the message is stored
   ({ scansIdle } = await import('../services/paymentAutoDetect.js'));
   config.meta.whatsapp.accessToken = 'wa-token';
   config.groq.apiKey = 'test-key';

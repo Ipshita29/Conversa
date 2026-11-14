@@ -25,7 +25,8 @@ import { instagramStart, instagramComplete, whatsappComplete, whatsappSignupConf
 import { clearStatusCache } from '../services/integrations/index.js';
 import { parseWebhook as parseWa, parseStatuses as waStatuses } from '../services/integrations/whatsappService.js';
 import { parseWebhook as parseIg, parseStatuses as igStatuses } from '../services/integrations/instagramService.js';
-import { sendReply } from '../services/replyService.js';
+import { sendReply, sendTemplateReply } from '../services/replyService.js';
+import { retryMedia, mediaIdle } from '../services/messageService.js';
 
 const KEY = 'k'.repeat(48);
 const SECRET = 'app-secret-for-tests';
@@ -106,7 +107,7 @@ after(async () => {
 });
 
 const sign = (raw) => `sha256=${crypto.createHmac('sha256', SECRET).update(raw).digest('hex')}`;
-const hook = async (channel, payload, { signature } = {}) => { const raw = JSON.stringify(payload); const r = await fetch(`${base}/webhooks/${channel}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature ?? sign(raw) }, body: raw }); return { status: r.status, json: await r.json().catch(() => null) }; };
+const hook = async (channel, payload, { signature } = {}) => { const raw = JSON.stringify(payload); const r = await fetch(`${base}/webhooks/${channel}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature ?? sign(raw) }, body: raw }); const json = await r.json().catch(() => null); await mediaIdle(); return { status: r.status, json }; }; // the picture downloads after the message is stored: wait for it
 const api = async (method, p, body) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, json: await r.json().catch(() => null) }; };
 const waMsg = (id, text, from = '919811111111', extra = {}) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { contacts: [{ wa_id: from, profile: { name: 'Priya Nair' } }], messages: [{ id, from, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text }, ...extra }] } }] }] });
 
@@ -225,11 +226,11 @@ test('9. replies go through the connected platform inside Meta\'s 24-hour window
   };
   try {
     const sent = await sendReply(String(conv._id), 'Yes, we can make that. The total is ₹4,400.');
-    assert.deepEqual([sent.delivery.mode, sent.delivery.state], ['real', 'sent']);
+    assert.deepEqual([sent.delivery.mode, sent.delivery.state], ['real', 'accepted']); // Meta took it; only its webhooks may say sent / delivered / read
     assert.ok(calls.some(([u, m]) => u.includes('/555000111/messages') && m === 'POST'));
     assert.equal((await Message.findOne({ externalId: 'wamid.SENT1' }).lean()).direction, 'outbound'); // stored under Meta's id, so its receipts can find it
     globalThis.__reject = true;
-    await assert.rejects(sendReply(String(conv._id), 'again'), (e) => e.code === 'SEND_FAILED' && /Re-engagement/.test(e.message));
+    await assert.rejects(sendReply(String(conv._id), 'again'), (e) => e.code === 'INVALID_REQUEST' && /Re-engagement/.test(e.message));
     assert.equal(await Message.countDocuments({ text: 'again' }), 0); // a refused message is not recorded as sent
     delete globalThis.__reject;
     await Message.updateMany({ conversation: conv._id, direction: { $ne: 'outbound' } }, { $set: { receivedAt: new Date(Date.now() - 30 * 3600000) } }); // the customer last wrote 30 hours ago
@@ -238,15 +239,16 @@ test('9. replies go through the connected platform inside Meta\'s 24-hour window
   } finally { globalThis.fetch = realFetch; Object.assign(config.meta.whatsapp, { accessToken: '', phoneNumberId: '' }); clearStatusCache(); }
 });
 
-test('10. without Meta credentials the app runs: integrations report "not connected", a reply is a clearly marked simulation, and nothing crashes', { skip }, async () => {
+test('10. without Meta credentials the app runs: integrations report "not connected", a reply to a real customer is refused (never faked as delivered), and nothing crashes', { skip }, async () => {
   clearStatusCache();
   const items = (await api('GET', '/integrations')).json;
   assert.deepEqual(items.items.map((i) => [i.channel, i.state]), [['whatsapp', 'not_connected'], ['instagram', 'not_connected']]);
   assert.equal(items.webhooks.whatsapp, 'https://api.example.com/api/webhooks/whatsapp');
   assert.equal((await api('GET', '/health')).json.status, 'ok');
   const conv = await Conversation.findOne({ contactId: '17841400000042' });
-  const r = await sendReply(String(conv._id), 'Thanks for asking!');
-  assert.deepEqual([r.delivery.mode, r.delivery.state], ['simulated', 'sent']);
+  const before = await Message.countDocuments({ conversation: conv._id });
+  await assert.rejects(sendReply(String(conv._id), 'Thanks for asking!'), (e) => e.code === 'NOT_CONNECTED' && /not connected/i.test(e.message));
+  assert.equal(await Message.countDocuments({ conversation: conv._id }), before); // nothing stored as if it had been sent
   assert.equal(JSON.stringify(items).includes('token'), false);
 });
 
@@ -613,4 +615,338 @@ test('29. Settings reports the truth: not connected (with what is missing, or re
     assert.equal((await api('POST', '/integrations/instagram/disconnect')).json.status, 'disconnected');
     c = await card(); assert.deepEqual([c.state, c.accountLabel], ['not_connected', null]);
   } finally { config.serverUrl = saved.s; off(); clearStatusCache(); }
+});
+
+// ---- One body of data: a confirmed WhatsApp order joins Orders, Plan, Insights and Payments; What-if never saves -------------------------------------
+test('30. unified flow: a confirmed WhatsApp order sits beside the existing orders, the Plan and Insights recompute from it, and What-if saves nothing', { skip }, async () => {
+  const from = '919855555555';
+  const orders = async () => (await api('GET', '/orders?pageSize=100')).json.items; // no dataset: everything is one set
+  const planOf = async () => (await api('GET', '/planner?days=30')).json;
+  const total = async () => (await api('GET', '/analytics/summary?range=90')).json;
+  const beforeOrders = await orders(); const beforePlan = await planOf(); const beforeInsights = await total();
+  assert.ok(['Aanya Sharma', 'Kartik Singh', 'Neha Sharma', 'Meera Iyer'].every((n) => beforeOrders.some((o) => o.customerName === n)));
+
+  assert.equal((await hook('whatsapp', text('wamid.U1', 'Hi, I want to order a chocolate cake. 2 kg, for tomorrow at 5 PM.', from))).json.stored, 1);
+  const conv = await Conversation.findOne({ contactId: from });
+  assert.equal((await autoDraftForConversation(String(conv._id), { groqJson: chocolate })).action, 'created');
+  const draft = await Order.findOne({ customerContact: from }).lean();
+  assert.equal(draft.status, 'draft');
+  // a draft is visible in Orders but is not workload and not revenue until the owner confirms it
+  assert.equal((await planOf()).schedule.length, beforePlan.schedule.length);
+  assert.equal((await total()).kpis ? JSON.stringify((await total()).kpis) : '', beforeInsights.kpis ? JSON.stringify(beforeInsights.kpis) : '');
+
+  assert.equal((await api('PATCH', `/orders/${draft._id}`, { status: 'confirmed', prepTimeMinutes: 90, price: 1800 })).status, 200);
+  const afterOrders = await orders();
+  assert.equal(afterOrders.length, beforeOrders.length + 1); // exactly one new record, beside the existing ones
+  assert.equal(afterOrders.filter((o) => o.customerContact === from).length, 1);
+  for (const o of beforeOrders.filter((x) => x.status !== 'draft')) assert.ok(afterOrders.some((x) => x.id === o.id), `${o.customerName} is still there`);
+  const plan = await planOf();
+  assert.equal(plan.schedule.length, beforePlan.schedule.length + 1);
+  assert.ok(plan.schedule.some((e) => e.orderId === String(draft._id)));
+  for (const e of beforePlan.schedule) assert.ok(plan.schedule.some((x) => x.orderId === e.orderId), 'existing orders stay in the plan');
+  const after = await total();
+  assert.notEqual(JSON.stringify(after.kpis), JSON.stringify(beforeInsights.kpis)); // Insights recomputed from the new record
+
+  // What-if is a proposal only: running it leaves the saved plan exactly as it was
+  const snapshot = JSON.stringify((await planOf()).schedule.map((e) => [e.orderId, e.start, e.end]));
+  const ov = (await api('GET', '/planner/whatif?scope=commitment')).json;
+  const pick = ov.orders?.[0] ?? ov.candidates?.[0];
+  if (pick) await api('POST', '/planner/whatif/move', { scope: 'commitment', orderId: pick.id, deadline: pick.deadline });
+  assert.equal(JSON.stringify((await planOf()).schedule.map((e) => [e.orderId, e.start, e.end])), snapshot);
+});
+
+// ---- The reported WhatsApp scenario: a cake picture, "payment screenshot of rs 500" + a screenshot, "I want the Cake tmrw 3 pm" -------------------------
+test('31. picture received while the token was dead is kept with the reason, recovered by a retry, and the chat still becomes ONE draft (Cake, tomorrow 3 PM, no invented quantity)', { skip }, async () => {
+  const from = '919866666666'; const png = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'assets', 'demo', 'pay-aanya-upi.png'));
+  const realFetch = globalThis.fetch; let tokenOk = false; const mk = (id, extra, name = 'Riya Das') => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { contacts: [{ wa_id: from, profile: { name } }], messages: [{ id, from, timestamp: String(Math.floor(Date.now() / 1000)), ...extra }] } }] }] });
+  Object.assign(config.meta.whatsapp, { accessToken: 'EAAexpired', phoneNumberId: '555000222' }); clearStatusCache();
+  globalThis.fetch = async (url, init) => {
+    const u = String(url); if (u.startsWith(base)) return realFetch(url, init);
+    if (/\/MEDIA1$/.test(u)) return tokenOk ? new Response(JSON.stringify({ url: 'https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=1' }), { status: 200 }) : new Response(JSON.stringify({ error: { message: 'Session has expired', code: 190 } }), { status: 401 });
+    if (u.includes('lookaside.fbsbx.com')) return new Response(png, { status: 200, headers: { 'Content-Type': 'image/png' } });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    // 1. the cake picture arrives while Meta refuses the token: the message is kept, with the reason and what is needed to retry
+    assert.equal((await hook('whatsapp', mk('wamid.S1', { type: 'image', image: { id: 'MEDIA1' } }))).json.stored, 1);
+    let m = await Message.findOne({ externalId: 'wamid.S1' }).lean();
+    assert.equal(m.attachment, null); assert.equal(m.media.id, 'MEDIA1'); assert.match(m.media.error, /expired|revoked/); assert.doesNotMatch(JSON.stringify(m), /EAAexpired/);
+    // 2 + 3. the texts arrive; a webhook retry of any of them creates nothing new
+    assert.equal((await hook('whatsapp', mk('wamid.S2', { type: 'text', text: { body: 'This is the payment screenshot of rs 500' } }))).json.stored, 1);
+    const last = mk('wamid.S3', { type: 'text', text: { body: 'I want the Cake tmrw 3 pm' } });
+    assert.equal((await hook('whatsapp', last)).json.stored, 1); assert.deepEqual([(await hook('whatsapp', last)).json.stored, (await hook('whatsapp', last)).json.duplicates], [0, 1]);
+    const conv = await Conversation.findOne({ contactId: from });
+    // 4. the token is reconnected: the retry downloads the picture (and nothing else changes)
+    tokenOk = true; const back = await retryMedia({ conversationId: String(conv._id) });
+    assert.equal(back.recovered, 1); m = await Message.findOne({ externalId: 'wamid.S1' }).lean(); assert.ok(m.attachment?.file); assert.equal(m.media.error, null);
+    assert.equal((await retryMedia({ conversationId: String(conv._id) })).recovered, 0);
+    // 5. read as one conversation: Cake, tomorrow 3 PM in the business timezone, quantity left for the owner
+    const cake = reader([[/Cake/, { item: 'Cake', intent: 'order', deadlineDate: ymdTomorrow(), deadlineTime: '15:00' }]]);
+    const r = await autoDraftForConversation(String(conv._id), { groqJson: cake, skipMedia: true });
+    assert.equal(r.action, 'created');
+    const o = await Order.findOne({ customerContact: from }).lean();
+    assert.deepEqual([o.status, o.item, o.source], ['draft', 'Cake', 'whatsapp']); assert.equal(o.quantity, 1); // the schema default; the draft flags it as unconfirmed
+    assert.equal(new Date(o.deadline).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }), '15:00');
+    assert.ok(o.draft.missingFields.includes('quantity')); // flagged for the owner, never silently assumed
+    assert.equal(await Order.countDocuments({ customerContact: from }), 1);
+    // the cake picture is the order's reference; no payment is verified by any of this
+    assert.ok(!(await Payment.find({ order: o._id }).lean()).some((p) => p.status === 'verified'));
+  } finally { globalThis.fetch = realFetch; Object.assign(config.meta.whatsapp, { accessToken: '', phoneNumberId: '' }); clearStatusCache(); }
+});
+
+// ---- Live updates ----------------------------------------------------------------------------------------------------------------------------------
+test('32. live updates: a stored WhatsApp message is announced to an open browser (Server-Sent Events) at once, without waiting for the AI, and a reconnecting browser is told what it missed', { skip }, async () => {
+  const open = async (lastId) => {
+    const ctrl = new AbortController(); const res = await fetch(`${base}/events`, { headers: lastId ? { 'Last-Event-ID': String(lastId) } : {}, signal: ctrl.signal });
+    assert.match(res.headers.get('content-type'), /^text\/event-stream/);
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    const next = async (re, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { if (re.test(buf)) return buf; const t = await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r(null), 200))]); if (t && !t.done) buf += dec.decode(t.value); } return null; };
+    return { next, close: () => ctrl.abort(), get text() { return buf; } };
+  };
+  const a = await open(); assert.ok(await a.next(/event: hello/));
+  const t0 = Date.now();
+  assert.equal((await hook('whatsapp', text('wamid.L1', 'Hi, I want a cake', '919877777777'))).json.stored, 1);
+  const got = await a.next(/event: change\ndata: \{"topic":"messages"/); assert.ok(got, 'the browser was told'); assert.ok(Date.now() - t0 < 2000);
+  const conv = await Conversation.findOne({ contactId: '919877777777' });
+  assert.ok(a.text.includes(String(conv._id)), 'it says which conversation changed');
+  const lastId = Number([...a.text.matchAll(/^id: (\d+)/gm)].pop()[1]); a.close();
+  // a browser that was away is told about what happened meanwhile
+  assert.equal((await hook('whatsapp', text('wamid.L2', 'Make it 2 kg', '919877777777'))).json.stored, 1);
+  await new Promise((r) => setTimeout(r, 400));
+  const b = await open(lastId); assert.ok(await b.next(/event: change\ndata: \{"topic":"messages"/), 'missed events are replayed'); b.close();
+  // the message is in the Inbox's data whatever the AI does
+  const item = (await api('GET', '/conversations')).json.items.find((c) => c.id === String(conv._id));
+  assert.deepEqual(item.messages.map((m) => m.text), ['Hi, I want a cake', 'Make it 2 kg']);
+});
+
+// ---- Test connection: real checks, with the reasons --------------------------------------------------------------------------------------------------
+test('33. Test connection asks Meta and the public address for real: a refused token and an unreachable address are reported with their reason, a healthy setup passes, and no token is ever returned', { skip }, async () => {
+  await Integration.deleteMany({}); clearStatusCache();
+  const none = (await api('POST', '/integrations/whatsapp/test')).json;
+  assert.equal(none.ok, false); assert.equal(none.steps[0].id, 'credentials'); assert.equal(none.steps[0].ok, false);
+  const realFetch = globalThis.fetch; let tokenOk = false;
+  Object.assign(config.meta.whatsapp, { accessToken: 'EAAsecretvalue', phoneNumberId: '555000333', businessAccountId: 'WABA1' }); clearStatusCache();
+  globalThis.fetch = async (url, init) => {
+    const u = String(url); if (u.startsWith(base)) return realFetch(url, init);
+    if (u.startsWith('https://api.example.com/api/webhooks/whatsapp')) return new Response('{}', { status: tokenOk ? 403 : 0 || 502 });
+    if (/\/555000333\?/.test(u)) return tokenOk ? new Response(JSON.stringify({ display_phone_number: '+1 555-160-1991', verified_name: 'Test' }), { status: 200 }) : new Response(JSON.stringify({ error: { message: 'Session has expired' } }), { status: 401 });
+    if (/WABA1\/subscribed_apps/.test(u)) return new Response(JSON.stringify({ data: [{ whatsapp_business_api_data: { id: config.meta.appId } }] }), { status: 200 });
+    if (/subscriptions/.test(u)) return new Response(JSON.stringify({ error: { message: 'API access blocked.' } }), { status: 400 });
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const bad = (await api('POST', '/integrations/whatsapp/test')).json; const by = (r, id) => r.steps.find((s) => s.id === id);
+    assert.equal(bad.ok, false); assert.equal(by(bad, 'token').ok, false); assert.match(by(bad, 'token').detail, /Session has expired/); assert.equal(by(bad, 'public_url').ok, false);
+    tokenOk = true; clearStatusCache();
+    const good = (await api('POST', '/integrations/whatsapp/test')).json;
+    assert.equal(by(good, 'token').ok, true); assert.equal(by(good, 'subscription').ok, true); assert.equal(by(good, 'public_url').ok, true); assert.equal(by(good, 'callback').ok, null); // Meta would not say
+    assert.ok(!JSON.stringify([bad, good]).includes('EAAsecretvalue'));
+  } finally { globalThis.fetch = realFetch; Object.assign(config.meta.whatsapp, { accessToken: '', phoneNumberId: '', businessAccountId: '' }); clearStatusCache(); }
+  const d = (await api('GET', '/integrations/whatsapp/diagnostics')).json;
+  assert.ok(d.lastIncomingAt && d.webhook.lastReceivedAt && 'media' in d);
+});
+
+test('34. a healthy WhatsApp setup passes every check (permissions, account, subscription); failures are explained by kind; registering the webhook points Meta at SERVER_URL', { skip }, async () => {
+  const realFetch = globalThis.fetch; let mode = 'good'; const posts = [];
+  Object.assign(config.meta.whatsapp, { accessToken: 'EAAsecretvalue2', phoneNumberId: '555000444', businessAccountId: 'WABA2' }); clearStatusCache();
+  globalThis.fetch = async (url, init) => {
+    const u = String(url); if (u.startsWith(base)) return realFetch(url, init);
+    if ((init?.method ?? 'GET') === 'POST') { posts.push(u); return new Response(JSON.stringify({ success: true }), { status: 200 }); }
+    if (u.startsWith('https://api.example.com/')) return new Response('{}', { status: 403 });
+    if (/debug_token/.test(u)) return new Response(JSON.stringify({ data: { is_valid: true, scopes: mode === 'noperm' ? ['whatsapp_business_management'] : ['whatsapp_business_messaging', 'whatsapp_business_management'], expires_at: 0 } }), { status: 200 });
+    if (/\/555000444\?/.test(u)) return mode === 'forbidden' ? new Response(JSON.stringify({ error: { message: 'Permissions error', code: 200 } }), { status: 403 }) : mode === 'badid' ? new Response(JSON.stringify({ error: { message: 'Unsupported get request', code: 100 } }), { status: 400 }) : new Response(JSON.stringify({ display_phone_number: '+1 555-160-1991', verified_name: 'Test' }), { status: 200 });
+    if (/WABA2\/phone_numbers/.test(u)) return new Response(JSON.stringify({ data: [{ id: '555000444' }] }), { status: 200 });
+    if (/WABA2\/subscribed_apps/.test(u)) return new Response(JSON.stringify({ data: [{ whatsapp_business_api_data: { id: config.meta.appId } }] }), { status: 200 });
+    if (/subscriptions/.test(u)) return new Response(JSON.stringify({ data: [{ object: 'whatsapp_business_account', callback_url: 'https://api.example.com/api/webhooks/whatsapp' }] }), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const run = async () => (await api('POST', '/integrations/whatsapp/test')).json; const by = (r, id) => r.steps.find((s) => s.id === id);
+  try {
+    const good = await run(); assert.equal(good.ok, true, JSON.stringify(good.steps.filter((s) => s.ok !== true)));
+    for (const id of ['token', 'permissions', 'waba', 'subscription', 'public_url', 'callback']) assert.equal(by(good, id).ok, true, id);
+    mode = 'noperm'; clearStatusCache(); const np = await run(); assert.equal(by(np, 'permissions').ok, false); assert.match(by(np, 'permissions').detail, /whatsapp_business_messaging/);
+    mode = 'forbidden'; clearStatusCache(); const fb = await run(); assert.match(by(fb, 'token').detail, /lacks permission/);
+    mode = 'badid'; clearStatusCache(); const bi = await run(); assert.match(by(bi, 'token').detail, /does not recognise that id/);
+    const reg = (await api('POST', '/integrations/whatsapp/register-webhook')).json;
+    assert.equal(reg.ok, true); assert.ok(posts.some((u) => /\/1234567890\/subscriptions/.test(u))); assert.ok(posts.some((u) => /WABA2\/subscribed_apps/.test(u)));
+    assert.ok(!JSON.stringify([good, np, fb, bi, reg]).includes('EAAsecretvalue2'));
+  } finally { globalThis.fetch = realFetch; Object.assign(config.meta.whatsapp, { accessToken: '', phoneNumberId: '', businessAccountId: '' }); clearStatusCache(); }
+});
+
+// ---- One order, three pages ---------------------------------------------------------------------------------------------------------------------------
+test('35. a real order flows into Plan, What-if and Insights whatever its source; demo fixtures never hide it; drafts, completed and cancelled follow their rules; a simulation saves nothing', { skip }, async () => {
+  const base0 = { prepTimeMinutes: 45, price: 900, quantity: 1 };
+  const soon = (h) => new Date(Date.now() + h * 3600000).toISOString();
+  const mk = async (o) => { const r = await api('POST', '/orders', { ...base0, ...o }); assert.equal(r.status, 201, JSON.stringify(r.json)); return r.json; };
+  const demoBefore = (await Order.find({ notes: /^\[DEMO\]/ }).lean()).map((o) => [String(o._id), o.customerName, +new Date(o.deadline)]);
+  assert.equal(demoBefore.length, 5);
+  const wa = await mk({ customerName: 'Real WA', item: 'Cake', deadline: soon(60), status: 'confirmed', source: 'whatsapp' });
+  const ig = await mk({ customerName: 'Real IG', item: 'Pastries', deadline: soon(62), status: 'confirmed', source: 'instagram' });
+  const man = await mk({ customerName: 'Real Manual', item: 'Cupcakes', deadline: soon(64), status: 'in_progress', source: 'manual' });
+  const done = await mk({ customerName: 'Real Done', item: 'Cake', deadline: soon(66), status: 'completed', source: 'manual' });
+  const cancelled = await mk({ customerName: 'Real Cancelled', item: 'Cake', deadline: soon(68), status: 'cancelled', source: 'manual' });
+  const draft = await mk({ customerName: 'Real Draft', item: 'Cake', deadline: soon(70), status: 'draft', source: 'whatsapp' });
+  const real = [wa, ig, man];
+
+  // Plan
+  const plan = (await api('GET', '/planner?days=14')).json; const planned = new Set(plan.schedule.map((e) => e.orderId));
+  for (const o of real) assert.ok(planned.has(o.id), `${o.customerName} is in the Plan`);
+  for (const o of [done, cancelled, draft]) assert.ok(!planned.has(o.id), `${o.customerName} is not planned`);
+  // What-if (the real set, by default) uses the same orders and the same engine
+  const wi = (await api('GET', '/planner/whatif?scope=all')).json; const inWi = new Set(wi.cards.map((c) => c.id));
+  for (const o of real) assert.ok(inWi.has(o.id), `${o.customerName} is in What-if`);
+  for (const o of [done, cancelled, draft]) assert.ok(!inWi.has(o.id));
+  assert.ok(wi.awaiting.some((a) => a.id === draft.id), 'the draft is reported, not silently dropped');
+  assert.ok(wi.cards.some((c) => /Aanya|Kartik/.test(c.customerName)), 'the sample customers are still there, beside the real orders');
+  // Insights count them (business timezone, current period); a cancelled order is not completed revenue and a draft is not counted
+  const ins = (await api('GET', '/analytics/summary?range=7')).json;
+  const total = ins.kpis.totalOrders.value;
+  const expected = (await Order.countDocuments({ status: { $nin: ['draft', 'cancelled'] }, createdAt: { $gte: new Date(Date.now() - 7 * 86400000) } }));
+  assert.equal(total, expected); assert.ok(ins.awaiting.some((a) => a.id === draft.id));
+  const revenue = ins.kpis.totalRevenue.value; const orderRows = await Order.find({ status: { $ne: 'draft' }, createdAt: { $gte: new Date(Date.now() - 7 * 86400000) } }).lean();
+  assert.ok(revenue <= orderRows.filter((o) => o.status !== 'cancelled').reduce((s, o) => s + (o.price ?? 0), 0), 'cancelled orders are not revenue');
+  // A simulation changes nothing stored
+  const before = JSON.stringify(await Order.find({}).sort({ _id: 1 }).lean());
+  const sim = (await api('POST', '/planner/whatif/move', { scope: 'all', orderId: wa.id, deadline: soon(30) })).json;
+  assert.equal(sim.ok, true); assert.ok(sim.after.cards.some((c) => c.id === wa.id) && sim.after.cards.some((c) => c.id === ig.id), 'every order is re-planned');
+  assert.equal(JSON.stringify(await Order.find({}).sort({ _id: 1 }).lean()), before);
+  // Demo fixtures intact, nothing duplicated
+  const demoAfter = (await Order.find({ notes: /^\[DEMO\]/ }).lean()).map((o) => [String(o._id), o.customerName, +new Date(o.deadline)]);
+  assert.deepEqual(demoAfter, demoBefore);
+  const names = (await Order.find({}).lean()).map((o) => o.customerName); assert.equal(new Set(names.filter((n) => /^Real /.test(n))).size, 6);
+  // Re-seeding the demo never touches real orders
+  await reseedDemoOrders(new Date());
+  assert.equal(await Order.countDocuments({ customerName: /^Real / }), 6); assert.equal(await Order.countDocuments({ notes: /^\[DEMO\]/ }), 5);
+});
+
+test('36. the Insights story comes from the database: money split into booked / collected / outstanding, people from real conversations, the week from creation dates, three discoveries', { skip }, async () => {
+  const ins = (await api('GET', '/analytics/summary?range=30')).json; const s = ins.story;
+  assert.ok(s && s.money && s.orders && s.people && s.week && s.popular && s.busiest && s.regular);
+  assert.equal(s.week.days.length, 7); assert.equal(s.week.days[0].weekday, 'Monday'); assert.equal(s.week.days[6].weekday, 'Sunday');
+  const live = await Order.countDocuments({ status: { $nin: ['draft', 'cancelled'] }, createdAt: { $gte: new Date(s.week.from + 'T00:00:00+05:30'), $lt: new Date(new Date(s.week.to + 'T00:00:00+05:30').getTime() + 86400000) } });
+  assert.equal(s.week.total, live, 'the week counts the same orders as the database');
+  assert.equal(s.orders.value, ins.kpis.totalOrders.value);
+  assert.ok(s.money.collected <= s.money.booked && Math.abs(s.money.booked - s.money.collected - s.money.outstanding) < 0.01);
+  assert.ok(s.people.value >= 1 && s.people.value <= await Conversation.countDocuments());
+  assert.equal((await api('GET', '/analytics/summary?range=7&week=2026-11-02')).json.story.week.from, '2026-11-02');
+  assert.equal((await api('GET', '/analytics/summary?week=nope')).status, 400);
+});
+
+import { promoteReadyDrafts, missingForPlan } from '../services/orderService.js';
+test('37. a request the owner has reviewed and completed becomes a real order (and is planned); an untouched one stays a draft; what is "missing" is read from the order itself', { skip }, async () => {
+  const soon = (h) => new Date(Date.now() + h * 3600000).toISOString();
+  const draft = (await api('POST', '/orders', { customerName: 'Review Me', item: 'pineapple cake', quantity: 2, status: 'draft', source: 'whatsapp' })).json;
+  assert.deepEqual(missingForPlan(await Order.findById(draft.id).lean()), ['deadline', 'prepTimeMinutes']);
+  const planned = async () => new Set((await api('GET', '/planner?days=14')).json.schedule.map((e) => e.orderId));
+  // an edit that leaves something missing keeps it a draft, and the Plan page's "awaiting" list says exactly what is missing now
+  assert.equal((await api('PATCH', `/orders/${draft.id}`, { notes: 'asked for extra cream' })).json.status, 'draft');
+  const w = (await api('GET', '/planner/whatif?scope=all')).json.awaiting.find((a) => a.id === draft.id); assert.deepEqual(w.missing, ['deadline', 'prepTimeMinutes']);
+  assert.ok(!(await planned()).has(draft.id));
+  // complete and untouched by the startup check: still a draft (nobody reviewed it)
+  await Order.updateOne({ _id: draft.id }, { $set: { deadline: soon(30), prepTimeMinutes: 120 } });
+  assert.deepEqual(await promoteReadyDrafts(), []); assert.equal((await Order.findById(draft.id)).status, 'draft');
+  // the owner saves it: now it is an order, in the Plan, with the quantity kept as the number 2
+  assert.equal((await api('PATCH', `/orders/${draft.id}`, { notes: 'reviewed' })).json.status, 'draft'); // a note alone never confirms it
+  const saved = (await api('PATCH', `/orders/${draft.id}`, { prepTimeMinutes: 90 })).json;
+  assert.equal(saved.status, 'confirmed'); assert.ok((await planned()).has(draft.id));
+  const o = await Order.findById(draft.id).lean(); assert.equal(o.quantity, 2); assert.equal(typeof o.quantity, 'number');
+  assert.ok(!(await api('GET', '/planner/whatif?scope=all')).json.awaiting.some((a) => a.id === draft.id));
+  // putting it explicitly back to draft is respected
+  assert.equal((await api('PATCH', `/orders/${draft.id}`, { status: 'draft' })).json.status, 'draft');
+});
+
+test('38. deleting an order really removes it: gone from Orders, Plan, What-if and Insights; its payments go, its chat is unlinked but kept; other orders are untouched; a second delete is a 404', { skip }, async () => {
+  const soon = (h) => new Date(Date.now() + h * 3600000).toISOString();
+  const keep = (await api('POST', '/orders', { customerName: 'Keep Me', item: 'Cake', quantity: 1, prepTimeMinutes: 30, deadline: soon(50), status: 'confirmed', source: 'manual', price: 700 })).json;
+  const gone = (await api('POST', '/orders', { customerName: 'Delete Me', item: 'Cake', quantity: 1, prepTimeMinutes: 30, deadline: soon(52), status: 'confirmed', source: 'whatsapp', price: 900 })).json;
+  const conv = await Conversation.create({ channel: 'whatsapp', contactId: '919800099999', customerName: 'Delete Me', orderId: gone.id });
+  await Message.create({ conversation: conv._id, channel: 'whatsapp', externalId: 'wamid.DEL1', text: 'hello', messageType: 'text', receivedAt: new Date() });
+  await Payment.create({ order: gone.id, amount: 300, method: 'upi', status: 'confirmed', source: 'manual', paidAt: new Date() });
+  const insBefore = (await api('GET', '/analytics/summary?range=7')).json.kpis.totalOrders.value;
+  const demoBefore = await Order.countDocuments({ notes: /^\[DEMO\]/ });
+
+  const r = await api('DELETE', `/orders/${gone.id}`); assert.equal(r.status, 200); assert.equal(r.json.deleted, true);
+  assert.equal(await Order.countDocuments({ _id: gone.id }), 0); assert.equal(await Payment.countDocuments({ order: gone.id }), 0);
+  assert.equal((await Conversation.findById(conv._id).lean()).orderId, null); assert.equal(await Message.countDocuments({ conversation: conv._id }), 1);
+  assert.ok(!(await api('GET', '/orders?pageSize=100')).json.items.some((o) => o.id === gone.id)); assert.equal((await api('GET', `/orders/${gone.id}`)).status, 404);
+  assert.ok(!(await api('GET', '/planner?days=14')).json.schedule.some((e) => e.orderId === gone.id));
+  assert.ok(!(await api('GET', '/planner/whatif?scope=all')).json.cards.some((c) => c.id === gone.id));
+  assert.equal((await api('GET', '/analytics/summary?range=7')).json.kpis.totalOrders.value, insBefore - 1);
+  assert.ok((await api('GET', '/orders?pageSize=100')).json.items.some((o) => o.id === keep.id)); assert.equal(await Order.countDocuments({ notes: /^\[DEMO\]/ }), demoBefore);
+  assert.equal((await api('DELETE', `/orders/${gone.id}`)).status, 404); assert.equal((await api('DELETE', '/orders/not-an-id')).status, 404);
+});
+
+test('39. What-if keeps the Aanya/Kartik 10:30 demonstration AND includes the business\'s own open orders: one due before the demo morning is planned first on the real clock, one due after is planned with the five; nothing real is moved or applied away', { skip }, async () => {
+  const mk = async (o) => { const r = await api('POST', '/orders', { quantity: 2, prepTimeMinutes: 60, status: 'confirmed', source: 'whatsapp', ...o }); assert.equal(r.status, 201, JSON.stringify(r.json)); return r.json; };
+  const base = (await api('GET', '/planner/whatif?scope=commitment')).json;
+  const kartik = base.cards.find((c) => c.customerName === 'Kartik Singh'); const aanya = base.cards.find((c) => c.customerName === 'Aanya Sharma');
+  const t0 = Date.parse(kartik.start); // the demo morning, 9:00 in the business timezone
+  const early = await mk({ customerName: 'Real Early', item: 'pineapple cake', deadline: new Date(t0 - 20 * 3600000).toISOString() }); // due the day before the demo morning
+  const late = await mk({ customerName: 'Real Late', item: 'brownies', deadline: new Date(t0 + 30 * 3600000).toISOString() }); // due the day after
+  const draft = await mk({ customerName: 'Real Draft', item: 'cake', status: 'draft', deadline: new Date(t0 + 10 * 3600000).toISOString() });
+  const before = JSON.stringify(await Order.find({ customerName: /^Real / }).sort({ _id: 1 }).lean());
+
+  const wi = (await api('GET', '/planner/whatif?scope=commitment')).json; const names = wi.cards.map((c) => c.customerName);
+  assert.ok(names.includes('Real Early') && names.includes('Real Late'), 'both real orders are in the sequence');
+  assert.ok(!names.includes('Real Draft') && wi.awaiting.some((a) => a.id === draft.id), 'a draft is reported, not planned');
+  assert.ok(names.indexOf('Real Early') < names.indexOf('Kartik Singh'), 'the order due first is produced first (real clock)');
+  const k = wi.cards.find((c) => c.customerName === 'Kartik Singh'); const a = wi.cards.find((c) => c.customerName === 'Aanya Sharma');
+  assert.equal(k.start, kartik.start); assert.equal(k.end, kartik.end); assert.equal(a.start, aanya.start); assert.equal(a.end, aanya.end); // the demonstration is untouched
+  assert.ok(Date.parse(k.end) <= Date.parse(k.deadline) && Date.parse(a.end) <= Date.parse(a.deadline), 'both 10:30 promises are still kept');
+  const e = wi.cards.find((c) => c.customerName === 'Real Early'); assert.equal(e.prepTimeMinutes, 60); assert.equal(e.deadline, early.deadline);
+  // running the simulation re-plans every order, real ones included, and saves nothing
+  const run = (await api('POST', '/planner/whatif/move', { scope: 'commitment', orderId: k.id, deadline: k.deadline })).json;
+  assert.equal(run.ok, true); const after = run.after.cards.map((c) => c.customerName);
+  assert.ok(after.includes('Real Early') && after.includes('Real Late') && after.indexOf('Kartik Singh') < after.indexOf('Aanya Sharma'));
+  assert.equal(JSON.stringify(await Order.find({ customerName: /^Real / }).sort({ _id: 1 }).lean()), before);
+  // Apply to Plan changes only the sample orders' deadlines, never a real order's
+  await api('POST', '/planner/whatif/apply', { scope: 'commitment' });
+  assert.equal(JSON.stringify(await Order.find({ customerName: /^Real / }).sort({ _id: 1 }).lean()), before);
+  assert.equal(String((await Order.findById(early.id).lean()).deadline.toISOString()), early.deadline);
+});
+
+test('40. real WhatsApp sending end to end (against a fake Meta): the request carries the E.164 recipient and the phone number id, the wamid is stored, "accepted" only becomes sent / delivered / read through webhooks, failures are explained and never recorded, and the window rule offers a template', { skip }, async () => {
+  const realFetch = globalThis.fetch; const sent = []; let reply = { status: 200, body: { messages: [{ id: 'wamid.REAL1' }] } };
+  Object.assign(config.meta.whatsapp, { accessToken: 'EAAsendsecret', phoneNumberId: '555000777' }); clearStatusCache();
+  globalThis.fetch = async (url, init) => {
+    const u = String(url); if (u.startsWith(base)) return realFetch(url, init);
+    if (u.includes('/555000777/messages')) { sent.push({ url: u, auth: init.headers.Authorization, body: JSON.parse(init.body) }); return new Response(JSON.stringify(reply.body), { status: reply.status }); }
+    return new Response(JSON.stringify({ display_phone_number: '+1 555 160 1991', verified_name: 'Test' }), { status: 200 }); // the connection check
+  };
+  try {
+    await hook('whatsapp', text('wamid.IN40', 'Hello, is my cake ready?', '919844444444')); const conv = await Conversation.findOne({ contactId: '919844444444' }); const id = String(conv._id);
+    // 1. a reply inside the window goes to Meta for real
+    const r = await sendReply(id, 'Yes, it will be ready by 3 PM.');
+    assert.equal(sent.length, 1); assert.match(sent[0].url, /\/555000777\/messages$/); assert.equal(sent[0].auth, 'Bearer EAAsendsecret');
+    assert.deepEqual([sent[0].body.messaging_product, sent[0].body.to, sent[0].body.type, sent[0].body.text.body], ['whatsapp', '919844444444', 'text', 'Yes, it will be ready by 3 PM.']);
+    assert.deepEqual([r.delivery.mode, r.delivery.state], ['real', 'accepted']);
+    const stored = await Message.findOne({ externalId: 'wamid.REAL1' }).lean(); assert.equal(stored.direction, 'outbound'); assert.equal(stored.delivery.state, 'accepted');
+    // 2. only webhooks move it on, and never backwards
+    const st = (status, extra = {}) => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { statuses: [{ id: 'wamid.REAL1', status, timestamp: String(Math.floor(Date.now() / 1000)), recipient_id: '919844444444', ...extra }] } }] }] });
+    for (const [s2, want] of [['sent', 'sent'], ['delivered', 'delivered'], ['read', 'read'], ['delivered', 'read']]) { await hook('whatsapp', st(s2)); assert.equal((await Message.findOne({ externalId: 'wamid.REAL1' }).lean()).delivery.state, want); }
+    // 3. refusals: explained, not stored, nothing marked sent
+    const count = await Message.countDocuments({ conversation: conv._id });
+    reply = { status: 400, body: { error: { code: 131030, message: 'Recipient phone number not in allowed list' } } };
+    await assert.rejects(sendReply(id, 'second'), (e) => e.code === 'RECIPIENT_NOT_ALLOWED' && /allowed recipient list/.test(e.message));
+    reply = { status: 401, body: { error: { code: 190, message: 'Session has expired' } } };
+    await assert.rejects(sendReply(id, 'third'), (e) => e.code === 'TOKEN_INVALID' && /expired/.test(e.message));
+    reply = { status: 429, body: { error: { code: 130429, message: 'rate' } } };
+    await assert.rejects(sendReply(id, 'fourth'), (e) => e.code === 'RATE_LIMITED');
+    assert.equal(await Message.countDocuments({ conversation: conv._id }), count);
+    // 4. a Meta failure webhook is shown as not delivered, with its reason
+    reply = { status: 200, body: { messages: [{ id: 'wamid.REAL2' }] } }; clearStatusCache(); await Integration.deleteMany({});
+    await sendReply(id, 'fifth'); await hook('whatsapp', st('failed', { id: 'wamid.REAL2', errors: [{ code: 131026, title: 'Message undeliverable' }] }));
+    const failed = await Message.findOne({ externalId: 'wamid.REAL2' }).lean(); assert.deepEqual([failed.delivery.state, failed.delivery.error], ['failed', 'Message undeliverable']);
+    // 5. outside the 24-hour window: no free text, but an approved template can be sent, and it is tracked like any other message
+    await Message.updateMany({ conversation: conv._id, direction: 'inbound' }, { $set: { receivedAt: new Date(Date.now() - 30 * 3600000) } }); const n = sent.length;
+    reply = { status: 200, body: { messages: [{ id: 'wamid.TPL1' }] } };
+    await assert.rejects(sendReply(id, 'too late'), (e) => e.code === 'WINDOW_CLOSED' && /approved template/.test(e.message)); assert.equal(sent.length, n);
+    const t = await sendTemplateReply(id); assert.equal(sent.length, n + 1); assert.deepEqual([sent[n].body.type, sent[n].body.template.name, sent[n].body.template.language.code], ['template', 'hello_world', 'en_US']);
+    assert.deepEqual([t.delivery.mode, t.delivery.state], ['real', 'accepted']); assert.equal((await Message.findOne({ externalId: 'wamid.TPL1' }).lean()).messageType, 'template');
+    // 6. an invalid stored number is refused before Meta is called
+    await Conversation.updateOne({ _id: conv._id }, { $set: { contactId: '12' } }); await Message.updateMany({ conversation: conv._id, direction: 'inbound' }, { $set: { receivedAt: new Date() } }); const m = sent.length;
+    await assert.rejects(sendReply(id, 'x'), (e) => e.code === 'INVALID_RECIPIENT'); assert.equal(sent.length, m);
+    // the token never appears in anything returned
+    assert.ok(!JSON.stringify([r, t]).includes('EAAsendsecret'));
+  } finally { globalThis.fetch = realFetch; Object.assign(config.meta.whatsapp, { accessToken: '', phoneNumberId: '' }); clearStatusCache(); }
 });

@@ -285,7 +285,7 @@ test('failed screenshot extraction saves nothing: no payment, no stored file', {
 });
 
 test('payment-looking webhook text in a linked chat files a pending record', { skip }, async () => {
-  const { ingest } = await import('../services/messageService.js');
+  const { ingest: ingestNow, mediaIdle } = await import('../services/messageService.js'); const ingest = async (x) => { const r = await ingestNow(x); await mediaIdle(); return r; }; // pictures download after the message is stored
   const Conversation = mongoose.model('Conversation');
   const o = await newOrder();
   await Conversation.create({ channel: 'whatsapp', contactId: 'pay-test-1', customerName: 'Pay Test', orderId: o.id });
@@ -419,7 +419,7 @@ test('Inbox path: a picture in a chat is shown, read once, filed as pending on t
 });
 
 test('WhatsApp image messages are downloaded from Meta only, kept, and never lose the message on failure', { skip }, async () => {
-  const { ingest } = await import('../services/messageService.js');
+  const { ingest: ingestNow, mediaIdle } = await import('../services/messageService.js'); const ingest = async (x) => { const r = await ingestNow(x); await mediaIdle(); return r; }; // pictures download after the message is stored
   const { downloadMedia } = await import('../services/integrations/whatsappService.js');
   config.meta.whatsapp.accessToken = 'wa-token';
   const calls = [];

@@ -116,13 +116,13 @@ const fakeFetch = (res) => async () => ({ ok: res.ok, status: res.status ?? (res
 const cfg = { meta: { whatsapp: { accessToken: 't', phoneNumberId: '123', verifyToken: 'v' }, instagram: { accessToken: 't', verifyToken: 'v' }, graphVersion: 'v21.0' } };
 
 test('channel sends: success returns the message id; a refusal or an outage becomes a clear failure', async () => {
-  const ok = await whatsapp.sendText('9198', 'Hello', { fetchImpl: fakeFetch({ ok: true, body: { messages: [{ id: 'wamid.1' }] } }) }, cfg);
-  assert.deepEqual(ok, { ok: true, externalId: 'wamid.1' });
-  const refused = await whatsapp.sendText('9198', 'Hello', { fetchImpl: fakeFetch({ ok: false, status: 400, body: { error: { message: 'Re-engagement message' } } }) }, cfg);
+  const ok = await whatsapp.sendText('919811111111', 'Hello', { fetchImpl: fakeFetch({ ok: true, body: { messages: [{ id: 'wamid.1' }] } }) }, cfg);
+  assert.deepEqual(ok, { ok: true, externalId: 'wamid.1', to: '+919811111111' });
+  const refused = await whatsapp.sendText('919811111111', 'Hello', { fetchImpl: fakeFetch({ ok: false, status: 400, body: { error: { message: 'Re-engagement message' } } }) }, cfg);
   assert.equal(refused.ok, false); assert.match(refused.reason, /Re-engagement/);
   const down = await instagram.sendText('55', 'Hello', { fetchImpl: async () => { throw new Error('offline'); } }, cfg);
   assert.equal(down.ok, false); assert.match(down.reason, /Could not reach Instagram/);
-  const unconfigured = await whatsapp.sendText('9198', 'Hello', {}, { meta: { whatsapp: { accessToken: '', phoneNumberId: '' } } });
+  const unconfigured = await whatsapp.sendText('919811111111', 'Hello', {}, { meta: { whatsapp: { accessToken: '', phoneNumberId: '' } } });
   assert.equal(unconfigured.ok, false); assert.match(unconfigured.reason, /WHATSAPP_ACCESS_TOKEN/);
 });
 
@@ -139,4 +139,18 @@ test('flavour is not repeated when the customisation already says it', () => {
   const o = order({ customisation: 'Dark chocolate ganache, no nuts' });
   const s = orderSummary(o, row(o, []), { tz: TZ, spec: { fields: [{ key: 'flavour', value: 'Dark chocolate ganache' }] } });
   assert.ok(!s.lines.some((l) => l.label === 'Flavour'));
+});
+
+test('WhatsApp sending: numbers are checked as E.164, and each Meta refusal is explained for what it is', async () => {
+  const { toE164, explainSend } = whatsapp;
+  assert.equal(toE164('+91 98114-11111'), '+919811411111'); assert.equal(toE164('00447911123456'), '+447911123456'); assert.equal(toE164('12345'), null); assert.equal(toE164('abc'), null); assert.equal(toE164('0911111111111'), null);
+  const bad = await whatsapp.sendText('12345', 'Hello', { fetchImpl: async () => { throw new Error('must not be called'); } }, cfg); assert.equal(bad.kind, 'invalid_recipient'); // refused before it ever reaches Meta
+  const e = (status, error) => explainSend({ status, body: { error } });
+  assert.equal(e(400, { code: 131030, message: 'Recipient phone number not in allowed list' }).kind, 'recipient_not_allowed'); assert.match(e(400, { code: 131030 }).reason, /allowed recipient list.*API Setup/s);
+  assert.equal(e(401, { code: 190, message: 'expired' }).kind, 'token'); assert.match(e(401, {}).reason, /invalid or expired/);
+  assert.equal(e(400, { code: 131047 }).kind, 'window_closed'); assert.equal(e(429, { code: 130429 }).kind, 'rate_limit'); assert.equal(e(400, { code: 100, message: 'Invalid parameter' }).kind, 'invalid');
+  assert.equal(e(400, { code: 131026 }).kind, 'undeliverable'); assert.equal(explainSend({ status: 0, error: 'timeout' }).kind, 'network');
+  for (const k of [e(400, { code: 131030 }), e(401, {}), e(500, { message: 'x' })]) assert.match(k.reason, /Nothing was sent/);
+  const noId = await whatsapp.sendText('919811111111', 'Hello', { fetchImpl: fakeFetch({ ok: true, body: { messages: [] } }) }, cfg); assert.equal(noId.ok, false); // no wamid, no "sent"
+  const tpl = await whatsapp.sendTemplate('919811111111', { name: 'hello_world' }, { fetchImpl: fakeFetch({ ok: true, body: { messages: [{ id: 'wamid.T' }] } }) }, cfg); assert.deepEqual([tpl.ok, tpl.externalId], [true, 'wamid.T']);
 });
