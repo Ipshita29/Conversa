@@ -1,3 +1,4 @@
+import { announce } from '../services/events.js';
 import mongoose from 'mongoose';
 import { METHODS, PAYMENT_RECORD_STATUSES, PAYMENT_SOURCES } from '../services/paymentLogic.js';
 
@@ -53,4 +54,5 @@ const paymentSchema = new mongoose.Schema({
 paymentSchema.index({ proofHash: 1 }, { unique: true, partialFilterExpression: { proofHash: { $type: 'string' }, status: { $in: ['pending', 'confirmed'] } } });
 paymentSchema.index({ transactionKey: 1 }, { unique: true, partialFilterExpression: { transactionKey: { $type: 'string' }, status: { $in: ['pending', 'confirmed'] } } });
 
+paymentSchema.plugin(announce('payments', 'orders')); // open browsers are told when this changes
 export default mongoose.models.Payment || mongoose.model('Payment', paymentSchema);

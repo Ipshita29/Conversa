@@ -1,3 +1,4 @@
+import { announce } from '../services/events.js';
 import mongoose from 'mongoose';
 
 // The unique (channel, externalId) index makes webhook retries idempotent (no duplicate processing).
@@ -12,6 +13,8 @@ const messageSchema = new mongoose.Schema({
   // An image the customer sent (e.g. a payment screenshot), kept on disk like payment proofs. paymentId = the record filed from it.
   attachment: { type: { file: String, contentType: String, size: Number, sha256: String }, default: null, _id: false },
   paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment', default: null },
+  // The platform's own id of a picture (WhatsApp media id / Instagram link) and why it could not be downloaded, so a failed download can be retried later.
+  media: { type: { id: String, url: String, error: String, attempts: Number, state: String }, default: null, _id: false },
   // Automatic payment detection for an image: processing -> filed | review | duplicate | not_payment | failed. claimedAt makes sure one worker handles it.
   paymentScan: { type: { state: String, reason: String, at: Date, claimedAt: { type: Date, default: null } }, default: null, _id: false },
   // How an outbound message left Conversa: 'real' = sent through the channel's API; 'simulated' = stored only (demo conversation, or the channel is not connected).
@@ -23,4 +26,5 @@ messageSchema.index({ channel: 1, externalId: 1 }, { unique: true });
 messageSchema.index({ conversation: 1, receivedAt: 1 }); // a conversation's history, in order
 messageSchema.index({ paymentId: 1 }, { sparse: true });
 
+messageSchema.plugin(announce('messages')); // open browsers are told when this changes
 export default mongoose.models.Message || mongoose.model('Message', messageSchema);

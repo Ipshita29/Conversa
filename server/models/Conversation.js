@@ -1,3 +1,4 @@
+import { announce } from '../services/events.js';
 import mongoose from 'mongoose';
 
 const conversationSchema = new mongoose.Schema({
@@ -12,4 +13,5 @@ conversationSchema.index({ channel: 1, contactId: 1 }, { unique: true });
 conversationSchema.index({ isDemo: 1, lastMessageAt: -1 }); // the Inbox list, per data set
 conversationSchema.index({ orderId: 1 }, { sparse: true });
 
+conversationSchema.plugin(announce('messages')); // open browsers are told when this changes
 export default mongoose.models.Conversation || mongoose.model('Conversation', conversationSchema);

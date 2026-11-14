@@ -14,6 +14,7 @@ import integrations from './routes/integrations.js';
 import webhooks from './routes/webhooks.js';
 import conversations from './routes/conversations.js';
 import payments from './routes/payments.js';
+import { stream } from './services/events.js';
 
 export function createApp() {
   const app = express();
@@ -37,6 +38,7 @@ export function createApp() {
   app.use(express.json({ limit: '256kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 
   // Health check for the host / uptime monitor. No secrets, no customer data: only whether the pieces are up.
+  app.get('/api/events', stream); // live "something changed" nudges (Server-Sent Events)
   app.get('/api/health', (req, res) => res.json({ status: 'ok', database: isDbReady() ? 'connected' : 'disconnected' }));
   app.use('/api/dashboard', dashboard);
   app.use('/api/analytics', analytics);

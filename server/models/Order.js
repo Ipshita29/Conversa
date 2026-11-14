@@ -1,3 +1,4 @@
+import { announce } from '../services/events.js';
 import mongoose from 'mongoose';
 import { ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validation.js';
 
@@ -46,4 +47,5 @@ const orderSchema = new mongoose.Schema({
 });
 orderSchema.index({ status: 1, deadline: 1 });
 
+orderSchema.plugin(announce('orders')); // open browsers are told when this changes
 export default mongoose.models.Order || mongoose.model('Order', orderSchema);

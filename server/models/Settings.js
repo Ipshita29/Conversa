@@ -1,3 +1,4 @@
+import { announce } from '../services/events.js';
 import mongoose from 'mongoose';
 
 // Single-business app: one settings document. (No multi-tenant scoping is implemented.)
@@ -21,4 +22,5 @@ const settingsSchema = new mongoose.Schema({
   commitmentStart: { type: Date, default: null }, // production start of the What-if commitment the owner applied to the Plan (null = none)
 }, { timestamps: true });
 
+settingsSchema.plugin(announce('orders')); // open browsers are told when this changes
 export default mongoose.models.Settings || mongoose.model('Settings', settingsSchema);
