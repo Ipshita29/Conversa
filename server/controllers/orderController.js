@@ -1,4 +1,7 @@
+import { promoteReadyDrafts } from '../services/orderService.js';
 import Order from '../models/Order.js';
+import Payment from '../models/Payment.js';
+import Conversation from '../models/Conversation.js';
 import { asyncHandler, badQuery, notFound, validationError, ApiError } from '../utils/errors.js';
 import { validateOrderInput, validateEvidenceInput, ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validation.js';
 import { getSettings } from '../services/settingsService.js';
@@ -92,7 +95,24 @@ export const update = asyncHandler(async (req, res) => {
   if (value.status === 'completed' && order.status !== 'completed') order.completedAt = new Date(); // the moment it was delivered: what on-time delivery is measured from
   order.set(value);
   await order.save();
+  // The owner just supplied what the scheduler needs (a product, quantity, delivery time or preparation time) and nothing is missing now: the request becomes a
+  // real order. Editing a note or a customisation on a draft never confirms it, and putting it back to draft is respected.
+  const SCHEDULING = ['item', 'quantity', 'deadline', 'prepTimeMinutes'];
+  if (order.status === 'draft' && value.status !== 'draft' && SCHEDULING.some((f) => f in value) && (await promoteReadyDrafts({ orderId: order._id, reviewed: true })).length) await order.constructor.findById(order._id).then((fresh) => { if (fresh) order.status = fresh.status; });
   res.json(await withPictures(order, await riskMap(await getSettings())));
+});
+
+// DELETE /api/orders/:id : permanently removes the order. Its own payment records go with it (a ledger row for an order that no longer exists would be
+// meaningless), its own reference pictures are deleted from disk, and any chat that was linked to it is simply unlinked: the conversation and its messages
+// stay. Plan, What-if, Insights and Payments read the database, so they stop counting it at once (and open browsers are told).
+export const remove = asyncHandler(async (req, res) => {
+  const order = await findOrder(req.params.id);
+  const mine = (order.referenceImages ?? []).map((i) => i.toObject?.() ?? i);
+  await Payment.deleteMany({ order: order._id });
+  await Conversation.updateMany({ orderId: order._id }, { $set: { orderId: null } });
+  await Order.deleteOne({ _id: order._id });
+  for (const img of mine) await deleteProof(img).catch(() => {});
+  res.json({ deleted: true, id: String(order._id) });
 });
 
 // Attaches a reference to payment evidence. It never changes paymentStatus: only the seller does that via PATCH.
