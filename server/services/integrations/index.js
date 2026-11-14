@@ -1,5 +1,6 @@
 import * as whatsapp from './whatsappService.js';
 import * as instagram from './instagramService.js';
+import ChannelDiag from '../../models/ChannelDiag.js';
 import { getRecord, resolveConfig, describe } from './credentials.js';
 import { instagramConnectReadiness, whatsappSignupConfig } from './oauth.js';
 
@@ -29,7 +30,11 @@ export async function listStatuses(deps = {}, { fresh = false } = {}) {
       : state === 'connecting' ? 'Waiting for you to finish signing in. Use Connect to start again if the window was closed.'
       : state === 'not_connected' ? (connect.ready ? 'Not connected yet. Use Connect to sign in and choose the account.' : `To connect, the server still needs: ${connect.missing.join(', ')}.`)
       : d.statusReason ?? live.statusReason;
-    return { ...live, state, connect, statusReason: reason, source: d.source, expiresAt: d.expiresAt, accountLabel: live.accountLabel ?? d.accountLabel };
+    // Two separate questions: does the token work (state), and does Meta actually deliver to us (webhook)? A working token with a webhook Meta has
+    // never verified is not "fully connected": messages sent TO the business would not arrive.
+    const diag = await ChannelDiag.findOne({ channel }).lean().catch(() => null);
+    const webhook = { verified: Boolean(diag?.verifiedAt), lastReceivedAt: diag?.lastReceivedAt ?? null, lastError: diag?.lastError ?? null, health: diag?.lastReceivedAt ? 'receiving' : diag?.verifiedAt ? 'verified' : 'unverified' };
+    return { ...live, state, webhook, connect, statusReason: reason, source: d.source, expiresAt: d.expiresAt, accountLabel: live.accountLabel ?? d.accountLabel };
   }));
   cache = { at: Date.now(), items };
   return items;

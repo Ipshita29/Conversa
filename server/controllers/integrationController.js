@@ -3,6 +3,7 @@ import { config } from '../config/env.js';
 import { log } from '../utils/log.js';
 import { channels, listStatuses, clearStatusCache } from '../services/integrations/index.js';
 import { disconnect, resolveConfig } from '../services/integrations/credentials.js';
+import { lastActivity, testWhatsApp, registerWhatsAppWebhook } from '../services/integrations/diagnostics.js';
 import { instagramStart, instagramComplete, whatsappSignupConfig, whatsappComplete } from '../services/integrations/oauth.js';
 
 export const list = asyncHandler(async (req, res) => res.json({
@@ -20,6 +21,25 @@ export const connect = asyncHandler(async (req, res) => {
   const status = await svc.checkStatus({}, await resolveConfig());
   if (status.status !== 'connected') throw new ApiError(503, 'INTEGRATION_UNAVAILABLE', status.statusReason);
   res.json({ channel, status: 'connected', accountLabel: status.accountLabel, authorizationUrl: null, statusReason: status.statusReason });
+});
+
+// GET /api/integrations/:channel/diagnostics: when messages last came in and went out, the webhook's last error, the last picture download.
+export const diagnostics = asyncHandler(async (req, res) => {
+  if (!channels[req.params.channel]) throw new ApiError(404, 'NOT_FOUND', `Unknown channel '${req.params.channel}'.`);
+  res.json({ channel: req.params.channel, ...(await lastActivity(req.params.channel)) });
+});
+
+// POST /api/integrations/whatsapp/test: real checks against Meta, our public address and the database (never just "is a variable set").
+export const testConnection = asyncHandler(async (req, res) => {
+  if (req.params.channel !== 'whatsapp') throw new ApiError(400, 'UNSUPPORTED', 'Test connection is available for WhatsApp.');
+  clearStatusCache();
+  res.json({ channel: 'whatsapp', checkedAt: new Date().toISOString(), ...(await testWhatsApp()) });
+});
+
+export const registerWebhook = asyncHandler(async (req, res) => {
+  if (req.params.channel !== 'whatsapp') throw new ApiError(400, 'UNSUPPORTED', 'Registering the webhook is available for WhatsApp.');
+  clearStatusCache();
+  res.json({ channel: 'whatsapp', ...(await registerWhatsAppWebhook()) });
 });
 
 // POST /api/integrations/instagram/oauth/start -> { url }: where to send the owner to log in to Instagram and grant messaging access.

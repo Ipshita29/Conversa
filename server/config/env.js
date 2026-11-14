@@ -32,7 +32,7 @@ export const config = {
   payments: { proofDir: process.env.PAYMENT_PROOF_DIR || '' }, // empty = server/storage/proofs
   meta: {
     // The Graph API version every call uses. v26.0 is the current release (July 2026); override with META_GRAPH_API_VERSION to pin another.
-    graphVersion: process.env.META_GRAPH_API_VERSION || process.env.META_GRAPH_VERSION || 'v26.0',
+    graphVersion: process.env.WHATSAPP_API_VERSION || process.env.META_GRAPH_API_VERSION || process.env.META_GRAPH_VERSION || 'v26.0',
     appId: process.env.META_APP_ID || '',
     appSecret: process.env.META_APP_SECRET || '', // signs webhooks (X-Hub-Signature-256) and exchanges OAuth codes. Server-side only.
     whatsapp: {
