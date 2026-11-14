@@ -18,17 +18,33 @@ export const scopeNow = (scope, settings, now) => now;
 // placed on ONE production day, the next working morning (today when it is still before production starts). Aanya and Kartik both ask for 10:30,
 // Rohan and the rush order for noon, Meera for 14:00. These are COPIES with moved deadlines: no order is changed, and the schedule is still worked out
 // by the engine, from 9:00 that day. The day moves with the calendar, so the scenario never goes stale.
+//
+// The business's OWN open orders are part of that schedule too, exactly as they are (their own deadlines and preparation times, never moved):
+//   - an order due on or after that morning is planned together with the five, so it takes real capacity and can change the result honestly;
+//   - an order due BEFORE that morning is production that happens first, on the real clock: it is planned separately (`carried`) and shown ahead of the
+//     scenario day. It never moves the demonstration morning, which always starts at 9:00, so the Aanya/Kartik result is the same every time.
+// So a real order never replaces or hides the sample orders, and the sample orders never replace or hide a real one.
 export function scopeInputs(orders, scope, settings, now) {
-  const picked = scopeOrders(orders, scope);
-  if (scope !== 'commitment') return { orders: picked, now: scopeNow(scope, settings, now) };
+  if (scope !== 'commitment') return { orders: scopeOrders(orders, scope), now: scopeNow(scope, settings, now) };
   const tz = settings.timezone; const t = zonedParts(now, tz);
   let day = { year: t.year, month: t.month, day: t.day };
   const at = (d, hm) => zonedTimeToUtc({ ...d, ...parseHm(hm) }, tz);
   while (!settings.workingDays.includes(weekdayOf(day)) || at(day, DEMO_START) < now) day = addDays(day, 1);
+  const start = at(day, DEMO_START);
+  const demo = scopeOrders(orders, 'commitment'); const real = orders.filter((o) => !demo.includes(o));
+  const before = (o) => isOpen(o) && o.deadline && o.prepTimeMinutes != null && new Date(o.deadline) < start;
+  const carriedOrders = real.filter(before);
   return {
-    orders: picked.map((o) => (SCENARIO_DUE[o.customerName] ? { ...o, deadline: at(day, SCENARIO_DUE[o.customerName]) } : o)),
-    now: at(day, DEMO_START),
+    orders: [...demo.map((o) => (SCENARIO_DUE[o.customerName] ? { ...o, deadline: at(day, SCENARIO_DUE[o.customerName]) } : o)), ...real.filter((o) => !before(o))],
+    now: start, carried: carriedOrders.length ? { orders: carriedOrders, now } : null, // the demonstration morning always starts at 9:00: it is deterministic
   };
+}
+// The carried orders' cards (planned on the real clock) go in front of the scenario day's; verdicts are read over both.
+function carriedPart(carried, settings) {
+  if (!carried) return { cards: [], schedule: [] };
+  const input = carried.orders.map((o) => ({ ...o, id: String(o.id ?? o._id) })); const byId = byIdOf(input);
+  const plan = computePlan({ orders: input, settings, now: carried.now, rangeDays: 1 });
+  return { cards: plan.schedule.map((e) => ({ ...card(e, byId), earliest: null })).sort(byStart), schedule: plan.schedule };
 }
 
 // ---- Apply to Plan ------------------------------------------------------------------------------------------------------------------------
@@ -99,13 +115,14 @@ export function earliestDeadline({ orders, settings, now, orderId }) {
 
 // ---- The page's data ---------------------------------------------------------------------------------------------------------------------
 // Every open order with where the schedule puts it today, whether it can keep its deadline, and the earliest realistic deadline for it.
-export function overview({ orders, settings, now }) {
+export function overview({ orders, settings, now, carried = null }) {
   const input = orders.map((o) => ({ ...o }));
   const byId = byIdOf(input);
   const plan = computePlan({ orders: input, settings, now, rangeDays: 1 });
   const cards = plan.schedule.map((e) => ({ ...card(e, byId), earliest: earliestDeadline({ orders: input, settings, now, orderId: e.orderId }) })).sort(byStart);
+  const early = carriedPart(carried, settings);
   return {
-    timezone: settings.timezone, now: now.toISOString(), cards, ...verdict(plan.schedule, plan.unscheduledOrders),
+    timezone: settings.timezone, now: now.toISOString(), cards: [...early.cards, ...cards], ...verdict([...early.schedule, ...plan.schedule], plan.unscheduledOrders),
     needsDetails: plan.unscheduledOrders.map((u) => ({ id: u.id, customerName: byId[u.id]?.customerName ?? u.id, reason: u.reason })),
   };
 }
@@ -113,7 +130,7 @@ export function overview({ orders, settings, now }) {
 // ---- Move a deadline ------------------------------------------------------------------------------------------------------------------
 // ONE open order gets a proposed deadline; the engine re-plans every order on a copy. The proposal is unapplied: it is not agreed with the customer,
 // and nothing is saved until the owner confirms and the order's deadline is updated.
-export function runMove({ orders, settings, now, orderId, deadline }) {
+export function runMove({ orders, settings, now, orderId, deadline, carried = null }) {
   const input = orders.map((o) => ({ ...o }));
   const failure = (error, message) => ({ ok: false, error, message });
   const byId = byIdOf(input);
@@ -131,12 +148,13 @@ export function runMove({ orders, settings, now, orderId, deadline }) {
   const of = (list, id) => list.find((e) => e.orderId === id);
   const affected = after.filter((e) => e.orderId !== String(orderId)).map((e) => ({ now: card(e, byId), was: card(of(before, e.orderId), byId) }))
     .filter(({ now: n, was: w }) => n.end !== w.end || n.risk !== w.risk).map(({ now: n, was: w }) => ({ ...n, wasEnd: w.end, wasRisk: w.risk }));
-  const b = verdict(before); const a = verdict(after);
+  const early = carriedPart(carried, settings);
+  const b = verdict([...early.schedule, ...before]); const a = verdict([...early.schedule, ...after]);
   return {
     ok: true, timezone: settings.timezone,
     proposal: { orderId: String(orderId), customerName: o.customerName, item: o.item, from: iso(o.deadline), to: when.toISOString(), status: 'unapplied' },
     moved: { before: card(of(before, String(orderId)), byId), after: card(of(after, String(orderId)), byId) },
-    before: { ...b, cards: before.map((e) => card(e, byId)).sort(byStart) }, after: { ...a, cards: after.map((e) => card(e, byId)).sort(byStart) }, affected,
+    before: { ...b, cards: [...early.cards, ...before.map((e) => card(e, byId)).sort(byStart)] }, after: { ...a, cards: [...early.cards, ...after.map((e) => card(e, byId)).sort(byStart)] }, affected,
     newRisks: a.late.map((l) => l.orderId).filter((id) => !b.late.some((x) => x.orderId === id)), // late after, not late before
     resolved: [...b.late.map((l) => l.orderId), ...b.overdue].filter((id) => !a.late.some((x) => x.orderId === id) && !a.overdue.includes(id)),
   };

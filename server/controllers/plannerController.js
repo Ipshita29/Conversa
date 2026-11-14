@@ -1,4 +1,5 @@
 import Order from '../models/Order.js';
+import { awaitingConfirmation } from '../services/orderService.js';
 import { ApiError, asyncHandler, badQuery, validationError } from '../utils/errors.js';
 import { getCommitmentStart, getSettings, setCommitmentStart } from '../services/settingsService.js';
 import { computePlan, publicPlan, simulate, suggestScenario } from '../services/workloadEngine.js';
@@ -50,7 +51,7 @@ const whatIfInputs = async (scope) => {
   const kind = scopeOf(scope); const raw = orders.map((o) => o.toJSON());
   return { ...scopeInputs(raw, kind, settings, new Date()), settings, raw };
 };
-const engineInput = ({ orders, now, settings }) => ({ orders, now, settings });
+const engineInput = ({ orders, now, settings, carried }) => ({ orders, now, settings, carried });
 const body = (b, check) => {
   if (!isPlainObject(b)) throw validationError([{ field: 'body', message: 'Request body must be a JSON object.' }]);
   const details = check(b);
@@ -60,7 +61,7 @@ const body = (b, check) => {
 export const whatIf = asyncHandler(async (req, res) => {
   const inp = await whatIfInputs(req.query.scope);
   const applied = scopeOf(req.query.scope) === 'commitment' && commitmentApplied({ orders: inp.raw, scenario: inp, storedStart: await getCommitmentStart() }); // already the Plan?
-  res.json({ ...overview(engineInput(inp)), applied });
+  res.json({ ...overview(engineInput(inp)), applied, awaiting: await awaitingConfirmation() });
 });
 export const whatIfMove = asyncHandler(async (req, res) => {
   const b = body(req.body, (x) => [...(typeof x.orderId === 'string' && x.orderId ? [] : [{ field: 'orderId', message: 'Choose the order to move.' }]), ...(typeof x.deadline === 'string' ? [] : [{ field: 'deadline', message: 'Enter the proposed deadline.' }])]);
