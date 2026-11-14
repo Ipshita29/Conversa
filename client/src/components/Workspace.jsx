@@ -1,11 +1,12 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, ChevronDown, FlaskConical, Pencil, Info, PenLine, Clock, Plus, RotateCcw } from 'lucide-react';
 import useAsync from '../hooks/useAsync.js';
-import { getConversations, getWhatIf, simulateMove, applyWhatIf, updateOrder, createOrder, simulatePlanner } from '../services/api.js';
+import { DEMO_MODE, getConversations, getIntegrations, getWhatIf, simulateMove, applyWhatIf, updateOrder, createOrder, simulatePlanner } from '../services/api.js';
 import { summarise } from '../utils/homeSummary.js';
-import { formatDayInTz, formatInTz, formatMinutes, formatTimeInTz, isDemoOrder, STATUS_LABEL, formatLongInTz, fromLocalInput, toLocalInput } from '../utils/format.js';
+import { formatDayInTz, formatInTz, formatMinutes, formatTimeInTz, STATUS_LABEL, formatLongInTz, fromLocalInput, toLocalInput, isoToLocalInput, localInputToIso } from '../utils/format.js';
 import { useId, useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import DeckStage from './DeckStage.jsx';
 import { zonedParts, zonedTimeToUtc } from '../../../server/utils/timezone.js';
 import { SectionHead } from './Layout.jsx';
 import { RiskBadge, Modal, StateMessage, CountUp } from './UI.jsx';
@@ -91,7 +92,7 @@ export function DayWorkspace({ planner, orders }) {
                   <li key={m.orderId} className={`dw-issue is-${tone}`}>
                     <span className="dw-bar" aria-hidden="true" />
                     <div className="dw-issue-main">
-                      <p><strong>{o.customerName}</strong>{isDemoOrder(o) && <span className="demo-tag">Demo</span>}<span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></p>
+                      <p><strong>{o.customerName}</strong><span>{o.item}{o.quantity > 1 ? ` × ${o.quantity}` : ''}</span></p>
                       <p className="dw-reason">{state}{o.deadline && !missing && <> · <time dateTime={o.deadline}>{formatInTz(o.deadline, tz)}</time></>}</p>
                     </div>
                     <Link to={`/orders?edit=${o.id}`} className="dw-act">{missing ? 'Add details' : 'Review'} <ArrowRight size={14} aria-hidden="true" /></Link>
@@ -388,12 +389,15 @@ export function RiskSection({ planner, orders, onSimulate, eyebrow = 'Orders at 
 
 // ---------- ConnectSection ----------
 const CHANNELS = [
-  { key: 'whatsapp', name: 'WhatsApp', Logo: WhatsAppLogo, purpose: 'Customer messages and order requests will arrive in your inbox, ready to turn into orders.' },
-  { key: 'instagram', name: 'Instagram', Logo: InstagramLogo, purpose: 'Direct messages from your profile will land in the same inbox, next to every other conversation.' },
+  { key: 'whatsapp', name: 'WhatsApp', Logo: WhatsAppLogo, purpose: 'Customer messages and order requests arrive in your inbox, ready to turn into orders.' },
 ];
 
-// Neither channel is wired up: the tiles are informational only (no buttons, no OAuth, no connected state).
+// WhatsApp is the only messaging channel offered: the tile is informational only (no buttons, no OAuth, no connected state).
 export function ConnectSection() {
+  const integ = useAsync(getIntegrations, []); // the real connection state, as Settings shows it
+  const wa = (integ.data?.items ?? []).find((i) => i.channel === 'whatsapp');
+  const state = DEMO_MODE ? 'not_connected' : wa?.state ?? null;
+  const label = state === 'connected' ? 'Connected' : state === 'needs_attention' || state === 'expired' ? 'Needs attention' : state ? 'Not connected' : 'Checking…';
   return (
     <div className="cx">
       <h2 className="cx-lead">Bring your conversations together.</h2>
@@ -401,7 +405,7 @@ export function ConnectSection() {
         <div className="cx-intro">
           <p className="eyebrow">Channels</p>
           <h3 className="cx-title">Your conversations. <em>One workspace.</em></h3>
-          <p className="cx-text">Connect the channels where your customers already reach you, or get started by adding orders manually.</p>
+          <p className="cx-text">Connect WhatsApp, where your customers already reach you, or get started by adding orders manually.</p>
         </div>
 
         <ul className="cx-tiles">
@@ -409,7 +413,7 @@ export function ConnectSection() {
             <li key={key} className={`cx-tile cx-${key}`}>
               <Logo size={44} />
               <div>
-                <p className="cx-name">{name} <span className="cx-status">Coming soon · Not connected</span></p>
+                <p className="cx-name">{name} <span className={`cx-status${state === 'connected' ? ' is-on' : state === 'needs_attention' || state === 'expired' ? ' is-warn' : ''}`}>{label}</span></p>
                 <p className="cx-purpose">{purpose}</p>
               </div>
             </li>
@@ -418,7 +422,7 @@ export function ConnectSection() {
       </div>
 
       <div className="cx-paths">
-        <p className="cx-paths-label">Conversa works today, without either channel.</p>
+        <p className="cx-paths-label">Conversa works today, without WhatsApp connected.</p>
         <div className="cx-actions">
           <Link to="/plan" className="btn btn-primary">Continue with demo data <ArrowRight size={16} aria-hidden="true" /></Link>
           <Link to="/orders?edit=new" className="btn"><PenLine size={15} aria-hidden="true" /> Add an order manually</Link>
@@ -440,25 +444,6 @@ export function WhatsAppLogo({ size = 40 }) {
   );
 }
 
-export function InstagramLogo({ size = 40 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="Instagram">
-      <defs>
-        <radialGradient id="ig-grad" cx="0.3" cy="1.05" r="1.25">
-          <stop offset="0" stopColor="#FFD879" />
-          <stop offset="0.25" stopColor="#F9A03A" />
-          <stop offset="0.5" stopColor="#E1306C" />
-          <stop offset="0.8" stopColor="#A133B8" />
-          <stop offset="1" stopColor="#5851DB" />
-        </radialGradient>
-      </defs>
-      <rect width="48" height="48" rx="13" fill="url(#ig-grad)" />
-      <rect x="12.5" y="12.5" width="23" height="23" rx="7" fill="none" stroke="#fff" strokeWidth="2.6" />
-      <circle cx="24" cy="24" r="5.6" fill="none" stroke="#fff" strokeWidth="2.6" />
-      <circle cx="30.8" cy="17.2" r="1.7" fill="#fff" />
-    </svg>
-  );
-}
 
 // ======== Roadmap rows ========
 
@@ -476,7 +461,7 @@ export function TaskRow({ row, tz, next, onWhatIf }) {
         {next && <p className="rm-next">Next up</p>}
         <header className="rm-card-head">
           <div>
-            <h3>{row.customerName}{row.isDemo && <span className="demo-tag">Demo</span>}</h3>
+            <h3>{row.customerName}</h3>
             <p className="rm-what">{row.item}<span> × {row.quantity}</span></p>
           </div>
           <em className={`rm-status ${STATUS_CLASS[row.section]}`}>{row.label}</em>
@@ -641,13 +626,13 @@ function Arrow({ tone }) {
     </motion.div>
   );
 }
-function FlowStage({ cards }) {
+function FlowStage({ cards, landed = Infinity }) {
   const sig = cards.map((c) => c.id).join('|'); // a different sequence replays the entrance, so the new order is read left to right again
   return (
     <div className="wxc-scroll">
       <motion.ol className="wxc-stage" key={sig} variants={stageV} initial="hidden" animate="show" aria-label="Proposed production sequence">
         {cards.map((c, i) => (
-          <li className="wxc-cell" key={c.id}>
+          <li className={`wxc-cell${i >= landed ? ' is-undealt' : ''}`} key={c.id}>
             {i > 0 && <Arrow tone={c.tone === 'clash' ? 'clash' : c.tone === 'moved' ? 'moved' : 'idle'} />}
             <motion.article variants={cardV} whileHover={{ y: -3 }} transition={{ type: 'spring', stiffness: 260, damping: 26 }}
               className={`wxc-card is-${c.tone}`}>
@@ -682,6 +667,7 @@ export function WhatIfPage({ scope }) {
         <header className="wx-head"><h1>What <em>if?</em></h1><p>Conversa doesn't just accept orders. It understands whether you can keep your promises.</p></header>
         {d.cards.length === 0 ? <StateMessage message="There are no open orders with a deadline and a preparation time to check yet." />
           : <Commitment d={d} scope={scope} onApplied={q.reload} />}
+        {(d.awaiting ?? []).length > 0 && <p className="wx-none" role="status">{d.awaiting.map((a) => a.customerName).join(', ')} {d.awaiting.length === 1 ? 'sent a request' : 'sent requests'} through chat that {d.awaiting.length === 1 ? 'is' : 'are'} still a draft, so {d.awaiting.length === 1 ? 'it is' : 'they are'} not in this schedule yet. <Link to={`/orders?edit=${d.awaiting[0].id}`}>Review {d.awaiting.length === 1 ? 'it' : 'the first'}</Link> and confirm to include {d.awaiting.length === 1 ? 'it' : 'them'}.</p>}
         {d.needsDetails.length > 0 && <p className="wx-none" role="status">{d.needsDetails.length} {d.needsDetails.length === 1 ? 'order has' : 'orders have'} no deadline or preparation time and {d.needsDetails.length === 1 ? 'is' : 'are'} not included.</p>}
       </section>
     </>
@@ -735,11 +721,21 @@ function Commitment({ d, scope, onApplied }) {
   const navigate = useNavigate();
   const [applying, setApplying] = useState(false); const [applyErr, setApplyErr] = useState(null); const [justApplied, setJustApplied] = useState(false);
   const tz = d.timezone; const T = (iso) => stamp(iso, tz);
-  const group = conflictGroup(d.cards); const target = group?.[0] ?? d.cards[0];
+  const pitch = scope === 'commitment'; // the prepared two-customers-one-time scenario; otherwise the owner picks any open order and a new delivery time
+  const group = conflictGroup(d.cards);
+  const [pickId, setPickId] = useState(() => (group?.[0] ?? d.cards.find((c) => Date.parse(c.deadline) > Date.now()) ?? d.cards[0]).id); // not one whose deadline has already passed
+  const picked = d.cards.find((c) => c.id === pickId) ?? d.cards[0];
+  const [when, setWhen] = useState(() => isoToLocalInput(picked.deadline, d.timezone));
+  const target = pitch ? (group?.[0] ?? d.cards[0]) : { ...picked, deadline: localInputToIso(when, d.timezone) ?? picked.deadline };
+  const choose = (id) => { setPickId(id); setWhen(isoToLocalInput(d.cards.find((c) => c.id === id)?.deadline, d.timezone)); setRes(null); setLanded(Infinity); };
   const [res, setRes] = useState(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState(null);
+  // The deck animation plays once per calculated result (and when the owner asks for it again): `play` counts the plays, `landed` is how many order cards have been
+  // dealt so far (Infinity = all of them, i.e. nothing is being animated). The cards and their data are the scheduler's result either way.
+  const [play, setPlay] = useState(0); const [landed, setLanded] = useState(Infinity);
+  const deal = () => { setLanded(0); setPlay((n) => n + 1); };
   const run = async () => {
     setBusy(true); setErr(null);
-    try { setRes(await simulateMove(scope, { orderId: target.id, deadline: target.deadline })); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+    try { const r = await simulateMove(scope, { orderId: target.id, deadline: target.deadline }); setRes(r); if (r?.ok) deal(); } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const ok = res?.ok ? res : null;
   const applied = d.applied || justApplied; // this scenario is already the Plan (persisted), or was applied a moment ago
@@ -749,7 +745,7 @@ function Commitment({ d, scope, onApplied }) {
     try { await applyWhatIf(scope); setJustApplied(true); onApplied?.(); } catch (e) { setApplyErr(e.message); } finally { setApplying(false); }
   };
   const after = ok?.after.cards ?? null;
-  const inGroup = (c) => group?.some((g) => g.id === c.id);
+  const inGroup = (c) => (pitch ? group?.some((g) => g.id === c.id) : c.id === picked.id); // the order(s) being moved; everyone else is who it may affect
   const others = after ? after.filter((c) => !inGroup(c)) : [];
   const lateNow = after ? after.filter((c) => !c.end || Date.parse(c.end) > Date.parse(c.deadline)) : [];
   const withEarliest = lateNow.map((c) => d.cards.find((x) => x.id === c.id)).find((c) => c?.earliest);
@@ -767,19 +763,30 @@ function Commitment({ d, scope, onApplied }) {
 
   return (
     <>
-      <ConflictBrief cards={d.cards} after={after} tz={tz} T={T} />
+      {pitch ? <ConflictBrief cards={d.cards} after={after} tz={tz} T={T} /> : (
+        <section className="wxm" aria-label="Move a deadline">
+          <p className="wxb-kicker">Smart commitment management</p>
+          <h2>Move a deadline and see who it affects</h2>
+          <div className="wxm-form">
+            <label><span>Order</span><select value={picked.id} onChange={(e) => choose(e.target.value)}>{d.cards.map((c) => <option key={c.id} value={c.id}>{c.customerName} · {c.item}</option>)}</select></label>
+            <label><span>New delivery time ({tz})</span><input type="datetime-local" value={when} onChange={(e) => { setWhen(e.target.value); setRes(null); setLanded(Infinity); }} /></label>
+          </div>
+          <p className="wxm-note">Currently due {T(picked.deadline)}, takes {prepText(picked.prepTimeMinutes)}. The whole schedule is re-planned on copies; nothing is saved.</p>
+        </section>
+      )}
       <div className="wx-run">
         <button type="button" className="btn btn-primary btn-run" onClick={run} disabled={busy || Boolean(ok)}>{busy ? 'Simulating…' : ok ? 'Simulation complete' : <>Run simulation <ArrowRight size={16} aria-hidden="true" /></>}</button>
-        {ok && <button type="button" className="btn" onClick={() => setRes(null)}>Start over</button>}
+        {ok && <button type="button" className="btn" onClick={() => { setRes(null); setLanded(Infinity); }}>Start over</button>}
+        {ok && <button type="button" className="btn wx-replay" onClick={deal} disabled={landed < cards.length}>Replay animation</button>}
       </div>
-      {applied && !ok && <p className="wx-applied" role="status"><b>This commitment is applied to your Plan.</b> <button type="button" className="wx-link" onClick={() => navigate('/plan')}>Open Plan →</button></p>}
+      {pitch && applied && !ok && <p className="wx-applied" role="status"><b>This commitment is applied to your Plan.</b> <button type="button" className="wx-link" onClick={() => navigate('/plan')}>Open Plan →</button></p>}
       {res && !res.ok && <p className="wx-none" role="alert">{res.message}</p>}
       {err && <p className="wx-none" role="alert">{err}</p>}
       <AnimatePresence>
         {ok && (
           <motion.div className="wx-result" key="result" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.6, ease: [0.22, 0.61, 0.36, 1] }}>
             <h2 className="wx-h">Proposed production sequence</h2>
-            <FlowStage cards={cards} />
+            <DeckStage play={play} count={cards.length} onLanded={setLanded}><FlowStage cards={cards} landed={landed} /></DeckStage>
             <div className="wxs-answers">
               <article className={`wxs-ans is-${lateNow.length === 0 ? 'ok' : 'bad'}`}><h3>Can I fulfil these orders on time?</h3><b>{lateNow.length === 0 ? 'Yes' : 'No'}</b>
                 <p>{lateNow.length === 0 ? 'Every order finishes by its deadline.' : `${lateNow.map((c) => c.customerName).join(', ')} would miss ${lateNow.length === 1 ? 'its' : 'their'} deadline.`}</p></article>
@@ -789,7 +796,7 @@ function Commitment({ d, scope, onApplied }) {
                 {withEarliest ? <><b>{T(withEarliest.earliest.deadline)}</b><p>For {withEarliest.customerName}, from the actual production schedule.</p></> : <><b>No change needed</b><p>Every requested delivery time can be kept.</p></>}</article>
               <article className={`wxs-ans is-${ok.after.feasible ? 'ok' : 'bad'}`}><h3>Is the schedule feasible?</h3><b>{ok.after.feasible ? 'Yes' : 'No'}</b><p>{ok.after.feasible ? (applied ? 'Applied: this is now your production plan.' : 'Nothing was changed: this is a proposal, not your saved plan.') : `${ok.after.conflicts} ${ok.after.conflicts === 1 ? 'order still misses' : 'orders still miss'} its deadline.`}</p></article>
             </div>
-            {ok.after.feasible && (
+            {pitch && ok.after.feasible && (
               <div className={`wx-apply${applied ? ' is-done' : ''}`}>
                 {applied ? <><p><b>Applied to your Plan.</b> The Plan now follows this sequence, and the delivery times above are your orders' deadlines.</p><button type="button" className="btn btn-primary" onClick={() => navigate('/plan')}>Open Plan <ArrowRight size={16} aria-hidden="true" /></button></>
                   : <><p><b>Make this your plan?</b> This is only a proposal. Apply to Plan sets these delivery times on the orders and makes this sequence your production plan. Nothing else about the orders changes.</p>

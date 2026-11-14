@@ -55,3 +55,7 @@
 /* The customer's reference picture, shown whole (never cropped) so the owner can read their requirements */
 .odg-thumb.is-ref img { width: 220px; height: 270px; object-fit: contain; background: #F7F4ED; }
 @media (max-width: 700px) { .odg-thumb.is-ref img { width: min(100%, 240px); height: 280px; } }
+
+/* Delete order: quiet red, bottom-left, opposite Edit order */
+.odg-foot { justify-content: space-between; align-items: center; }
+.odg-delete { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0; border: 0; background: none; font: 500 0.88rem var(--display); color: #B4503A; cursor: pointer; } .odg-delete:hover { color: #8F3624; text-decoration: underline; text-underline-offset: 3px; } .odg-delete:focus-visible { outline: 2px solid #B4503A; outline-offset: 3px; border-radius: 4px; }

@@ -1,9 +1,9 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, GripVertical, ImageOff, MessageCircle, Camera, PenLine, Pencil, Sparkles } from 'lucide-react';
+import { AlertTriangle, GripVertical, ImageOff, Zap, MessageCircle, Camera, PenLine, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import { validateOrder, ORDER_STATUSES, PAYMENT_STATUSES, SOURCES } from '../utils/validateOrder.js';
-import { STATUS_LABEL, PAYMENT_LABEL, CHANNEL_LABEL, OPEN, toLocalInput, fromLocalInput, formatInTz, formatDateTime, formatMinutes, formatMoney, isDemoOrder } from '../utils/format.js';
+import { STATUS_LABEL, PAYMENT_LABEL, CHANNEL_LABEL, OPEN, toLocalInput, fromLocalInput, formatInTz, formatDateTime, formatMinutes, formatMoney } from '../utils/format.js';
 import { Modal, RiskBadge } from './UI.jsx';
 import { METHOD as METHOD_LABEL, RecPill, StatusPill } from './Payments.jsx';
 import useAsync from '../hooks/useAsync.js';
@@ -85,7 +85,7 @@ export function OrderForm({ initial = {}, missing = [], uncertain = {}, serverEr
   const F = {
     customerName: <Field key="customerName" {...fp('customerName')} label="Customer name *"><input value={v.customerName} onChange={set('customerName')} maxLength={120} /></Field>,
     source: <Field key="source" {...fp('source')} label="Channel">
-      <select value={v.source} onChange={set('source')}>{SOURCES.map((s) => <option key={s} value={s}>{CHANNEL_LABEL[s]}</option>)}</select>
+      <select value={v.source} onChange={set('source')}>{SOURCES.filter((s) => s !== 'instagram' || v.source === 'instagram').map((s) => <option key={s} value={s}>{CHANNEL_LABEL[s]}</option>)}</select>
     </Field>,
     item: <Field key="item" {...fp('item')} label={board ? 'Product *' : 'Item *'}><input value={v.item} onChange={set('item')} maxLength={200} /></Field>,
     quantity: <Field key="quantity" {...fp('quantity')} label="Quantity"><input type="number" min="0" step="any" value={v.quantity} onChange={set('quantity')} /></Field>,
@@ -215,7 +215,7 @@ export function DraftOrder({ message: initialMessage = '', source: initialSource
         <>
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Paste a customer message, e.g. “Can I get 2 dozen cupcakes by Friday evening?”" aria-label="Customer message" />
           <label className="field draft-source"><span className="field-label">Channel</span>
-            <select value={source} onChange={(e) => setSource(e.target.value)}>{SOURCES.map((s) => <option key={s} value={s}>{CHANNEL_LABEL[s]}</option>)}</select>
+            <select value={source} onChange={(e) => setSource(e.target.value)}>{SOURCES.filter((s) => s !== 'instagram' || v.source === 'instagram').map((s) => <option key={s} value={s}>{CHANNEL_LABEL[s]}</option>)}</select>
           </label>
         </>
       )}
@@ -352,7 +352,7 @@ export function relativeDue(o) {
   return { text: n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : `In ${n} days`, tone: n <= 1 ? 'soon' : null };
 }
 
-const CHANNEL_ICON = { whatsapp: MessageCircle, instagram: Camera, manual: PenLine };
+const CHANNEL_ICON = { whatsapp: MessageCircle, instagram: MessageCircle, manual: PenLine };
 
 function OrderCard({ o, dragging, onOpen, onStart, onMove, ignoreClick }) {
   const open = OPEN.includes(o.status);
@@ -368,7 +368,6 @@ function OrderCard({ o, dragging, onOpen, onStart, onMove, ignoreClick }) {
       onPointerDown={(e) => onStart(e, o)} onClick={(e) => { if (ignoreClick() || e.target.closest('select')) return; onOpen(o.id); }}>
       <header className="od-card-top">
         <button type="button" className="od-card-name" aria-label={`Open ${o.customerName}'s order`}>{o.customerName}</button>
-        {isDemoOrder(o) && <span className="demo-tag">Demo</span>}
         {!LOCKED.includes(o.status) && <span className="od-grip" data-grip aria-hidden="true"><GripVertical size={16} /></span>}
       </header>
       <p className="od-card-item">{o.item} <span>× {o.quantity}</span></p>
@@ -391,6 +390,39 @@ function OrderCard({ o, dragging, onOpen, onStart, onMove, ignoreClick }) {
         )}
       </footer>
     </article>
+  );
+}
+
+// ---------- RushBanner ----------
+// Whether the business can take an urgent order right now, as a small announcement above the gallery (never an order card). It is worked out from the same
+// schedule as the Plan: if any working day in the next two weeks still has free production time, rush orders are being taken. Nothing here is an order.
+const MIN_ROOM_MINUTES = 15; // the shortest free stretch the Plan offers a rush order
+export function RushBanner({ dataset }) {
+  const plan = useAsync(() => getPlanner({ days: 14, dataset }), [dataset]);
+  const [open, setOpen] = useState(false);
+  const days = (plan.data?.days ?? []).map((d) => ({ date: d.date, free: Math.max(0, (d.capacityMinutes ?? 0) - (d.plannedMinutes ?? 0)) })).filter((d) => d.free >= MIN_ROOM_MINUTES);
+  if (plan.status !== 'ready') return null; // nothing is claimed until the schedule has been read
+  const taking = days.length > 0;
+  const dayLabel = (iso) => new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${iso}T00:00:00Z`));
+  return (
+    <>
+      <button type="button" className={`rush${taking ? '' : ' is-off'}`} onClick={() => setOpen(true)} aria-haspopup="dialog">
+        <span className="rush-ico" aria-hidden="true"><Zap size={15} /></span>
+        <span className="rush-text"><b>{taking ? 'Taking rush orders' : 'Rush orders currently unavailable'}</b><small>{taking ? 'Have an urgent order? We may be able to fit it in.' : 'The schedule is full for the next two weeks.'}</small></span>
+        <span className="rush-cta">{taking ? 'Check availability' : 'Learn more'}</span>
+      </button>
+      {open && (
+        <Modal title="Rush orders" onClose={() => setOpen(false)}>
+          <div className="rush-modal">
+            <p>{taking ? 'An urgent order is checked against your real production schedule before it is accepted, so a rush never makes another promise late.' : 'There is no free production time in the next two weeks, so a rush order cannot be fitted in right now.'}</p>
+            {taking && <><h4>Free production time</h4>
+              <ul>{days.slice(0, 5).map((d) => <li key={d.date}><span>{dayLabel(d.date)}</span><b>{formatMinutes(d.free)}</b></li>)}</ul></>}
+            <p className="rush-note">Rush orders are added from the Plan, where the schedule is checked first. This is only an announcement: no order is created here.</p>
+            <div className="form-actions"><button type="button" className="btn" onClick={() => setOpen(false)}>Close</button><Link className="btn btn-primary" to="/plan">Open the Plan</Link></div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 
@@ -597,7 +629,7 @@ const SPEC_ALWAYS = ['product', 'quantity', 'deadline'];
 // the order's own record (placed = createdAt, due = deadline); the screenshots are the files the customer sent in Messages.
 const DRAFT_LABEL = { item: 'the product', quantity: 'the quantity', deadline: 'the delivery date and time', customisation: null };
 const PAY_STATE = { paid: ['Verified', 'is-ok'], partial: ['Partly paid', ''], verification_pending: ['Awaiting verification', 'is-wait'], cod: ['Cash on delivery', ''], due: ['Unpaid', ''] };
-export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus }) {
+export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus, onDelete }) {
   const conv = useAsync(() => getOrderConversation(o.id), [o.id]);
   const pays = useAsync(getPayments);
   const [photo, setPhoto] = useState(null);
@@ -665,7 +697,7 @@ export function OrderDetails({ order: o, busy, onClose, onEdit, onStatus }) {
           </section>
         </div>
 
-        <footer className="odg-foot"><button type="button" className="odg-link" onClick={() => onEdit(o.id)}>Edit order</button></footer>
+        <footer className="odg-foot">{onDelete && <button type="button" className="odg-delete" onClick={() => onDelete(o)}><Trash2 size={14} aria-hidden="true" /> Delete order</button>}<button type="button" className="odg-link" onClick={() => onEdit(o.id)}>Edit order</button></footer>
       </div>
       {photo && <Modal variant="lightbox" title="Picture" onClose={() => setPhoto(null)}><div className="pm-proof-big"><img src={attachmentSrc(photo)} alt="Picture from the order" /></div></Modal>}
     </Modal>

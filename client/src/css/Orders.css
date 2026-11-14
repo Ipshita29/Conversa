@@ -60,7 +60,6 @@ body:has(.orders) { background: #FCFBF9; }
 .od-card-top { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
 .od-card-name { min-width: 0; padding: 0; border: 0; background: none; font: 600 0.98rem var(--display); letter-spacing: -0.015em; color: var(--cocoa); text-align: left; cursor: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .od-card-name:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 4px; }
-.od-card-top .demo-tag { margin: 0; flex: none; }
 .od-grip { margin-left: auto; flex: none; display: inline-flex; color: #B8B1A5; touch-action: none; cursor: grab; transition: color 0.2s var(--ease); }
 .od-card:hover .od-grip { color: var(--muted); }
 .od-card-item { margin: 0; font-size: 0.9rem; line-height: 1.35; color: var(--cocoa); }
@@ -189,3 +188,21 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; us
 .of-picture-empty { display: inline-grid; place-items: center; width: 72px; height: 90px; padding: 0.3rem; border: 1px dashed #D8D2C6; border-radius: 12px; font-size: 0.68rem; line-height: 1.25; text-align: center; color: var(--faint); }
 .of-picture-row > div { display: grid; gap: 0.3rem; min-width: 0; flex: 1 1 14rem; }
 .oa-body .oa-add { margin-left: 0.6rem; background: transparent; }
+
+/* ---------- Rush-order availability: a small announcement, not an order ---------- */
+.rush { display: flex; align-items: center; gap: 0.85rem; width: 100%; margin: 0 0 14px; padding: 0.7rem 1.1rem; background: #F1F6FD; border: 1px solid #DCE7F6; border-radius: 16px; font: inherit; text-align: left; color: inherit; cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+.rush:hover { border-color: #BFD1EC; background: #EBF2FC; } .rush:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rush-ico { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: #fff; color: var(--primary); box-shadow: 0 0 0 1px #DCE7F6; }
+.rush-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.7rem; flex: 1; min-width: 0; }
+.rush-text b { font: 600 0.88rem var(--display); letter-spacing: -0.01em; color: var(--cocoa); } .rush-text small { font-size: 0.8rem; color: var(--muted); }
+.rush-cta { flex: none; font: 500 0.8rem var(--display); color: var(--blue-ink); text-decoration: underline; text-underline-offset: 3px; }
+.rush.is-off { background: #FAF7F1; border-color: #ECE6DA; } .rush.is-off .rush-ico { color: var(--caramel-ink); box-shadow: 0 0 0 1px #ECE6DA; }
+.rush-modal { display: grid; gap: 0.9rem; } .rush-modal p { margin: 0; font-size: 0.92rem; line-height: 1.5; color: var(--muted); } .rush-modal .rush-note { font-size: 0.8rem; color: var(--faint); }
+.rush-modal h4 { margin: 0.2rem 0 0; font: 600 0.62rem/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+.rush-modal ul { list-style: none; margin: 0; padding: 0; display: grid; } .rush-modal li { display: flex; justify-content: space-between; padding: 0.55rem 0; border-top: 1px solid #F1EEE8; font-size: 0.9rem; } .rush-modal li:first-child { border-top: 0; }
+@media (max-width: 640px) { .rush { flex-wrap: wrap; } .rush-cta { margin-left: 2.4rem; } }
+
+/* Order deleted toast and the red confirm button */
+.od-toast { position: fixed; left: 50%; bottom: 1.6rem; transform: translateX(-50%); z-index: 400; padding: 0.7rem 1.2rem; border-radius: 999px; background: #292923; color: #fff; font-size: 0.9rem; box-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.4); animation: od-toast-in 0.35s cubic-bezier(0.22, 0.61, 0.36, 1); }
+@keyframes od-toast-in { from { opacity: 0; transform: translate(-50%, 10px); } }
+.btn-danger { background: #B4503A; border-color: #B4503A; color: #fff; } .btn-danger:hover:not(:disabled) { background: #9C412D; border-color: #9C412D; }

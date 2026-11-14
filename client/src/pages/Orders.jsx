@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Search } from 'lucide-react';
-import { listOrders, createOrder, getOrder, updateOrder, uploadOrderReferenceImage, DEMO_MODE } from '../services/api.js';
+import { deleteOrder, listOrders, createOrder, getOrder, updateOrder, uploadOrderReferenceImage, DEMO_MODE } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
-import { OPEN } from '../utils/format.js';
-import { DemoBadge, Modal, StateMessage } from '../components/UI.jsx';
-import useDataset from '../hooks/useDataset.js';
-import DatasetToggle from '../components/DatasetToggle.jsx';
-import { COLUMNS, OrderAccordion, OrderDetails, OrderForm, statusFor } from '../components/Orders.jsx';
+import useLive from '../hooks/useLive.js';
+import { OPEN, isRushPlaceholder } from '../utils/format.js';
+import { Modal, StateMessage } from '../components/UI.jsx';
+import { COLUMNS, OrderAccordion, OrderDetails, RushBanner, OrderForm, statusFor } from '../components/Orders.jsx';
 import '../css/Orders.css';
 
 
@@ -52,6 +51,13 @@ export default function Orders() {
   const [notice, setNotice] = useState(null);   // why a drop was refused
   const [confirming, setConfirming] = useState(null); // an order about to be marked completed (it can't be reopened)
   const [busyId, setBusyId] = useState(null);
+  const [deleting, setDeleting] = useState(null); // an order the owner is about to delete permanently: { order, busy, error }
+  const [toast, setToast] = useState(null);
+  const confirmDelete = async () => {
+    const o = deleting.order; setDeleting({ order: o, busy: true, error: null });
+    try { await deleteOrder(o.id); setDeleting(null); setOpenId(null); reload(); setToast(`${o.customerName}’s order was deleted.`); setTimeout(() => setToast(null), 4500); }
+    catch (e) { setDeleting({ order: o, busy: false, error: e.message || 'The order could not be deleted.' }); } // the order stays exactly as it was
+  };
 
   // /orders?edit=<id> (used by "Complete order details") opens the existing edit dialog.
   useEffect(() => {
@@ -59,10 +65,11 @@ export default function Orders() {
     if (id) { setEditing(id === 'new' ? 'new' : id); setParams({}, { replace: true }); }
   }, [params, setParams]);
 
-  const ds = useDataset();
-  const { status, data, error, reload } = useAsync(() => (ds.ready ? listOrders({ pageSize: 100, dataset: ds.dataset }) : new Promise(() => {})), [ds.dataset, ds.ready]);
+  // Every order is shown together, as an ordinary customer order: the page makes no distinction between sample and other orders.
+  const { status, data, error, reload } = useAsync(() => listOrders({ pageSize: 100 }));
+  useLive(['orders', 'payments'], reload);
   const [orders, setOrders] = useState([]); // local copy, so a drop moves the card at once and the API call follows
-  useEffect(() => { if (data) setOrders(data.items); }, [data]);
+  useEffect(() => { if (data) setOrders(data.items.filter((o) => !isRushPlaceholder(o))); }, [data]); // the rush-capacity stand-in is shown by the banner, not as a customer's order
   // Real orders change on their own (a customer sends a new reference picture): look again every so often while the page is open and visible.
   useEffect(() => {
     if (DEMO_MODE) return undefined;
@@ -106,7 +113,6 @@ export default function Orders() {
           {data && <p className="od-pulse"><b>{stats.open}</b> open{stats.overdue > 0 && <> · <b className="is-late">{stats.overdue}</b> overdue</>} · <b>{stats.due}</b> awaiting payment</p>}
         </div>
         <div className="od-head-actions">
-          <DatasetToggle ds={ds} /><DemoBadge />
           <label className="od-search"><Search size={16} aria-hidden="true" /><input type="search" placeholder="Search customer or product" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search orders" /></label>
           <button type="button" className="btn btn-primary od-add" onClick={() => setEditing('new')}><Plus size={16} aria-hidden="true" /> Add order</button>
         </div>
@@ -121,13 +127,26 @@ export default function Orders() {
       )}
       {data && orders.length > 0 && (
         <>
+          <RushBanner />
           <OrderAccordion orders={shown} onOpen={setOpenId} onEdit={setEditing} />
           {search && shown.length === 0 && <p className="od-foot">No orders match “{search}”. <button type="button" className="od-clear" onClick={() => setSearch('')}>Clear search</button></p>}
         </>
       )}
 
       {selected && !editing && <OrderDetails order={selected} busy={busyId === selected.id} onClose={() => setOpenId(null)} onEdit={(id) => { setOpenId(null); setEditing(id); }}
-        onStatus={(o, next) => { if (next === 'completed') { setOpenId(null); setConfirming(o); } else persist(o, next); }} onChanged={reload} />}
+        onStatus={(o, next) => { if (next === 'completed') { setOpenId(null); setConfirming(o); } else persist(o, next); }} onChanged={reload} onDelete={(o) => setDeleting({ order: o, busy: false, error: null })} />}
+
+      {deleting && (
+        <Modal variant="confirm" title="Delete this order?" onClose={() => !deleting.busy && setDeleting(null)}>
+          <p>This order will be permanently removed. This action cannot be undone.</p>
+          {deleting.error && <div className="notice error" role="alert">{deleting.error}</div>}
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={() => setDeleting(null)} disabled={deleting.busy}>Cancel</button>
+            <button type="button" className="btn btn-danger" onClick={confirmDelete} disabled={deleting.busy}>{deleting.busy ? 'Deleting…' : 'Delete order'}</button>
+          </div>
+        </Modal>
+      )}
+      {toast && <div className="od-toast" role="status">{toast}</div>}
 
       {confirming && (
         <Modal title="Mark as completed?" onClose={() => setConfirming(null)}>

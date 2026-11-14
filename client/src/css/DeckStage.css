@@ -1,0 +1,4 @@
+/* The deck scene plays over the production sequence; the real cards stay underneath. The canvas never takes clicks and never adds scroll width. */
+.wxd { position: relative; width: 100%; display: flex; justify-content: center; }
+.wxd-canvas { position: absolute; display: none; pointer-events: none; z-index: 6; }
+.wxc-cell.is-undealt { visibility: hidden; }
