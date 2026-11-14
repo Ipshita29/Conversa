@@ -1,315 +1,243 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, ChevronDown, Flame, IndianRupee, Info, Sparkles, TrendingUp, TriangleAlert } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { motion, useInView } from 'framer-motion';
 import useAsync from '../hooks/useAsync.js';
-import { getInsights } from '../services/api.js';
-import { DemoBadge, StateMessage } from '../components/UI.jsx';
-import { CARAMEL, ComboChart, Donut, INK, SOFT, Sparkline, compact } from '../components/Insights.jsx';
-import '../css/Insights.css';
+import useLive from '../hooks/useLive.js';
+import usePrefersReducedMotion from '../hooks/usePrefersReducedMotion.js';
+import { attachmentSrc, getInsights } from '../services/api.js';
+import { StateMessage } from '../components/UI.jsx';
+import '../css/InsightsStory.css';
 
-const plural = (n, one, many) => (n === 1 ? one : many);
-const inr = (n) => `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: n % 1 ? 2 : 0 }).format(n)}`;
-const utc = (iso) => new Date(`${iso}T00:00:00Z`);
-const short = (iso) => utc(iso).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
-const long = (iso) => utc(iso).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+
 const RANGES = [[7, '7 days'], [30, '30 days'], [90, '3 months']];
+const inr = (n) => `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(n))}`;
+const plural = (n, one, many) => (n === 1 ? one : many);
+const dayLong = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'short' });
+const dayShort = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+const ease = [0.22, 0.61, 0.36, 1];
 
-// Whole percentages that add up to exactly 100 (largest-remainder), so the legend always reconciles with the donut.
-function percents(values) {
-  const total = values.reduce((s, v) => s + v, 0);
-  if (!total) return values.map(() => 0);
-  const raw = values.map((v) => (v / total) * 100); const out = raw.map(Math.floor);
-  let left = 100 - out.reduce((s, v) => s + v, 0);
-  raw.map((r, i) => [r - out[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0 && values[i] > 0) { out[i] += 1; left -= 1; } });
-  return out;
+// A number that counts up to its value (and re-counts when the value changes). Reduced motion: it just shows the value.
+function useCount(value, reduced, ms = 1100) {
+  const [shown, setShown] = useState(reduced ? value : 0); const from = useRef(reduced ? value : 0);
+  useEffect(() => {
+    if (reduced) { setShown(value); from.current = value; return undefined; }
+    const a = from.current; const t0 = performance.now(); let raf = 0;
+    const step = (now) => { const p = Math.min(1, (now - t0) / ms); const e = 1 - (1 - p) ** 4; setShown(a + (value - a) * e); if (p < 1) raf = requestAnimationFrame(step); else from.current = value; };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value, reduced, ms]);
+  return shown;
 }
 
-// ---- Date range: quick filters plus a custom period -------------------------------------------------------------------------
-function DateRange({ range, custom, days, onQuick, onCustom }) {
-  const [open, setOpen] = useState(false);
-  const [from, setFrom] = useState(range.from); const [to, setTo] = useState(range.to); const [err, setErr] = useState(null);
-  const box = useRef(null);
-  const today = new Date().toLocaleDateString('en-CA');
-  useEffect(() => { setFrom(range.from); setTo(range.to); setErr(null); }, [range.from, range.to, open]);
-  useEffect(() => {
-    if (!open) return undefined;
-    const down = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
-    const key = (e) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', down); document.addEventListener('keydown', key);
-    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
-  }, [open]);
-  const apply = () => {
-    if (!from || !to) return setErr('Choose both dates.');
-    if (from > to) return setErr('The start date must be on or before the end date.');
-    if (to > today) return setErr('The end date cannot be in the future.');
-    if ((utc(to) - utc(from)) / 86400000 + 1 > 366) return setErr('Choose a period of at most a year.');
-    setOpen(false); onCustom(from, to);
-  };
+// Cards lean very slightly toward the pointer: depth without noise. Off for touch and reduced motion.
+function Tilt({ children, className = '', max = 3.5 }) {
+  const ref = useRef(null); const reduced = usePrefersReducedMotion();
+  const move = (e) => { if (reduced || e.pointerType === 'touch') return; const r = ref.current.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width - 0.5; const y = (e.clientY - r.top) / r.height - 0.5; ref.current.style.transform = `perspective(1100px) rotateX(${(-y * max).toFixed(2)}deg) rotateY(${(x * max).toFixed(2)}deg)`; };
+  const leave = () => { if (ref.current) ref.current.style.transform = ''; };
+  return <div ref={ref} className={`is-tilt ${className}`} onPointerMove={move} onPointerLeave={leave}>{children}</div>;
+}
+
+const Change = ({ c, label }) => {
+  if (!c?.available) return <p className="is-compare is-none">{c?.reason ?? 'No comparison yet.'}</p>;
+  if (c.change === null) return <p className="is-compare">Up from none the {label}.</p>;
+  const up = c.change > 0; const same = c.change === 0;
+  return <p className={`is-compare${same ? '' : up ? ' is-up' : ' is-down'}`}><b>{same ? 'No change' : `${up ? '↑' : '↓'} ${Math.abs(c.change)}%`}</b> compared with the previous {label} ({typeof c.previous === 'number' && c.previous > 999 ? inr(c.previous) : c.previous}).</p>;
+};
+
+// ---- Section 1: the three numbers ------------------------------------------------------------------------------------------------
+function Numbers({ story, days, reduced }) {
+  const label = days === 90 ? '3 months' : `${days} days`;
+  const money = useCount(story.money.available ? story.money.booked : 0, reduced);
+  const orders = useCount(story.orders.value, reduced);
+  const wa = story.people.byChannel.whatsapp; // WhatsApp is the only channel shown
+  const people = useCount(wa, reduced);
+  const m = story.money; const paid = m.available && m.booked > 0 ? Math.min(100, (m.collected / m.booked) * 100) : 0;
   return (
-    <div className="in-range" ref={box}>
-      <button type="button" className="in-datebtn" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((o) => !o)}>
-        <CalendarRange size={16} aria-hidden="true" /><span>{short(range.from)} – {short(range.to)} {range.to.slice(0, 4)}</span><ChevronDown size={15} aria-hidden="true" />
-      </button>
-      <div className="in-quick" role="group" aria-label="Quick range">
-        {RANGES.map(([d, l]) => <button key={d} type="button" className={!custom && days === d ? 'is-on' : ''} aria-pressed={!custom && days === d} onClick={() => onQuick(d)}>{l}</button>)}
-      </div>
-      {open && (
-        <div className="in-pop" role="dialog" aria-label="Choose a date range">
-          <label>From<input type="date" value={from} max={to || today} onChange={(e) => setFrom(e.target.value)} /></label>
-          <label>To<input type="date" value={to} min={from} max={today} onChange={(e) => setTo(e.target.value)} /></label>
-          {err && <p className="in-pop-err" role="alert">{err}</p>}
-          <div className="in-pop-actions"><button type="button" className="btn btn-sm" onClick={() => setOpen(false)}>Cancel</button><button type="button" className="btn btn-primary btn-sm" onClick={apply}>Apply</button></div>
-        </div>
-      )}
+    <section className="is-numbers" aria-label="The business in three numbers">
+      <motion.div className="is-n is-money" initial={{ opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, ease }}>
+        <Tilt>
+          <p className="is-label">Total money</p>
+          {m.available ? <>
+            <p className="is-big"><span className="is-cur">₹</span>{new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Math.round(money))}</p>
+            <Change c={m.comparison} label={label} />
+            <div className="is-collect" role="img" aria-label={`${inr(m.collected)} collected, ${inr(m.outstanding)} still to collect`}>
+              <span className="is-bar"><motion.i initial={{ width: 0 }} animate={{ width: `${paid}%` }} transition={{ duration: 1.3, delay: 0.5, ease }} /></span>
+              <p><b>{inr(m.collected)}</b> collected <span>·</span> <b className="is-out">{inr(m.outstanding)}</b> still to collect</p>
+            </div>
+            <p className="is-foot">Booked value of orders received. Collected counts confirmed payments only.{m.unpricedOrders > 0 ? ` ${m.unpricedOrders} ${plural(m.unpricedOrders, 'order has', 'orders have')} no price yet and ${plural(m.unpricedOrders, 'is', 'are')} not included.` : ''}</p>
+          </> : <p className="is-empty">{m.reason}</p>}
+        </Tilt>
+      </motion.div>
+      <motion.div className="is-n is-orders" initial={{ opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.12, ease }}>
+        <Tilt>
+          <p className="is-label">Total orders</p>
+          <p className="is-big is-mid">{Math.round(orders)}</p>
+          <Change c={story.orders.comparison} label={label} />
+          <p className="is-foot">Orders received. Drafts and cancelled orders are not counted.</p>
+        </Tilt>
+      </motion.div>
+      <motion.div className="is-n is-people" initial={{ opacity: 0, y: 26 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.24, ease }}>
+        <Tilt>
+          <p className="is-label">People who contacted</p>
+          <p className="is-big is-mid">{Math.round(people)}</p>
+          <p className="is-split">{wa} {plural(wa, 'person', 'people')} on WhatsApp</p>
+          <Change c={story.people.comparison} label={label} />
+          <details className="is-how"><summary>How is this counted?</summary><p>Unique people who sent at least one WhatsApp message in this period. The same number counts once, however many messages it sent.</p></details>
+        </Tilt>
+      </motion.div>
+    </section>
+  );
+}
+
+// ---- Section 2: the week ---------------------------------------------------------------------------------------------------------
+// A smooth monotone curve through the seven daily counts (no overshoot below zero), drawn at the real pixel size of its box so text stays readable on a phone.
+function curve(pts) {
+  if (pts.length < 2) return '';
+  const n = pts.length; const dx = []; const m = []; const t = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = (pts[i + 1][1] - pts[i][1]) / dx[i]; }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+  for (let i = 0; i < n - 1; i++) { if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; } const a = t[i] / m[i]; const b = t[i + 1] / m[i]; const s = a * a + b * b; if (s > 9) { const k = 3 / Math.sqrt(s); t[i] = k * a * m[i]; t[i + 1] = k * b * m[i]; } }
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < n - 1; i++) d += ` C${pts[i][0] + dx[i] / 3},${pts[i][1] + (t[i] * dx[i]) / 3} ${pts[i + 1][0] - dx[i] / 3},${pts[i + 1][1] - (t[i + 1] * dx[i]) / 3} ${pts[i + 1][0]},${pts[i + 1][1]}`;
+  return d;
+}
+
+function WeekChart({ week, reduced }) {
+  const box = useRef(null); const [w, setW] = useState(820); const [active, setActive] = useState(null);
+  const inView = useInView(box, { once: true, margin: '-12% 0px' });
+  useEffect(() => { const ro = new ResizeObserver(([e]) => setW(Math.max(280, Math.round(e.contentRect.width)))); ro.observe(box.current); return () => ro.disconnect(); }, []);
+  const H = w < 520 ? 300 : 360; const pad = { l: 34, r: 22, t: 34, b: 52 };
+  const counts = week.days.map((d) => d.orders); const top = Math.max(3, ...counts); const yMax = top <= 4 ? 4 : Math.ceil(top / 2) * 2;
+  const x = (i) => pad.l + 16 + (i * (w - pad.l - pad.r - 32)) / 6; const y = (v) => pad.t + (1 - v / yMax) * (H - pad.t - pad.b);
+  const known = week.days.map((d, i) => (d.future ? null : [x(i), y(d.orders)])); const shown = known.filter(Boolean);
+  const line = curve(shown); const area = shown.length > 1 ? `${line} L${shown[shown.length - 1][0]},${y(0)} L${shown[0][0]},${y(0)} Z` : '';
+  const ticks = Array.from({ length: yMax / (yMax > 8 ? 4 : 2) + 1 }, (_, i) => i * (yMax > 8 ? 4 : 2));
+  const near = (clientX) => { const r = box.current.getBoundingClientRect(); const px = clientX - r.left; let b = 0; for (let i = 1; i < 7; i++) if (Math.abs(x(i) - px) < Math.abs(x(b) - px)) b = i; return b; };
+  const a = active === null ? null : week.days[active];
+  const mob = w < 520;
+  return (
+    <div className="is-chart" ref={box} onPointerMove={(e) => setActive(near(e.clientX))} onPointerLeave={() => setActive(null)}>
+      <svg width={w} height={H} viewBox={`0 0 ${w} ${H}`} role="group" aria-label={`Orders received each day, ${dayShort(week.from)} to ${dayShort(week.to)}`}>
+        <defs>
+          <linearGradient id="isArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#B9D0F0" stopOpacity="0.55" /><stop offset="100%" stopColor="#B9D0F0" stopOpacity="0" /></linearGradient>
+        </defs>
+        {ticks.map((t) => <g key={t}><line x1={pad.l} x2={w - pad.r} y1={y(t)} y2={y(t)} className="is-grid" /><text x={pad.l - 10} y={y(t) + 4} textAnchor="end" className="is-tick">{t}</text></g>)}
+        {a && <line x1={x(active)} x2={x(active)} y1={pad.t - 8} y2={y(0)} className="is-guide" />}
+        {area && <motion.path d={area} fill="url(#isArea)" initial={{ opacity: 0 }} animate={{ opacity: inView || reduced ? 1 : 0 }} transition={{ duration: 1.2, delay: reduced ? 0 : 0.5 }} />}
+        {line && <motion.path d={line} className="is-line" fill="none" initial={{ pathLength: reduced ? 1 : 0 }} animate={{ pathLength: inView || reduced ? 1 : 0 }} transition={{ duration: reduced ? 0 : 1.6, ease }} />}
+        {week.days.map((d, i) => (
+          <g key={d.date}>
+            <text x={x(i)} y={H - 20} textAnchor="middle" className={`is-day${active === i ? ' is-on' : ''}`}>{mob ? d.weekday.slice(0, 1) : d.weekday.slice(0, 3)}</text>
+            {!d.future && <motion.circle cx={x(i)} cy={y(d.orders)} r={active === i ? 7 : 4.5} className={`is-dot${active === i ? ' is-on' : ''}`} initial={{ opacity: 0, scale: 0.4 }} animate={{ opacity: inView || reduced ? 1 : 0, scale: 1 }} transition={{ duration: 0.5, delay: reduced ? 0 : 0.7 + i * 0.12 }} style={{ transformOrigin: `${x(i)}px ${y(d.orders)}px` }} />}
+            <rect x={x(i) - 26} y={pad.t - 10} width={52} height={H - pad.t - pad.b + 24} fill="transparent" tabIndex={0} role="img" aria-label={d.future ? `${d.weekday}: not yet` : `${d.weekday} ${dayShort(d.date)}: ${d.orders} ${plural(d.orders, 'order', 'orders')}`} onFocus={() => setActive(i)} onBlur={() => setActive(null)} className="is-hit" />
+          </g>
+        ))}
+      </svg>
+      {a && <div className="is-tip" style={{ left: Math.min(w - 90, Math.max(90, x(active))), top: a.future ? y(0) - 70 : Math.max(8, y(a.orders) - 74) }} role="status"><b>{a.future ? '—' : a.orders}</b><span>{a.future ? `${a.weekday}, not yet` : `${plural(a.orders, 'order', 'orders')} · ${dayLong(a.date)}`}</span></div>}
     </div>
   );
 }
 
-// ---- KPI card ------------------------------------------------------------------------------------------------------------------
-function Change({ c, days }) {
-  if (!c || !c.available) return <span className="in-change is-muted" title={c?.reason}>Not enough data yet</span>;
-  if (c.change === null) return <span className="in-change is-muted">Nothing to compare with</span>;
-  const up = c.change > 0; const flat = c.change === 0;
-  const unit = c.unit === 'points' ? ' pts' : '%';
+function Week({ week, onWeek, reduced }) {
   return (
-    <span className={`in-change ${flat ? 'is-muted' : up ? 'is-up' : 'is-down'}`} title={`Previous ${days} days: ${c.previous}${c.unit === 'points' ? '%' : ''}`}>
-      {flat ? null : up ? <ArrowUpRight size={14} aria-hidden="true" /> : <ArrowDownRight size={14} aria-hidden="true" />}
-      {flat ? 'Same as' : `${Math.abs(c.change)}${unit}`} vs previous {days} {plural(days, 'day', 'days')}
-    </span>
-  );
-}
-
-function Kpi({ label, children, spark, sparkColor, open, onToggle }) {
-  return (
-    <button type="button" className={`in-kpi${open ? ' is-open' : ''}`} aria-expanded={open} onClick={onToggle}>
-      <span className="in-label">{label}</span>
-      <span className="in-kpi-body"><span className="in-kpi-main">{children}</span>{spark && <Sparkline values={spark} color={sparkColor} />}</span>
-    </button>
-  );
-}
-
-// What sits behind a KPI: a few labelled shares, all worked out from the figures already on the page.
-function Breakdown({ title, rows, note, onClose }) {
-  const total = rows.reduce((t, r) => t + r.value, 0);
-  return (
-    <section className="in-detail" aria-label={title}>
-      <header><h2>{title}</h2><button type="button" className="in-x" onClick={onClose}>Close</button></header>
-      {rows.length === 0 || total === 0 ? <p className="in-empty">Nothing to break down in this period.</p> : (
-        <ul>{rows.map((r) => (
-          <li key={r.label}><span>{r.label}</span><span className="in-meter" aria-hidden="true"><i style={{ width: `${Math.max(2, (r.value / total) * 100)}%`, background: r.color }} /></span><b>{r.text ?? r.value}</b><em>{Math.round((r.value / total) * 100)}%</em></li>
-        ))}</ul>
-      )}
-      {note && <p className="in-detail-note">{note}</p>}
+    <section className="is-week" aria-labelledby="is-week-h">
+      <div className="is-week-head">
+        <div>
+          <h2 id="is-week-h">Your business, <em>this week.</em></h2>
+          <p>Every order tells a little more about your rhythm.</p>
+        </div>
+        <div className="is-weeknav" role="group" aria-label="Choose a week">
+          <button type="button" onClick={() => onWeek(week.prev)} aria-label="Previous week">←</button>
+          <span>{dayShort(week.from)} – {dayShort(week.to)}<small>{week.total} {plural(week.total, 'order', 'orders')}{week.isCurrent ? ' · this week' : ''}</small></span>
+          <button type="button" onClick={() => onWeek(week.next)} disabled={!week.next} aria-label="Next week">→</button>
+        </div>
+      </div>
+      <WeekChart week={week} reduced={reduced} />
+      <ul className="sr-only">{week.days.map((d) => <li key={d.date}>{d.weekday}: {d.future ? 'not yet' : `${d.orders} ${plural(d.orders, 'order', 'orders')}`}</li>)}</ul>
     </section>
   );
 }
 
-const INSIGHT_ICON = { 'deadline-risk': TriangleAlert, overload: Flame, 'best-seller': TrendingUp, 'busiest-day': CalendarDays, 'missing-prices': IndianRupee };
+// ---- Section 3: three discoveries ------------------------------------------------------------------------------------------------
+const Reveal = ({ children, className, delay = 0 }) => <motion.article className={className} initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-10% 0px' }} transition={{ duration: 0.8, delay, ease }}>{children}</motion.article>;
+
+function Highlights({ story, label }) {
+  const { popular: p, busiest: b, regular: r } = story;
+  return (
+    <section className="is-found" aria-label="Three things worth knowing">
+      <Reveal className="is-card is-pop">
+        <Tilt max={2.5}>
+          <div className="is-pop-grid">
+            <div className={`is-pic${p.available && p.image ? '' : ' is-noimg'}`}>{p.available && p.image ? <img src={attachmentSrc(p.image)} alt={`A ${p.product.toLowerCase()} order`} loading="lazy" /> : <span aria-hidden="true">{p.available ? p.product.charAt(0) : '·'}</span>}</div>
+            <div className="is-pop-text">
+              <p className="is-kick">Most popular order</p>
+              <h3>The crowd <em>favourite.</em></h3>
+              {p.available ? <>
+                <p className="is-name">{p.product}</p>
+                <p className="is-stat"><b>{p.orders}</b> {plural(p.orders, 'order', 'orders')} <span>·</span> <b>{p.units}</b> {plural(p.units, 'unit', 'units')}</p>
+                <p className="is-note">{p.repeats ? `${p.share}% of the orders in the last ${label}.` : p.tiedOnOrders > 1 ? `Every product was ordered once in the last ${label}; this one leads on quantity.` : `Ordered once in the last ${label}.`}</p>
+              </> : <p className="is-empty">{p.reason}</p>}
+            </div>
+          </div>
+        </Tilt>
+      </Reveal>
+      <div className="is-found-side">
+        <Reveal className="is-card is-busy" delay={0.1}>
+          <p className="is-kick">Busiest days</p>
+          <h3>Your busiest <em>rhythm.</em></h3>
+          {b.available ? <>
+            <p className="is-day-big">{b.weekday}{b.ties > 1 ? <small> and {b.ties - 1} more</small> : null}</p>
+            <p className="is-stat"><b>{b.orders}</b> {plural(b.orders, 'order', 'orders')} <span>·</span> out of {b.total}</p>
+            <div className="is-mini" role="img" aria-label={b.perWeekday.map((d) => `${d.weekday} ${d.orders}`).join(', ')}>{b.perWeekday.map((d) => <span key={d.weekday} className={d.orders === b.orders ? 'is-hi' : ''}><i style={{ height: `${Math.max(6, (d.orders / b.orders) * 100)}%` }} /><em>{d.weekday.slice(0, 1)}</em></span>)}</div>
+            {b.quietest && <p className="is-note">Quietest: {b.quietest.weekday}, {b.quietest.orders} {plural(b.quietest.orders, 'order', 'orders')}.</p>}
+          </> : <p className="is-empty">{b.reason}</p>}
+        </Reveal>
+        <Reveal className="is-card is-reg" delay={0.2}>
+          <p className="is-kick">Most regular customer</p>
+          <h3>A familiar <em>face.</em></h3>
+          {r.available ? <div className="is-reg-body">
+            <div className="is-mono" aria-hidden="true"><span>{r.name.trim().charAt(0).toUpperCase()}</span><i /></div>
+            <div><p className="is-name">{r.name}</p><p className="is-stat"><b>{r.orders}</b> orders</p><p className="is-note">Last ordered {new Date(r.lastOrderAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}. {r.basis === 'name' ? 'Matched by name, as no contact is recorded.' : 'Matched by contact.'}</p></div>
+          </div> : <p className="is-empty">{r.reason}</p>}
+        </Reveal>
+      </div>
+    </section>
+  );
+}
 
 export default function Analytics() {
   const [params, setParams] = useSearchParams();
-  const fromP = params.get('from'); const toP = params.get('to');
-  const custom = /^\d{4}-\d{2}-\d{2}$/.test(fromP ?? '') && /^\d{4}-\d{2}-\d{2}$/.test(toP ?? '') ? { from: fromP, to: toP } : null;
-  const rangeP = Number(params.get('range'));
-  const days = [7, 30, 90].includes(rangeP) ? rangeP : 7; // the last 7 days unless told otherwise
-  const explicit = ['real', 'demo', 'all'].includes(params.get('data')) ? params.get('data') : null;
-  const [auto, setAuto] = useState('all'); // the first load asks for everything just to learn how many real and demo orders exist
-  const requested = explicit ?? auto;
-  const [mode, setMode] = useState('combined');
-  const [rank, setRank] = useState('revenue');
-  const [kpiOpen, setKpiOpen] = useState(null); // which KPI's breakdown is showing
-  const [prodOpen, setProdOpen] = useState(null); // which product row is expanded
-  const { status, data, error, reload } = useAsync(() => getInsights(custom ?? days, requested), [days, custom?.from, custom?.to, requested]);
-  useEffect(() => { if (data && !explicit && auto === 'all') setAuto(data.datasets.real > 0 ? 'real' : 'demo'); }, [data, explicit, auto]);
-  const setP = (changes) => setParams((p) => { const n = new URLSearchParams(p); Object.entries(changes).forEach(([k, v]) => (v === null ? n.delete(k) : n.set(k, v))); return n; }, { replace: true });
+  const rangeP = Number(params.get('range')); const days = [7, 30, 90].includes(rangeP) ? rangeP : 7;
+  const weekP = /^\d{4}-\d{2}-\d{2}$/.test(params.get('week') ?? '') ? params.get('week') : undefined;
+  const reduced = usePrefersReducedMotion();
+  const { status, data, error, reload } = useAsync(() => getInsights(days, 'all', weekP), [days, weekP]);
+  useLive(['orders', 'payments', 'messages'], reload);
+  const setP = (changes) => setParams((p) => { const n = new URLSearchParams(p); Object.entries(changes).forEach(([k, v]) => (v == null ? n.delete(k) : n.set(k, v))); return n; }, { replace: true });
+  const story = data?.story;
+  const label = days === 90 ? '3 months' : `${days} days`;
 
-  const trendPoints = useMemo(() => {
-    if (!data) return [];
-    const t = data.trend;
-    if (t.length <= 31) return t.map((d) => ({ label: t.length <= 8 ? utc(d.date).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric' }) : short(d.date), full: long(d.date), bar: d.revenue, line: d.orders }));
-    const out = []; // long periods are drawn week by week so every bar stays readable
-    for (let i = 0; i < t.length; i += 7) { const w = t.slice(i, i + 7); out.push({ label: short(w[0].date), full: `${short(w[0].date)} – ${short(w.at(-1).date)}`, bar: w.reduce((s, d) => s + d.revenue, 0), line: w.reduce((s, d) => s + d.orders, 0) }); }
-    return out;
-  }, [data]);
-
-  const head = (
-    <header className="in-head">
-      <div className="in-title">
-        <h1>Your business <em>at a glance.</em></h1>
-      </div>
-      <div className="in-controls">
-        {data ? <DateRange range={data.range} custom={Boolean(custom)} days={days} onQuick={(d) => setP({ range: d === 7 ? null : d, from: null, to: null })} onCustom={(f, t) => setP({ from: f, to: t, range: null })} />
-          : <div className="in-quick" role="group" aria-label="Quick range">{RANGES.map(([d, l]) => <button key={d} type="button" className={days === d ? 'is-on' : ''} onClick={() => setP({ range: d === 7 ? null : d, from: null, to: null })}>{l}</button>)}</div>}
-        <div className="in-datasets">
-          {data && (data.datasets.real > 0 && data.datasets.demo > 0 || data.datasets.selected === 'demo') && (
-            <div className="in-seg" role="group" aria-label="Which orders">
-              {[['real', 'Real', data.datasets.real], ['demo', 'Demo', data.datasets.demo], ['all', 'Both', data.datasets.real + data.datasets.demo]].map(([k, l, n]) => (
-                <button key={k} type="button" className={data.datasets.selected === k ? 'is-on' : ''} aria-pressed={data.datasets.selected === k} onClick={() => setP({ data: k })}>{l}<b>{n}</b></button>
-              ))}
-            </div>
-          )}
-          <DemoBadge />
-        </div>
-      </div>
-    </header>
-  );
-
-  const shell = (inner, cls = '') => (
-    <section className={`page insights${cls}`}>
-      <div className="in-content">{head}{inner}</div>
-    </section>
-  );
-  if (!data && status === 'loading') return shell(<StateMessage kind="loading" message="Gathering your numbers…" />);
-  if (status === 'error' || !data) return shell(<StateMessage kind="error" message={`Couldn't load your insights. ${error?.message ?? ''}`} onRetry={reload} />);
-
-  const { kpis, trend, products, insights, datasets, status: st, timing } = data;
-  const periodDays = data.range.days;
-  const sel = datasets.selected;
-  const revOn = kpis.totalRevenue.available;
-  const effMode = !revOn && mode !== 'orders' ? 'orders' : mode;
-  const show = { bar: effMode !== 'orders' && revOn, line: effMode !== 'revenue' };
-  const rate = kpis.onTimeRate;
-  // Delivery cards exist only when the selected period (and Real/Demo/Both choice) has orders really delivered: completed, with a promised deadline.
-  const hasDelivery = timing.delivered > 0;
-  const completedPct = kpis.totalOrders.value ? Math.round((kpis.completedOrders.value / kpis.totalOrders.value) * 100) : null;
-  const rateSeries = trend.map((d) => (d.delivered ? Math.round((d.onTime / d.delivered) * 100) : null));
-
-  const statusRows = [['completed', 'Completed', '#7FA97A'], ['pending', 'Pending', SOFT.blue], ['cancelled', 'Cancelled', '#C9C1B4'], ['atRisk', 'At risk', '#E39A6B']].map(([k, label, color]) => ({ key: k, label, color, value: st[k] }));
-  const statusPct = percents(statusRows.map((r) => r.value));
-  const timingRows = [{ key: 'onTime', label: 'On time', color: '#7FA97A', value: timing.onTime }, { key: 'delayed', label: 'Delayed', color: '#E39A6B', value: timing.delayed }];
-  const timingPct = percents(timingRows.map((r) => r.value));
-
-  const toggleKpi = (k) => setKpiOpen((o) => (o === k ? null : k));
-  const pricedTotal = products.reduce((t, p) => t + (p.revenue ?? 0), 0);
-  const breakdown = {
-    revenue: { title: 'Where the revenue comes from', rows: [...products].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue).slice(0, 5).map((p) => ({ label: p.product, value: p.revenue, text: inr(p.revenue), color: CARAMEL })),
-      note: kpis.totalRevenue.unpricedOrders ? `${kpis.totalRevenue.unpricedOrders} ${plural(kpis.totalRevenue.unpricedOrders, 'order has', 'orders have')} no price yet and ${plural(kpis.totalRevenue.unpricedOrders, 'is', 'are')} not counted.` : null },
-    orders: { title: 'Orders by status', rows: statusRows.filter((r) => r.value > 0).map((r) => ({ label: r.label, value: r.value, color: r.color })) },
-    completed: { title: 'Completed against the rest', rows: [{ label: 'Completed', value: st.completed, color: '#7FA97A' }, { label: 'Still open', value: st.pending, color: SOFT.blue }, { label: 'Cancelled', value: st.cancelled, color: '#C9C1B4' }].filter((r) => r.value > 0) },
-    ontime: { title: 'Delivered orders against their deadline', rows: timingRows.filter((r) => r.value > 0).map((r) => ({ label: r.label, value: r.value, color: r.color })) },
-  };
-  const sorted = [...products].sort((a, b) => (rank === 'units' ? b.units - a.units || (b.revenue ?? -1) - (a.revenue ?? -1) : (b.revenue ?? -1) - (a.revenue ?? -1) || b.units - a.units)).slice(0, 5);
-  const peak = Math.max(...sorted.map((p) => (rank === 'units' ? p.units : p.revenue ?? 0)), 0);
-  const noOrders = st.total === 0;
-
-  return shell(
-    <>
-      {sel !== 'real' && <p className="in-note"><Info size={14} aria-hidden="true" /> {sel === 'demo' ? 'Demo orders only: sample bakery data, not your business.' : 'Real and demo orders combined: these figures mix sample and real data.'}</p>}
-
-      <div className={`in-body${status === 'loading' ? ' is-loading' : ''}`}>
-        <div className={`in-kpis ${hasDelivery ? 'has-4' : 'has-3'}`}>
-          <Kpi label="Total revenue" open={kpiOpen === 'revenue'} onToggle={() => toggleKpi('revenue')} spark={revOn ? trend.map((d) => d.revenue) : null} sparkColor={CARAMEL}>
-            {revOn ? <><b className="in-val">{inr(kpis.totalRevenue.value)}</b><Change c={kpis.totalRevenue.comparison} days={periodDays} /><small>{kpis.totalRevenue.unpricedOrders ? `Booked sales · ${kpis.totalRevenue.unpricedOrders} ${plural(kpis.totalRevenue.unpricedOrders, 'order has', 'orders have')} no price` : 'Booked sales, not money collected'}</small></>
-              : <><b className="in-val is-na">—</b><span className="in-change is-muted">Not enough data yet</span><small>{kpis.totalRevenue.reason}</small></>}
-          </Kpi>
-          <Kpi label="Total orders" open={kpiOpen === 'orders'} onToggle={() => toggleKpi('orders')} spark={trend.map((d) => d.orders)} sparkColor={INK}>
-            <b className="in-val">{kpis.totalOrders.value}</b><Change c={kpis.totalOrders.comparison} days={periodDays} /><small>Received, cancelled excluded</small>
-          </Kpi>
-          <Kpi label="Completed orders" open={kpiOpen === 'completed'} onToggle={() => toggleKpi('completed')} spark={trend.map((d) => d.completed)} sparkColor="#5E9460">
-            <b className="in-val">{kpis.completedOrders.value}</b><Change c={kpis.completedOrders.comparison} days={periodDays} /><small>{completedPct === null ? 'No orders received' : `${completedPct}% of ${kpis.totalOrders.value} received`}</small>
-          </Kpi>
-          {hasDelivery && (
-            <Kpi label="On-time delivery rate" open={kpiOpen === 'ontime'} onToggle={() => toggleKpi('ontime')} spark={rateSeries} sparkColor={INK}>
-              <b className="in-val">{rate.value}%</b><Change c={rate.comparison} days={periodDays} /><small>{rate.onTime} of {rate.delivered} delivered on or before the deadline</small>
-            </Kpi>
-          )}
-        </div>
-
-        {kpiOpen && breakdown[kpiOpen] && <Breakdown {...breakdown[kpiOpen]} onClose={() => setKpiOpen(null)} />}
-
-        {noOrders ? <StateMessage message={`No orders were received in this period. Add an order, or choose another range.`}><Link className="btn btn-primary" to="/orders">Go to Orders</Link></StateMessage> : (
-          <div className="in-main">
-            <article className="in-card in-trend">
-              <header className="in-card-head">
-                <div><h2>Revenue &amp; orders trend</h2><p>{show.bar ? 'Booked revenue per ' : 'Orders per '}{trend.length > 31 ? 'week' : 'day'}{show.bar && show.line ? ', with orders received' : ''}</p></div>
-                <div className="in-seg" role="group" aria-label="Chart shows">
-                  {[['combined', 'Combined'], ['revenue', 'Revenue'], ['orders', 'Orders']].map(([k, l]) => <button key={k} type="button" disabled={!revOn && k !== 'orders' && k !== 'combined'} className={effMode === k ? 'is-on' : ''} aria-pressed={effMode === k} onClick={() => setMode(k)}>{l}</button>)}
-                </div>
-              </header>
-              {!revOn && <p className="in-chart-note">Revenue appears here once your orders have prices. Showing orders for now.</p>}
-              <ComboChart key={`${effMode}-${data.range.from}-${data.range.to}-${sel}`} points={trendPoints} show={show} barName="Revenue (booked)" lineName="Orders" fmtBar={inr} fmtLine={(v) => `${v} ${plural(v, 'order', 'orders')}`} tickBar={(v) => `₹${compact(v)}`} height={372}
-                ariaLabel={`${show.bar ? 'Booked revenue' : 'Orders'} ${trend.length > 31 ? 'by week' : 'by day'}. ${trendPoints.map((p) => `${p.full}: ${show.bar ? `${inr(p.bar)}, ` : ''}${p.line} ${plural(p.line, 'order', 'orders')}`).join('. ')}`} />
-              <ul className="in-legend">
-                {show.bar && <li><i className="sw bar" />Revenue (booked)</li>}
-                {show.line && <li><i className="sw line" />Orders</li>}
-              </ul>
-            </article>
-
-            <article className="in-card in-products">
-              <header className="in-card-head">
-                <div><h2>Top-selling products</h2><p>{rank === 'revenue' ? 'Booked revenue' : 'Units sold'}, received in this period</p></div>
-                <div className="in-seg" role="group" aria-label="Rank by">
-                  {[['revenue', 'Revenue'], ['units', 'Units']].map(([k, l]) => <button key={k} type="button" className={rank === k ? 'is-on' : ''} aria-pressed={rank === k} onClick={() => setRank(k)}>{l}</button>)}
-                </div>
-              </header>
-              {sorted.length === 0 ? <p className="in-empty">No products in this period.</p> : (
-                <ol>
-                  {sorted.map((p, i) => {
-                    const v = rank === 'units' ? p.units : p.revenue ?? 0;
-                    return (
-                      <li key={p.product} className={prodOpen === p.product ? 'is-open' : ''}>
-                        <button type="button" className="in-prow" aria-expanded={prodOpen === p.product} onClick={() => setProdOpen((o) => (o === p.product ? null : p.product))}>
-                          <span className="in-rank">{i + 1}</span>
-                          <span className="in-prod"><strong title={p.product}>{p.product}</strong><small>{p.units} {plural(p.units, 'unit', 'units')} · {p.orders} {plural(p.orders, 'order', 'orders')}</small>
-                            <span className="in-meter" aria-hidden="true"><i style={{ width: peak ? `${Math.max(v ? 4 : 0, (v / peak) * 100)}%` : '0%' }} /></span></span>
-                          <span className={`in-rev${p.revenue == null ? ' is-na' : ''}`}>{p.revenue == null ? 'No price yet' : inr(p.revenue)}{p.partial && <small>some unpriced</small>}</span>
-                        </button>
-                        {prodOpen === p.product && (
-                          <dl className="in-pdetail">
-                            <div><dt>Share of revenue</dt><dd>{p.revenue != null && pricedTotal ? `${Math.round((p.revenue / pricedTotal) * 100)}%` : '—'}</dd></div>
-                            <div><dt>Orders</dt><dd>{p.orders}</dd></div>
-                            <div><dt>Average per unit</dt><dd>{p.revenue != null && p.units && !p.partial ? inr(Math.round((p.revenue / p.units) * 100) / 100) : '—'}</dd></div>
-                          </dl>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-            </article>
+  return (
+    <section className="page insights is-page">
+      <header className="is-hero">
+        <motion.div className="is-hero-text" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9, ease }}>
+          <p className="is-eyebrow">Insights</p>
+          <h1>How your<br />business <em>is doing.</em></h1>
+          <div className="is-range" role="group" aria-label="Reporting period">
+            {RANGES.map(([d, l]) => <button key={d} type="button" className={days === d ? 'is-on' : ''} aria-pressed={days === d} onClick={() => setP({ range: d === 7 ? null : d })}>{l}</button>)}
           </div>
-        )}
+        </motion.div>
+      </header>
 
-        <div className={`in-bottom ${hasDelivery ? 'has-3' : 'has-2'}`}>
-          <article className="in-card in-status">
-            <header className="in-card-head"><div><h2>Order status</h2><p>All orders received in this period, cancelled included</p></div></header>
-            <div className="in-donut-row">
-              <Donut slices={statusRows} centerTop={String(st.total)} centerBottom={plural(st.total, 'order', 'orders')} ariaLabel={`Order status: ${statusRows.map((r) => `${r.value} ${r.label}`).join(', ')}, ${st.total} in total`} />
-              <ul className="in-keys">{statusRows.map((r, i) => <li key={r.key}><i style={{ background: r.color }} /><span>{r.label}</span><b>{r.value}</b><em>{statusPct[i]}%</em></li>)}</ul>
-            </div>
-          </article>
-
-          {hasDelivery && (
-            <article className="in-card in-timing">
-              <header className="in-card-head"><div><h2>Order timing</h2><p>Delivered orders, against the promised deadline</p></div></header>
-              <div className="in-donut-row">
-                <Donut slices={timingRows} centerTop={`${timingPct[0]}%`} centerBottom="on time" ariaLabel={`${timing.onTime} of ${timing.delivered} delivered orders were on time`} />
-                <ul className="in-keys">{timingRows.map((r, i) => <li key={r.key}><i style={{ background: r.color }} /><span>{r.label}</span><b>{r.value}</b><em>{timingPct[i]}%</em></li>)}
-                  <li className="is-total"><span>Delivered</span><b>{timing.delivered}</b></li></ul>
-              </div>
-            </article>
-          )}
-
-          <article className="in-card in-ai">
-            <header className="in-card-head"><div><h2><Sparkles size={17} aria-hidden="true" /> Smart insights</h2><p>Worked out from your orders and schedule</p></div></header>
-            {insights.length === 0 ? <p className="in-empty">Nothing needs your attention. Insights appear here as your orders and schedule give a reason.</p> : (
-              <ul>
-                {insights.slice(0, 3).map((i) => {
-                  const Icon = INSIGHT_ICON[i.id] ?? Sparkles;
-                  return (
-                    <li key={i.id} className={`is-${i.tone}`}>
-                      <span className="in-ico"><Icon size={16} aria-hidden="true" /></span>
-                      <div><h3>{i.title}</h3><p>{i.finding}</p>{i.link && <Link to={i.link.to} className="in-link">{i.link.label} <ArrowRight size={13} aria-hidden="true" /></Link>}</div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </article>
+      {status === 'error' && <StateMessage kind="error" message={`Couldn't load Insights. ${error.message}`} onRetry={reload} />}
+      {!story && status !== 'error' && <StateMessage kind="loading" message="Reading your orders…" />}
+      {story && (
+        <div className="is-body">
+          <Numbers story={story} days={days} reduced={reduced} />
+          <Week week={story.week} onWeek={(w) => w && setP({ week: w })} reduced={reduced} />
+          <Highlights story={story} label={label} />
         </div>
-      </div>
-      <p className="in-basis">{data.basis}{hasDelivery ? ' Delivery timing uses the moment an order was moved to Completed.' : ''}</p>
-    </>,
-    status === 'loading' ? ' is-loading' : '',
+      )}
+    </section>
   );
 }
