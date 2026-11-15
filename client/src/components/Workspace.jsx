@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, ChevronDown, FlaskConical, Pencil, Info, PenLine, Clock, Plus, RotateCcw } from 'lucide-react';
+import { ArrowRight, CalendarCheck, Check, ChevronDown, FlaskConical, Layers, Zap, Pencil, Info, PenLine, Clock, Plus, RotateCcw } from 'lucide-react';
 import useAsync from '../hooks/useAsync.js';
 import { DEMO_MODE, getConversations, getIntegrations, getWhatIf, simulateMove, applyWhatIf, updateOrder, createOrder, simulatePlanner } from '../services/api.js';
 import { summarise } from '../utils/homeSummary.js';
@@ -388,16 +388,35 @@ export function RiskSection({ planner, orders, onSimulate, eyebrow = 'Orders at 
 }
 
 // ---------- ConnectSection ----------
-const CHANNELS = [
-  { key: 'whatsapp', name: 'WhatsApp', Logo: WhatsAppLogo, purpose: 'Customer messages and order requests arrive in your inbox, ready to turn into orders.' },
+const FEATURES = [
+  { Icon: Zap, label: 'Auto capture orders' },
+  { Icon: CalendarCheck, label: 'Keep your day planned' },
+  { Icon: Layers, label: 'All channels in one place' },
 ];
+const ROADMAP = [
+  { key: 'instagram', name: 'Instagram', Logo: InstagramLogo },
+  { key: 'messenger', name: 'Facebook Messenger', Logo: MessengerLogo },
+  { key: 'shopify', name: 'Shopify', Logo: ShopifyLogo },
+  { key: 'woocommerce', name: 'WooCommerce', Logo: WooCommerceLogo },
+];
+const COUNTRY_CODES = [['+1', 'US'], ['+44', 'UK'], ['+91', 'IN'], ['+61', 'AU'], ['+49', 'DE'], ['+33', 'FR'], ['+971', 'AE'], ['+65', 'SG']];
 
-// WhatsApp is the only messaging channel offered: the tile is informational only (no buttons, no OAuth, no connected state).
+// The WhatsApp panel shows the real connection state. The number form is an onboarding preview: it never calls the API, so the
+// account that is already connected is never replaced or reset.
 export function ConnectSection() {
-  const integ = useAsync(getIntegrations, []); // the real connection state, as Settings shows it
+  const integ = useAsync(getIntegrations, []);
   const wa = (integ.data?.items ?? []).find((i) => i.channel === 'whatsapp');
   const state = DEMO_MODE ? 'not_connected' : wa?.state ?? null;
   const label = state === 'connected' ? 'Connected' : state === 'needs_attention' || state === 'expired' ? 'Needs attention' : state ? 'Not connected' : 'Checking…';
+  const [code, setCode] = useState('+1');
+  const [number, setNumber] = useState('');
+  const [note, setNote] = useState(null);
+  const submit = (e) => {
+    e.preventDefault();
+    const digits = number.replace(/\D/g, '');
+    if (digits.length < 7 || digits.length > 14) { setNote({ ok: false, text: 'Enter a valid WhatsApp Business number.' }); return; }
+    setNote({ ok: true, text: 'Your WhatsApp Business account is already connected, so nothing was changed. Adding further numbers is coming soon.' });
+  };
   return (
     <div className="cx">
       <h2 className="cx-lead">Bring your conversations together.</h2>
@@ -405,27 +424,41 @@ export function ConnectSection() {
         <div className="cx-intro">
           <p className="eyebrow">Channels</p>
           <h3 className="cx-title">Your conversations. <em>One workspace.</em></h3>
-          <p className="cx-text">Connect WhatsApp, where your customers already reach you, or get started by adding orders manually.</p>
+          <p className="cx-text">Connect your business channels, starting with WhatsApp, so customer messages and order requests flow into Conversa automatically.</p>
+          <ul className="cx-features">
+            {FEATURES.map(({ Icon, label: text }) => <li key={text}><span aria-hidden="true"><Icon size={16} /></span>{text}</li>)}
+          </ul>
+          <Link to="/orders?edit=new" className="cx-manual"><PenLine size={14} aria-hidden="true" /> Add an order manually</Link>
         </div>
 
-        <ul className="cx-tiles">
-          {CHANNELS.map(({ key, name, Logo, purpose }) => (
-            <li key={key} className={`cx-tile cx-${key}`}>
-              <Logo size={44} />
-              <div>
-                <p className="cx-name">{name} <span className={`cx-status${state === 'connected' ? ' is-on' : state === 'needs_attention' || state === 'expired' ? ' is-warn' : ''}`}>{label}</span></p>
-                <p className="cx-purpose">{purpose}</p>
+        <div className="cx-side">
+          <section className="cx-wa" aria-label="WhatsApp Business">
+            <div className="cx-wa-head">
+              <WhatsAppLogo size={44} />
+              <h4>WhatsApp Business <span className={`cx-status${state === 'connected' ? ' is-on' : state === 'needs_attention' || state === 'expired' ? ' is-warn' : ''}`}>{label}</span></h4>
+            </div>
+            <p className="cx-purpose">{state === 'connected' ? 'Conversa is currently connected to your WhatsApp Business number.' : 'Connect your WhatsApp Business number to bring customer messages into Conversa.'}</p>
+            <form className="cx-form" onSubmit={submit} noValidate>
+              <div className="cx-phone">
+                <select value={code} onChange={(e) => setCode(e.target.value)} aria-label="Country code">
+                  {COUNTRY_CODES.map(([c, n]) => <option key={c} value={c} title={n}>{c}</option>)}
+                </select>
+                <input type="tel" inputMode="tel" autoComplete="tel-national" value={number} onChange={(e) => { setNumber(e.target.value); setNote(null); }} placeholder="Enter your WhatsApp Business number" aria-label="WhatsApp Business number" />
               </div>
-            </li>
-          ))}
-        </ul>
-      </div>
+              <button type="submit" className="btn btn-primary">Connect to Conversa <ArrowRight size={16} aria-hidden="true" /></button>
+            </form>
+            {note && <p className={`cx-note ${note.ok ? 'is-ok' : 'is-bad'}`} role={note.ok ? 'status' : 'alert'}>{note.text}</p>}
+            <p className="cx-help">Add your WhatsApp Business number to start receiving and managing orders in Conversa.</p>
+          </section>
 
-      <div className="cx-paths">
-        <p className="cx-paths-label">Conversa works today, without WhatsApp connected.</p>
-        <div className="cx-actions">
-          <Link to="/plan" className="btn btn-primary">Continue with demo data <ArrowRight size={16} aria-hidden="true" /></Link>
-          <Link to="/orders?edit=new" className="btn"><PenLine size={15} aria-hidden="true" /> Add an order manually</Link>
+          <section className="cx-future" aria-label="Future integrations">
+            <p className="cx-future-tag">Future plan</p>
+            <h4>02. Expand the business ecosystem</h4>
+            <p className="cx-purpose">Connect additional sales channels, online storefronts, and order-management tools — such as Facebook Messenger, Shopify, and WooCommerce — into one intelligent workspace.</p>
+            <ul className="cx-roadmap">
+              {ROADMAP.map(({ key, name, Logo }) => <li key={key}><Logo size={28} />{name}</li>)}
+            </ul>
+          </section>
         </div>
       </div>
     </div>
@@ -440,6 +473,48 @@ export function WhatsAppLogo({ size = 40 }) {
       <circle cx="24" cy="24" r="24" fill="#25D366" />
       <path fill="#fff" d="M24.1 10.5a13.3 13.3 0 0 0-11.4 20.1l-1.9 6.9 7.1-1.9A13.3 13.3 0 1 0 24.1 10.5Zm0 2.4a10.9 10.9 0 1 1-5.6 20.3l-.5-.3-4.2 1.1 1.1-4.1-.3-.5A10.9 10.9 0 0 1 24.1 12.9Z" />
       <path fill="#fff" d="M19.2 17.8c-.3-.7-.6-.7-.9-.7h-.7c-.3 0-.7.1-1.1.5-.4.4-1.400 1.400-1.400 3.400s1.500 3.900 1.700 4.200c.2.300 2.900 4.600 7.100 6.200 3.500 1.400 4.200 1.100 4.900 1 .8-.1 2.500-1 2.800-2 .4-1 .4-1.800.2-2-.1-.2-.4-.3-.8-.5l-2.700-1.300c-.4-.1-.6-.2-.9.200l-1.200 1.500c-.2.300-.5.300-.9.100-.4-.2-1.700-.6-3.200-2-1.200-1.100-2-2.400-2.200-2.800-.2-.4 0-.6.200-.8l.6-.7c.2-.2.300-.4.400-.7.100-.3.100-.5 0-.7l-1.200-3Z" />
+    </svg>
+  );
+}
+
+export function InstagramLogo({ size = 28 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="Instagram">
+      <defs><linearGradient id="ig-g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stopColor="#FEDA75" /><stop offset=".35" stopColor="#FA7E1E" /><stop offset=".6" stopColor="#D62976" /><stop offset="1" stopColor="#4F5BD5" /></linearGradient></defs>
+      <rect width="48" height="48" rx="13" fill="url(#ig-g)" />
+      <rect x="12" y="12" width="24" height="24" rx="7" fill="none" stroke="#fff" strokeWidth="2.6" />
+      <circle cx="24" cy="24" r="5.6" fill="none" stroke="#fff" strokeWidth="2.6" />
+      <circle cx="31.2" cy="16.8" r="1.7" fill="#fff" />
+    </svg>
+  );
+}
+
+export function MessengerLogo({ size = 28 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="Facebook Messenger">
+      <defs><linearGradient id="ms-g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stopColor="#0099FF" /><stop offset="1" stopColor="#A033FF" /></linearGradient></defs>
+      <circle cx="24" cy="24" r="24" fill="url(#ms-g)" />
+      <path fill="#fff" d="M24 10.5c-7.5 0-13.2 5.5-13.2 12.9 0 3.9 1.600 7.200 4.200 9.500v4.600l4.300-2.400c1.500.4 3 .6 4.700.6 7.500 0 13.200-5.500 13.200-12.900S31.500 10.500 24 10.500Zm1.300 17.300-3.400-3.600-6.600 3.600 7.300-7.700 3.500 3.600 6.500-3.600-7.300 7.700Z" />
+    </svg>
+  );
+}
+
+export function ShopifyLogo({ size = 28 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="Shopify">
+      <path fill="#95BF47" d="M33.300 11.200c0-.1-.1-.2-.2-.2l-2.300-.2s-1.500-1.500-1.700-1.700c-.2-.2-.5-.1-.6-.1l-.9.300c-.5-1.500-1.400-2.800-3-2.800h-.1c-.4-.6-1-.8-1.500-.8-3.600 0-5.300 4.500-5.800 6.800l-2.500.8c-.8.200-.8.300-.9 1L11.300 38l17.800 3.300 9.600-2.100s-5.300-27.900-5.400-28Z" />
+      <path fill="#5E8E3E" d="m33.100 11-2.300-.2s-1.500-1.500-1.700-1.700c-.1-.1-.2-.1-.3-.1V41.300l9.600-2.100S33.200 11.200 33.100 11Z" />
+      <path fill="#fff" d="m24.700 18.600-1.100 3.300s-1-.5-2.200-.4c-1.800.1-1.800 1.200-1.800 1.500.1 1.500 4 1.900 4.300 5.500.3 2.800-1.500 4.700-3.900 4.900-2.900.2-4.500-1.500-4.500-1.500l.6-2.600s1.600 1.200 2.900 1.100c.8-.1 1.100-.8 1.100-1.300-.2-2-3.300-1.900-3.500-5.200-.3-2.800 1.600-5.500 5.700-5.800 1.600-.1 2.400.5 2.400.5Z" />
+    </svg>
+  );
+}
+
+export function WooCommerceLogo({ size = 28 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" role="img" aria-label="WooCommerce">
+      <rect x="2" y="8" width="44" height="26" rx="7" fill="#7F54B3" />
+      <path fill="#7F54B3" d="M16 34h8l-8 7z" />
+      <path fill="#fff" d="M8.500 15.500c.4-.5 1-.8 1.700-.8.900-.1 1.500.3 1.600 1.200.6 4 1.200 7.200 1.800 9.700l3.700-7c.3-.7.800-1 1.400-1.100.9-.1 1.400.3 1.700 1.300.4 1.600.9 3.800 1.500 5.400.4-3.200 1-5.500 1.600-6.900.2-.5.500-.8 1.100-.8.500 0 1 .1 1.300.4.400.3.500.7.400 1.200-.5 1.500-1.200 3.900-1.800 7.200-.5 2.600-1 4-1.900 4.100-.8.100-1.400-.6-2-2-.5-1.100-1.100-3-1.800-5.600-.9 1.800-1.900 3.600-2.800 5.400-1.100 2.200-2.100 3.200-3 3.300-.6 0-1.100-.5-1.500-1.600-.7-2.400-1.600-6.100-2.600-11.100-.1-.4 0-.9.300-1.200Zm28.300 1.700c.9.100 1.600.5 2 1.300.5.800.6 1.900.4 3.200-.4 2.700-1.600 4.300-3.300 4.800-.6.200-1.200.2-1.700.1-.9-.1-1.600-.5-2-1.300-.4-.7-.6-1.700-.4-3.100.4-2.100 1.200-3.600 2.600-4.500.7-.4 1.500-.6 2.400-.5Zm-.1 2c-.9 0-1.600.7-2.100 2-.2.600-.3 1.200-.3 1.700s.1 1 .3 1.300c.3.400.6.600 1 .6.600 0 1.100-.5 1.500-1.400.3-.7.400-1.400.4-2s-.1-1.200-.4-1.600c-.1-.4-.3-.6-.4-.6Z" />
     </svg>
   );
 }
