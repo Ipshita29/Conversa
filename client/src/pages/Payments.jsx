@@ -1,19 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Search } from 'lucide-react';
-import { getPayments } from '../services/api.js';
+import { getPayments, proofSrc } from '../services/api.js';
 import useAsync from '../hooks/useAsync.js';
 import useLive from '../hooks/useLive.js';
 import { formatMoney } from '../utils/format.js';
 import { StateMessage } from '../components/UI.jsx';
-import { PaymentModal, AssignPayment, METHOD, PaymentDetail, ProofThumb, ProofViewer, RecordPayment, VerifyPayment, detectedFrom } from '../components/Payments.jsx';
+import { PaymentModal, AssignPayment, METHOD, PaymentDetail, ProofViewer, RecordPayment, VerifyPayment, detectedFrom } from '../components/Payments.jsx';
+import { AtelierBackdrop, AtelierBar, AtelierHero, AtelierOverview, ReceiptGallery, VerificationDesk } from '../components/PaymentAtelier.jsx';
 import '../css/Payments.css';
 
-const shortId = (id) => `#${/^[a-f\d]{24}$/i.test(String(id)) ? String(id).slice(-6).toUpperCase() : String(id).replace(/^ord_/, '')}`;
 const TABS = [['all', 'All'], ['verify', 'To verify'], ['verified', 'Verified']];
 // What the owner is told about an order's money. One row per ORDER: the payments inside it (an advance by UPI and the balance on delivery, say) are
 // the parts of one story, not separate rows.
-const STATE = { paid: ['Paid', 'is-paid'], partial: ['Partly paid', 'is-partial'], verification_pending: ['Awaiting verification', 'is-pending'], cod: ['Cash on delivery', 'is-cod'], due: ['Due', 'is-due'] };
+const STATE = { paid: ['Verified', 'paid'], partial: ['Partly paid', 'due'], verification_pending: ['Awaiting verification', 'pending'], cod: ['Cash on delivery', 'cod'], due: ['Outstanding', 'due'] };
 const live = (r) => r.payments.filter((p) => p.kind !== 'refund' && p.status !== 'rejected');
 const toVerifyOf = (r) => r.payments.find((p) => p.status === 'pending' && p.kind !== 'refund' && p.method !== 'cod') ?? null; // the claim waiting for the owner (cash on delivery is confirmed when collected)
 
@@ -70,61 +69,47 @@ export default function Payments() {
   // Clicking a row opens what needs deciding: the claim to verify, the unmatched screenshot, or the order's payments.
   const openRow = (i) => { if (i.unmatched) setAssigning(i.unmatched); else if (i.pending) setVerifyId(i.pending.id); else setOpenId(i.row.orderId); };
 
+  // One card per entry in the ledger: the same facts the old rows showed, laid out as receipts.
+  const cardOf = (i) => {
+    const r = i.row; const methods = [...new Set(live(r).map((p) => METHOD[p.method] ?? p.method))];
+    const [label, tone] = i.unmatched ? ['Needs review', 'pending'] : (i.pending ? STATE.verification_pending : STATE[r.status] ?? [r.status, 'due']);
+    const parts = i.unmatched ? [`${formatMoney(i.unmatched.amount)} claimed`] : [r.paid > 0 && `${formatMoney(r.paid)} received`, r.pending > 0 && `${formatMoney(r.pending)} awaiting verification`, r.codDue > 0 && `${formatMoney(r.codDue)} on delivery`].filter(Boolean);
+    const qty = r.quantity > 1 && !new RegExp(`\\b${r.quantity}\\b`).test(r.item) ? ` × ${r.quantity}` : '';
+    const pay = i.unmatched ?? i.pending ?? r.payments.find((p) => p.proof) ?? live(r)[0] ?? null;
+    return {
+      key: i.key, entry: i, name: r.customerName, orderId: r.orderId, product: `${r.item ?? ''}${qty}`, label, tone, pay,
+      amount: i.unmatched ? formatMoney(i.unmatched.amount) : r.total === null ? '—' : formatMoney(r.total), detail: parts.join(' · ') || (r.total === null ? 'Not priced' : 'Nothing paid yet'),
+      methods: methods.length ? methods.join(' · ') : '—', src: proofSrc(i.shot), actionable: Boolean(i.pending || i.unmatched),
+    };
+  };
+  const cards = useMemo(() => shown.map(cardOf), [shown]); // eslint-disable-line react-hooks/exhaustive-deps
+  const deskItems = useMemo(() => list.map(cardOf).filter((c) => c.src && c.pay).map((c) => ({ ...c, tone: c.actionable ? 'pending' : c.pay.status === 'confirmed' ? 'paid' : c.tone })), [list]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [deskKey, setDeskKey] = useState(null);
+  const deskSel = (deskItems.find((c) => c.key === deskKey) ?? deskItems.find((c) => c.actionable) ?? deskItems[0])?.key ?? null;
+  const counts = { all: list.length, verify: list.filter((i) => i.pending || i.unmatched).length, verified: list.filter((i) => i.row.paid > 0).length };
+  const confirmedCount = rows.reduce((n, r) => n + r.payments.filter((p) => p.kind === 'payment' && p.status === 'confirmed').length, 0);
+
   const k = data?.kpis;
   return (
-    <section className="page payments">
-      <header className="pmx-head">
-        <div><h1>Payments</h1><p>Keep track of what your customers have paid.</p></div>
-        <div className="pmx-head-actions">
-          
-          <button type="button" className="btn btn-primary pmx-add" onClick={() => setRecording({ orderId: null })} disabled={!data}><Plus size={16} aria-hidden="true" /> Record payment</button>
-        </div>
-      </header>
-
+    <section className="page payments pa">
+      <AtelierBackdrop />
       {status === 'loading' && !data && <StateMessage kind="loading" message="Loading payments…" />}
       {status === 'error' && <StateMessage kind="error" message={`Couldn't load payments. ${error.message}`} onRetry={reload} />}
       {notice && <div className="notice ok pm-notice" role="status">{notice} <button type="button" onClick={() => setNotice(null)}>Dismiss</button></div>}
 
       {data && (
         <>
-          <dl className="pmx-overview" aria-label="Payment overview">
-            <div><dt>Total received</dt><dd>{formatMoney(k.totalReceived)}</dd><small>Confirmed by you</small></div>
-            <div className={k.toVerify ? 'is-amber' : ''}><dt>Awaiting verification</dt><dd>{formatMoney(k.toVerifyAmount)}</dd><small>{k.toVerify ? `${k.toVerify} ${k.toVerify === 1 ? 'payment' : 'payments'} to check` : 'Nothing waiting'}</small></div>
-            <div><dt>Outstanding balance</dt><dd>{formatMoney(k.outstanding)}</dd><small>{k.outstandingOrders} {k.outstandingOrders === 1 ? 'order' : 'orders'}{k.codDue > 0 ? ` · ${formatMoney(k.codDue)} on delivery` : ''}</small></div>
-          </dl>
+          <AtelierHero k={k} count={rows.length} canRecord onRecord={() => setRecording({ orderId: null })} />
+          <AtelierOverview k={k} confirmedCount={confirmedCount} />
+          <VerificationDesk items={deskItems} selectedKey={deskSel} onSelect={setDeskKey} onVerify={openRow} onOpen={openRow} onProof={setProof} />
 
-          <div className="pmx-bar" role="search">
-            <div className="pmx-tabs" role="tablist" aria-label="Show">
-              {TABS.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? 'is-on' : ''} onClick={() => setTab(key)}>{label}</button>)}
-            </div>
-            <label className="pmx-search"><Search size={15} aria-hidden="true" /><span className="sr-only">Search payments</span><input type="search" placeholder="Search customer, order or reference" value={q} onChange={(e) => setQ(e.target.value)} /></label>
-          </div>
-
-          {rows.length === 0 ? <StateMessage message="No orders yet, so there are no payments to show." />
-            : shown.length === 0 ? <StateMessage message={tab === 'all' && !q ? 'No payments yet.' : 'No payments match.'} /> : (
-              <ul className="pmx-list" aria-label="Payments">
-                {shown.map((i) => {
-                  const r = i.row; const money = live(r);
-                  const methods = [...new Set(money.map((p) => METHOD[p.method] ?? p.method))];
-                  const [label, tone] = i.unmatched ? ['Needs review', 'is-pending'] : (i.pending ? STATE.verification_pending : STATE[r.status] ?? [r.status, '']);
-                  const parts = i.unmatched ? [`${formatMoney(i.unmatched.amount)} claimed`] : [r.paid > 0 && `${formatMoney(r.paid)} received`, r.pending > 0 && `${formatMoney(r.pending)} awaiting verification`, r.codDue > 0 && `${formatMoney(r.codDue)} on delivery`].filter(Boolean);
-                  return (
-                    <li key={i.key} className="pmx-row">
-                      <button type="button" className="pmx-main" onClick={() => openRow(i)} aria-label={`${r.customerName}${r.orderId ? `, order ${shortId(r.orderId)}` : ''}`}>
-                        <span className="pmx-who"><b>{r.customerName}</b><small>{r.orderId ? <>{shortId(r.orderId)} · {r.item}{r.quantity > 1 && !new RegExp(`\\b${r.quantity}\\b`).test(r.item) ? ` × ${r.quantity}` : ''}</> : 'Not matched to an order yet'}</small></span>
-                        <span className="pmx-money"><b>{i.unmatched ? formatMoney(i.unmatched.amount) : r.total === null ? '—' : formatMoney(r.total)}</b><small>{parts.join(' · ') || (r.total === null ? 'Not priced' : 'Nothing paid yet')}</small></span>
-                        <span className="pmx-method">{methods.length ? methods.join(' · ') : '—'}</span>
-                        <span className={`pmx-status ${tone}`}>{label}</span>
-                      </button>
-                      <span className="pmx-side">
-                        {i.shot ? <ProofThumb proof={i.shot} onOpen={setProof} /> : <span className="pmx-noshot" title="No screenshot">—</span>}
-                        {(i.pending || i.unmatched) ? <button type="button" className="btn btn-primary btn-sm" onClick={() => openRow(i)}>{i.unmatched ? 'Match' : 'Verify'}</button> : <span className="pmx-spacer" />}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+          <section className="pa-activity" aria-labelledby="pa-act-h">
+            <div className="pa-sec-head"><h2 id="pa-act-h">Payment activity</h2><p>Every payment as a receipt. Open one to see everything on that order.</p></div>
+            <AtelierBar tabs={TABS} tab={tab} setTab={setTab} q={q} setQ={setQ} counts={counts} />
+            {rows.length === 0 ? <StateMessage message="No orders yet, so there are no payments to show." />
+              : shown.length === 0 ? <StateMessage message={tab === 'all' && !q ? 'No payments yet.' : 'No payments match.'} />
+                : <ReceiptGallery cards={cards} onOpen={openRow} onProof={setProof} />}
+          </section>
           <p className="pm-foot">Verifying records what you checked in your own bank or UPI account; Conversa never contacts a bank.</p>
         </>
       )}

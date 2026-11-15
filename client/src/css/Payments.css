@@ -165,63 +165,7 @@ html.pm-lock { overflow: hidden; }
 @media (max-width: 760px) { .pm-actions li { grid-template-columns: 1fr auto; } .pm-act-why { grid-column: 1 / -1; } .pm-act-btns { grid-column: 1 / -1; justify-content: flex-start; } }
 .pm-pill { padding: 1px 8px; font-size: 0.68rem; }
 
-/* ---------- Payments: a calm financial workspace. One row per order; white on warm off-white, thin borders, muted green / amber ---------- */
-body:has(.payments) { background: #FCFBF9; }
-.app-main:has(> .page.payments) { max-width: 1120px; }
-.pmx-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; margin-bottom: 2.4rem; }
-.pmx-head h1 { margin: 0; font: 500 clamp(2rem, 3.4vw, 2.6rem)/1.05 var(--display); letter-spacing: -0.04em; }
-.pmx-head p { margin: 0.5rem 0 0; font-size: 1rem; color: var(--muted); }
-.pmx-head-actions { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
-.pmx-add { min-height: 44px; padding-inline: 1.3rem 1.5rem; }
-
-.pmx-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 2.6rem; padding: 0; border-block: 1px solid #ECE8E0; }
-.pmx-overview > div { padding: 1.4rem 1.6rem 1.4rem 0; }
-.pmx-overview > div + div { padding-left: 1.8rem; border-left: 1px solid #ECE8E0; }
-.pmx-overview dt { font: 600 0.66rem/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
-.pmx-overview dd { margin: 0.7rem 0 0.35rem; font: 500 clamp(1.7rem, 2.6vw, 2.2rem)/1 var(--display); letter-spacing: -0.035em; font-variant-numeric: tabular-nums; color: var(--cocoa); }
-.pmx-overview small { font-size: 0.8rem; color: var(--faint); }
-.pmx-overview .is-amber dd { color: #A87A2E; }
-
-.pmx-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
-.pmx-tabs { display: inline-flex; padding: 3px; background: #F4F1EA; border-radius: 999px; }
-.pmx-tabs button { min-height: 34px; padding: 0 1.1rem; border: 0; border-radius: 999px; background: none; font: 500 0.86rem var(--display); color: var(--muted); cursor: pointer; transition: background 0.2s, color 0.2s; }
-.pmx-tabs button.is-on { background: #fff; color: var(--cocoa); box-shadow: 0 1px 2px rgba(41, 41, 35, 0.1); }
-.pmx-search { display: flex; align-items: center; gap: 0.55rem; flex: 0 1 300px; height: 40px; padding: 0 1rem; background: #fff; border: 1px solid #E8E4DC; border-radius: 999px; color: var(--faint); }
-.pmx-search:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(36, 63, 115, 0.1); }
-.pmx-search input { flex: 1; min-width: 0; min-height: 0; padding: 0; border: 0; outline: 0; background: transparent; box-shadow: none; font: inherit; font-size: 0.88rem; color: var(--cocoa); }
-
-.pmx-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.pmx-row { display: flex; align-items: center; gap: 1rem; background: #fff; border: 1px solid #ECE8E0; border-radius: 18px; transition: border-color 0.2s, box-shadow 0.2s; }
-.pmx-row:hover { border-color: #DAD4C8; box-shadow: 0 8px 24px -18px rgba(41, 41, 35, 0.35); }
-.pmx-main { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(180px, 2fr) minmax(150px, 1.5fr) minmax(90px, 1fr) minmax(150px, 1.1fr); gap: 0 1.6rem; align-items: center; padding: 1.25rem 0 1.25rem 1.6rem; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
-.pmx-main:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; border-radius: 18px; }
-.pmx-who, .pmx-money { display: grid; gap: 0.25rem; min-width: 0; }
-.pmx-who b { font: 600 1.02rem var(--display); letter-spacing: -0.015em; }
-.pmx-who small, .pmx-money small { font-size: 0.8rem; line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
-.pmx-money b { font: 500 1.08rem var(--display); font-variant-numeric: tabular-nums; }
-.pmx-method { font-size: 0.88rem; color: var(--muted); }
-.pmx-status { display: inline-flex; align-items: center; gap: 0.45rem; font: 500 0.86rem var(--display); color: var(--muted); }
-.pmx-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #C9C3B6; }
-.pmx-status.is-paid { color: #4C7A4A; } .pmx-status.is-paid::before { background: #7FA97A; }
-.pmx-status.is-pending { color: #9A6F25; } .pmx-status.is-pending::before { background: #D9A94E; }
-.pmx-status.is-partial::before { background: #9FB6D6; } .pmx-status.is-cod::before { background: #B9A9D1; } .pmx-status.is-due::before { background: #DDB892; }
-.pmx-side { display: flex; align-items: center; gap: 0.9rem; padding-right: 1.4rem; }
-.pmx-side .pm-thumb { border-radius: 10px; } .pmx-side .pm-thumb.is-sm img { width: 40px; height: 48px; }
-.pmx-noshot { display: inline-grid; place-items: center; width: 40px; height: 48px; border: 1px dashed #E2DDD2; border-radius: 10px; color: #CFC9BC; font-size: 0.8rem; }
-.pmx-spacer { display: inline-block; width: 64px; }
-.pmx-side .btn { min-width: 64px; }
-@media (max-width: 900px) {
-  .pmx-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.9rem 1.2rem; }
-  .pmx-method { display: none; }
-}
-@media (max-width: 640px) {
-  .pmx-overview { grid-template-columns: minmax(0, 1fr); } .pmx-overview > div + div { padding-left: 0; border-left: 0; border-top: 1px solid #ECE8E0; }
-  .pmx-overview > div { padding: 1.1rem 0; }
-  .pmx-row { flex-direction: column; align-items: stretch; gap: 0; }
-  .pmx-main { grid-template-columns: minmax(0, 1fr); padding: 1.1rem 1.2rem 0.6rem; }
-  .pmx-side { justify-content: space-between; padding: 0.4rem 1.2rem 1.1rem; }
-  .pmx-search { flex: 1 1 100%; }
-}
+/* The Payments page layout lives in PaymentAtelier.css. */
 
 /* The verification detail view (one claim: the screenshot, what was read, Confirm / Reject) */
 .pm-verify { display: grid; gap: 1.1rem; }
